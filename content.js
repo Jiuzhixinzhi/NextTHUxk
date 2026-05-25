@@ -1955,7 +1955,7 @@ function fmtTime(ts) {
   return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-const CUR_VER = '1.1.3';
+const CUR_VER = '1.2.0';
 let updateTimer = null;
 
 function cmpVer(a, b) {
