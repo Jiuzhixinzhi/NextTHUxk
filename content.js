@@ -1962,7 +1962,8 @@ function fmtTime(ts) {
   return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-const CUR_VER = '1.2.1';
+const CUR_VER = '1.2.2';
+const DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 let updateTimer = null;
 
 function cmpVer(a, b) {
@@ -1976,6 +1977,10 @@ function cmpVer(a, b) {
 }
 
 async function checkUpdate() {
+  if (DANGEROUS_VERS.includes(CUR_VER)) {
+    showDangerBanner();
+    return;
+  }
   try {
     const lastCheck = await store.get('lastUpdateCheck');
     if (lastCheck && Date.now() - lastCheck < 30 * 60 * 1000) return; // 30 min cooldown
@@ -2014,6 +2019,22 @@ function showUpdateBanner(ver, url) {
     </div>`;
   db.prepend(banner);
   $('nextthuxk-update-close').onclick = () => banner.remove();
+}
+
+function showDangerBanner() {
+  const existing = $('nextthuxk-danger-banner');
+  if (existing) return;
+  const db = $('nextthuxk-dashboard');
+  if (!db) return;
+  const banner = document.createElement('div');
+  banner.id = 'nextthuxk-danger-banner';
+  banner.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:linear-gradient(90deg,#ff3b30,#ff6b6b);color:#fff;font-size:13px;border-radius:8px;margin:8px 0;">
+      <span>⚠️ 当前版本 v${esc(CUR_VER)} 存在严重错误，请立即升级到 <a href="https://github.com/smartThise/NextTHUxk/releases/latest" target="_blank" style="color:#fff;font-weight:700;text-decoration:underline">最新版本</a></span>
+      <button id="nextthuxk-danger-close" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;line-height:1;">✕</button>
+    </div>`;
+  db.prepend(banner);
+  $('nextthuxk-danger-close').onclick = () => banner.remove();
 }
 
 async function launch() {
@@ -2178,7 +2199,7 @@ $('nextthuxk-check-update').onclick = async () => {
   btn.textContent = '🔔 检查更新';
   btn.disabled = false;
   // If no banner appeared, show "up to date"
-  if (!$('nextthuxk-update-banner')) {
+  if (!$('nextthuxk-update-banner') && !$('nextthuxk-danger-banner')) {
     const toast = document.createElement('div');
     toast.id = 'nextthuxk-update-banner';
     toast.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#34c759;color:#fff;font-size:13px;border-radius:8px;margin:8px 0;">
