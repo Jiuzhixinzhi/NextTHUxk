@@ -1133,10 +1133,15 @@ function renderCourses(list) {
 
 function fmtVol(v) {
   if (!v) return '';
-  const cleaned = v.replace(/^\(.*?\)/, '');
+  // Extract priority number in parentheses: e.g. "0,2,3(5)" → priority=5
+  const priMatch = v.match(/\((\d+)\)\s*$/);
+  const pri = priMatch ? parseInt(priMatch[1]) : 0;
+  const cleaned = v.replace(/\(.*?\)/g, '');
   const parts = cleaned.split(',').map(n => parseInt(n) || 0);
-  if (parts.every(n => n === 0)) return '';
-  return parts.join('/');
+  if (parts.every(n => n === 0) && !pri) return '';
+  let s = parts.join('/');
+  if (pri) s += `(优先${pri})`;
+  return s;
 }
 
 function volColor(course) {
@@ -1153,7 +1158,11 @@ function parseVolArr(s) {
   if (!s) return null;
   const nums = String(s).match(/\d+/g);
   if (!nums || nums.length < 3) return null;
-  return nums.slice(-3).map(n => parseInt(n, 10) || 0);
+  const arr = nums.slice(-3).map(n => parseInt(n, 10) || 0);
+  // Extract priority (number in parentheses) for 任选
+  const priMatch = String(s).match(/\((\d+)\)\s*$/);
+  arr.priority = priMatch ? parseInt(priMatch[1]) : 0;
+  return arr;
 }
 
 function calcProb(course, flag, zy) {
@@ -1171,22 +1180,45 @@ function calcProb(course, flag, zy) {
     return probResult(rem, vols[zyIdx]);
   }
 
-  // 必修/限选/任选：全局级联 必修1→必修2→必修3→限选1→限选2→限选3→任选1→任选2→任选3
+  // 必修/限选/任选：全局级联
+  // 顺序：必修1→2→3→限选1→2→3→任选(优先)→任选1→2→3
   const bxV = parseVolArr(course.volRequired);
   const xxV = parseVolArr(course.volElective);
   const rxV = parseVolArr(course.volOptional);
-  const typeOrder = [['bx', bxV], ['xx', xxV], ['rx', rxV]];
 
   let rem = cap;
-  for (const [tf, tv] of typeOrder) {
-    if (!tv) continue;
-    for (let i = 0; i < 3; i++) {
-      if (tf === flag && i === zyIdx) {
-        return probResult(rem, tv[i]);
-      }
-      rem -= tv[i];
+
+  // 必修级联
+  if (bxV) {
+    if (flag === 'bx') {
+      for (let i = 0; i < zyIdx; i++) rem -= bxV[i];
+      return probResult(rem, bxV[zyIdx]);
     }
+    for (let i = 0; i < 3; i++) rem -= bxV[i];
   }
+
+  // 限选级联
+  if (xxV) {
+    if (flag === 'xx') {
+      for (let i = 0; i < zyIdx; i++) rem -= xxV[i];
+      return probResult(rem, xxV[zyIdx]);
+    }
+    for (let i = 0; i < 3; i++) rem -= xxV[i];
+  }
+
+  // 任选级联（优先志愿为最高优先级，相当于第0志愿）
+  if (rxV) {
+    const pri = rxV.priority || 0;
+    if (flag === 'rx') {
+      // 优先志愿先扣
+      rem -= pri;
+      for (let i = 0; i < zyIdx; i++) rem -= rxV[i];
+      return probResult(rem, rxV[zyIdx]);
+    }
+    rem -= pri;
+    for (let i = 0; i < 3; i++) rem -= rxV[i];
+  }
+
   return { prob: -1, label: '无数据', color: '#86868b' };
 }
 
@@ -1962,7 +1994,7 @@ function fmtTime(ts) {
   return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-const CUR_VER = '1.2.2';
+const CUR_VER = '1.2.3';
 const DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 let updateTimer = null;
 
