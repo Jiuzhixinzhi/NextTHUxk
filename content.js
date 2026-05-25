@@ -281,7 +281,8 @@ function isSportsCourse(course) {
   return (course.attr||'') === '体育'
     || (course.department||'').includes('体育')
     || (course.name||'').includes('体育')
-    || course.typeLabel === '体育';
+    || course.typeLabel === '体育'
+    || course.typeCode === 'ty';
 }
 
 // Base flag determines allowed type options
@@ -1309,12 +1310,34 @@ async function refreshSelected() {
   const selected = await fetchSelectedCourses();
   const selMap = {};
   selected.forEach(s => { selMap[s.code + '_' + s.seq] = s; });
+
+  // Load cached zy data from previous successful fetch
+  const zyCache = (await store.get('zyCache')) || {};
+  let cacheUpdated = false;
+
   allCourses.forEach(c => {
     const s = selMap[c.code + '_' + (c.seq || '0')];
     c.selected = !!s;
-    if (s) { c.zy = s.zy; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel; }
-    else { c.zy = 0; c.typeCode = ''; c.typeLabel = ''; }
+    if (s) {
+      if (s.zy > 0) {
+        // Fresh data with volunteer info — update cache
+        c.zy = s.zy; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel;
+        zyCache[c.code + '_' + (c.seq || '0')] = { zy: s.zy, typeCode: s.typeCode, typeLabel: s.typeLabel };
+        cacheUpdated = true;
+      } else {
+        // zy=0 (e.g. selection period ended) — try cache
+        const cached = zyCache[c.code + '_' + (c.seq || '0')];
+        if (cached) {
+          c.zy = cached.zy; c.typeCode = cached.typeCode; c.typeLabel = cached.typeLabel;
+        } else {
+          c.zy = 0; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel;
+        }
+      }
+    } else {
+      c.zy = 0; c.typeCode = ''; c.typeLabel = '';
+    }
   });
+  if (cacheUpdated) await store.set('zyCache', zyCache);
   filterCourses();
   renderPreviewTT(allCourses.filter(c => c.selected), '当前已选');
 }
@@ -1996,7 +2019,7 @@ function fmtTime(ts) {
   return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-const CUR_VER = '1.2.4';
+const CUR_VER = '1.2.5';
 const DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 let updateTimer = null;
 
@@ -2139,13 +2162,27 @@ async function launch() {
 
     planData = plan;
     allCourses = mergeStaticData(catalog, volData, plan);
+    // Load zy cache for fallback
+    const zyCacheInit = (await store.get('zyCache')) || {};
+    let cacheUpdatedInit = false;
     const selMap = {};
     selectedCourses.forEach(s => { selMap[s.code + '_' + s.seq] = s; });
     allCourses.forEach(c => {
       const s = selMap[c.code + '_' + (c.seq || '0')];
       c.selected = !!s;
-      if (s) { c.zy = s.zy; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel; }
+      if (s) {
+        if (s.zy > 0) {
+          c.zy = s.zy; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel;
+          zyCacheInit[c.code + '_' + (c.seq || '0')] = { zy: s.zy, typeCode: s.typeCode, typeLabel: s.typeLabel };
+          cacheUpdatedInit = true;
+        } else {
+          const cached = zyCacheInit[c.code + '_' + (c.seq || '0')];
+          if (cached) { c.zy = cached.zy; c.typeCode = cached.typeCode; c.typeLabel = cached.typeLabel; }
+          else { c.zy = 0; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel; }
+        }
+      }
     });
+    if (cacheUpdatedInit) await store.set('zyCache', zyCacheInit);
 
     renderCourses(allCourses);
     renderPlan(planData);
