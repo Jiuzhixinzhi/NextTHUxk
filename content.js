@@ -1171,16 +1171,23 @@ function calcProb(course, flag, zy) {
     return probResult(rem, vols[zyIdx]);
   }
 
-  // 非体育课：在当前课程属性内按 1→2→3 志愿级联
-  const vols = flag === 'bx'
-    ? parseVolArr(course.volRequired)
-    : flag === 'xx'
-      ? parseVolArr(course.volElective)
-      : parseVolArr(course.volOptional);
-  if (!vols) return { prob: -1, label: '无数据', color: '#86868b' };
+  // 必修/限选/任选：全局级联 必修1→必修2→必修3→限选1→限选2→限选3→任选1→任选2→任选3
+  const bxV = parseVolArr(course.volRequired);
+  const xxV = parseVolArr(course.volElective);
+  const rxV = parseVolArr(course.volOptional);
+  const typeOrder = [['bx', bxV], ['xx', xxV], ['rx', rxV]];
+
   let rem = cap;
-  for (let i = 0; i < zyIdx; i++) rem -= vols[i];
-  return probResult(rem, vols[zyIdx]);
+  for (const [tf, tv] of typeOrder) {
+    if (!tv) continue;
+    for (let i = 0; i < 3; i++) {
+      if (tf === flag && i === zyIdx) {
+        return probResult(rem, tv[i]);
+      }
+      rem -= tv[i];
+    }
+  }
+  return { prob: -1, label: '无数据', color: '#86868b' };
 }
 
 function probResult(rem, applicants) {
@@ -1955,7 +1962,7 @@ function fmtTime(ts) {
   return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-const CUR_VER = '1.2.0';
+const CUR_VER = '1.2.1';
 let updateTimer = null;
 
 function cmpVer(a, b) {
