@@ -1133,14 +1133,14 @@ function renderCourses(list) {
 
 function fmtVol(v) {
   if (!v) return '';
-  // Extract priority number in parentheses: e.g. "0,2,3(5)" → priority=5
-  const priMatch = v.match(/\((\d+)\)\s*$/);
+  // Format: "(priority)vol1,vol2,vol3"  e.g. "(46)5,15,29"
+  const priMatch = v.match(/^\((\d+)\)/);
   const pri = priMatch ? parseInt(priMatch[1]) : 0;
-  const cleaned = v.replace(/\(.*?\)/g, '');
+  const cleaned = v.replace(/^\(\d+\)/, '');
   const parts = cleaned.split(',').map(n => parseInt(n) || 0);
   if (parts.every(n => n === 0) && !pri) return '';
   let s = parts.join('/');
-  if (pri) s += `(优先${pri})`;
+  if (pri) s = `优先${pri}/` + s;
   return s;
 }
 
@@ -1156,12 +1156,14 @@ function volColor(course) {
 
 function parseVolArr(s) {
   if (!s) return null;
-  const nums = String(s).match(/\d+/g);
+  // Format: "(priority)vol1,vol2,vol3"  e.g. "(46)5,15,29"
+  const priMatch = String(s).match(/^\((\d+)\)/);
+  const pri = priMatch ? parseInt(priMatch[1]) : 0;
+  const cleaned = String(s).replace(/^\(\d+\)/, '');
+  const nums = cleaned.match(/\d+/g);
   if (!nums || nums.length < 3) return null;
-  const arr = nums.slice(-3).map(n => parseInt(n, 10) || 0);
-  // Extract priority (number in parentheses) for 任选
-  const priMatch = String(s).match(/\((\d+)\)\s*$/);
-  arr.priority = priMatch ? parseInt(priMatch[1]) : 0;
+  const arr = nums.slice(0, 3).map(n => parseInt(n, 10) || 0);
+  arr.priority = pri;
   return arr;
 }
 
@@ -1994,7 +1996,7 @@ function fmtTime(ts) {
   return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-const CUR_VER = '1.2.3';
+const CUR_VER = '1.2.4';
 const DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 let updateTimer = null;
 
