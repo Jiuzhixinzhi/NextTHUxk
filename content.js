@@ -450,6 +450,36 @@ async function fetchSelectedCourses() {
   } catch(e) { console.warn(TAG, 'fetch selected:', e); return []; }
 }
 
+// Fetch 一级课表列表 to get course attributes (必修/限选/任选/体育)
+async function fetchLevelTable() {
+  if (!isZhjwxk) return {};
+  try {
+    const url = `${BASE}/xkBks.vxkBksXkbBs.do?p_xnxq=${SEM}&pathContent=${encodeURIComponent('一级课表')}`;
+    const html = await fetchPage(url);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const rows = doc.querySelectorAll('tr.trr2');
+    const map = {};
+    rows.forEach(row => {
+      const rawCells = [...row.querySelectorAll('td')].map(td => td.textContent.trim().replace(/\s+/g, ' '));
+      let code = '', seq = '', attr = '';
+      for (let i = 0; i < rawCells.length; i++) {
+        if (/^\d{8}$/.test(rawCells[i]) && !code) {
+          code = rawCells[i]; seq = rawCells[i+1] || '0';
+          attr = rawCells[i+2] || '';
+          if (!/^(必修|限选|任选)$/.test(attr)) attr = ''; // empty attr = 体育课
+        }
+      }
+      if (!code) return;
+      const isSports = !attr;
+      const typeLabel = isSports ? '体育' : attr;
+      const typeCode = isSports ? 'ty' : attr === '必修' ? '006' : attr === '限选' ? '008' : attr === '任选' ? '007' : '';
+      map[code + '_' + seq] = { typeCode, typeLabel, attr };
+    });
+    console.log(TAG, 'level table:', Object.keys(map).length, 'courses');
+    return map;
+  } catch(e) { console.warn(TAG, 'level table:', e); return {}; }
+}
+
 async function fetchCourseDetail(teacherId, code) {
   if (!isZhjwxk) return null;
   const url = `${BASE}/js.vjsKcbBs.do?m=showToXs&p_id=${encodeURIComponent(teacherId+';'+code)}`;
@@ -619,6 +649,21 @@ const CSS = `
 .nx-draft-go{background:linear-gradient(135deg,#34c759,#30d158);color:#fff}
 .nx-draft-del{background:rgba(255,59,48,.1);color:#ff3b30}
 .nx-draft-acts button:hover{opacity:.8}
+.nx-zy-modal-mask{position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:110;display:flex;align-items:center;justify-content:center;opacity:0;pointer-events:none;transition:opacity .2s}
+.nx-zy-modal-mask.show{opacity:1;pointer-events:all}
+.nx-zy-modal{background:#fff;border-radius:16px;width:520px;max-width:90vw;max-height:80vh;display:flex;flex-direction:column;box-shadow:0 20px 60px rgba(0,0,0,.2);transform:translateY(20px);transition:transform .25s}
+.nx-zy-modal-mask.show .nx-zy-modal{transform:translateY(0)}
+.nx-zy-modal-head{display:flex;justify-content:space-between;align-items:center;padding:18px 24px;border-bottom:1px solid rgba(0,0,0,.06);flex-shrink:0}
+.nx-zy-modal-title{font-size:16px;font-weight:700;color:#1d1d1f}
+.nx-zy-modal-body{padding:16px 24px;overflow-y:auto;flex:1}
+.nx-zy-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid rgba(0,0,0,.04)}
+.nx-zy-row:last-child{border-bottom:none}
+.nx-zy-name{flex:1;font-size:13px;font-weight:600;color:#1d1d1f;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nx-zy-type{font-size:11px;color:#86868b;white-space:nowrap;padding:2px 8px;border-radius:6px;background:rgba(124,106,239,.08)}
+.nx-zy-modal-foot{display:flex;justify-content:flex-end;gap:8px;padding:14px 24px;border-top:1px solid rgba(0,0,0,.06)}
+.nx-zy-ok{padding:8px 20px;border-radius:10px;background:linear-gradient(135deg,#7c6aef,#6366f1);color:#fff;border:none;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;transition:opacity .15s}
+.nx-zy-ok:hover{opacity:.9}
+.nx-zy-hint{font-size:12px;color:#86868b;padding-bottom:8px}
 `;
 
 // ─── §9. HTML ─────────────────────────────────────────────
@@ -634,6 +679,18 @@ const HTML = `
         <button class="nx-modal-close" id="nextthuxk-modal-close">✕</button>
       </div>
       <div class="nx-modal-body" id="nextthuxk-modal-body"><div class="nx-modal-loading">加载中…</div></div>
+    </div>
+  </div>
+  <div class="nx-zy-modal-mask" id="nextthuxk-zy-modal">
+    <div class="nx-zy-modal">
+      <div class="nx-zy-modal-head">
+        <div class="nx-zy-modal-title">📋 志愿信息确认</div>
+        <button class="nx-modal-close" id="nextthuxk-zy-modal-close">✕</button>
+      </div>
+      <div class="nx-zy-modal-body" id="nextthuxk-zy-modal-body"></div>
+      <div class="nx-zy-modal-foot">
+        <button class="nx-zy-ok" id="nextthuxk-zy-modal-ok">确认</button>
+      </div>
     </div>
   </div>
     <div class="nx-header">
@@ -1306,55 +1363,85 @@ function showXkResult(res) {
   setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.style.display = 'none', 300); }, 2500);
 }
 
-async function refreshSelected() {
-  const selected = await fetchSelectedCourses();
-  const selMap = {};
-  selected.forEach(s => { selMap[s.code + '_' + s.seq] = s; });
+function showZyModal(missingZy) {
+  return new Promise(resolve => {
+    const mask = $('nextthuxk-zy-modal');
+    const body = $('nextthuxk-zy-modal-body');
+    if (!mask || !body) { resolve(missingZy.map(() => 3)); return; }
+    body.innerHTML = '<div class="nx-zy-hint">以下课程未能自动获取志愿信息，请手动确认：</div>' + missingZy.map((c, i) => {
+      const flag = courseFlag(c) === 'ty' ? '体育' : c.typeLabel || '?';
+      const curZy = c.zy || 3;
+      return `<div class="nx-zy-row">
+        <span class="nx-zy-name">${esc(c.name)}</span>
+        <span class="nx-zy-type">${esc(flag)}</span>
+        <select class="nx-zy-select nx-zy-modal-sel" data-idx="${i}">
+          <option value="1"${curZy===1?' selected':''}>第1志愿</option>
+          <option value="2"${curZy===2?' selected':''}>第2志愿</option>
+          <option value="3"${curZy===3?' selected':''}>第3志愿</option>
+        </select>
+      </div>`;
+    }).join('');
+    mask.classList.add('show');
+    const finish = () => {
+      mask.classList.remove('show');
+      const values = [];
+      body.querySelectorAll('.nx-zy-modal-sel').forEach(sel => values.push(parseInt(sel.value) || 3));
+      resolve(values);
+    };
+    $('nextthuxk-zy-modal-ok').onclick = finish;
+    $('nextthuxk-zy-modal-close').onclick = finish;
+  });
+}
 
-  const zyCache = (await store.get('zyCache')) || {};
+async function resolveCourseZy(courses, selMap, zyCache) {
   let cacheUpdated = false;
-  const missingZy = []; // courses needing manual input
-
-  allCourses.forEach(c => {
-    const s = selMap[c.code + '_' + (c.seq || '0')];
+  const missingZy = [];
+  let levelMap = null;
+  for (const c of courses) {
+    const key = c.code + '_' + (c.seq || '0');
+    const s = selMap[key];
     c.selected = !!s;
     if (s) {
       if (s.zy > 0) {
         c.zy = s.zy; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel;
-        zyCache[c.code + '_' + (c.seq || '0')] = { zy: s.zy, typeCode: s.typeCode, typeLabel: s.typeLabel };
+        zyCache[key] = { zy: s.zy, typeCode: s.typeCode, typeLabel: s.typeLabel, confirmed: true };
         cacheUpdated = true;
       } else {
-        const cached = zyCache[c.code + '_' + (c.seq || '0')];
-        if (cached) {
+        const cached = zyCache[key];
+        if (cached && cached.zy > 0 && cached.confirmed) {
           c.zy = cached.zy; c.typeCode = cached.typeCode; c.typeLabel = cached.typeLabel;
         } else {
-          c.zy = 0; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel;
+          if (!levelMap) levelMap = await fetchLevelTable();
+          const lt = levelMap[key];
+          if (lt) { c.typeCode = lt.typeCode; c.typeLabel = lt.typeLabel; }
+          else { c.typeCode = s.typeCode; c.typeLabel = s.typeLabel; }
+          c.zy = (cached && cached.zy > 0) ? cached.zy : 0;
           missingZy.push(c);
         }
       }
     } else {
       c.zy = 0; c.typeCode = ''; c.typeLabel = '';
     }
-  });
-
-  // If some selected courses have no zy data and no cache, ask user
-  if (missingZy.length) {
-    const lines = missingZy.map((c, i) => `${i+1}. ${c.name}(${c.teacher}) → 第几志愿? (1/2/3)`).join('\n');
-    const input = prompt(
-      `选课系统暂未返回以下课程的志愿信息（可能是选课已结束）。\n请输入各课程的志愿号，格式如：1 2 3（用空格分隔，顺序对应）：\n\n${lines}`
-    );
-    if (input) {
-      const nums = input.trim().split(/[\s,，]+/).map(n => Math.max(1, Math.min(3, parseInt(n) || 0)));
-      missingZy.forEach((c, i) => {
-        if (nums[i] > 0) {
-          c.zy = nums[i];
-          zyCache[c.code + '_' + (c.seq || '0')] = { zy: c.zy, typeCode: c.typeCode, typeLabel: c.typeLabel };
-          cacheUpdated = true;
-        }
-      });
-    }
   }
+  if (missingZy.length) {
+    const values = await showZyModal(missingZy);
+    missingZy.forEach((c, i) => {
+      if (values[i] > 0) {
+        c.zy = values[i];
+        zyCache[c.code + '_' + (c.seq || '0')] = { zy: c.zy, typeCode: c.typeCode, typeLabel: c.typeLabel, confirmed: false };
+        cacheUpdated = true;
+      }
+    });
+  }
+  return cacheUpdated;
+}
 
+async function refreshSelected() {
+  const selected = await fetchSelectedCourses();
+  const selMap = {};
+  selected.forEach(s => { selMap[s.code + '_' + s.seq] = s; });
+  const zyCache = (await store.get('zyCache')) || {};
+  const cacheUpdated = await resolveCourseZy(allCourses, selMap, zyCache);
   if (cacheUpdated) await store.set('zyCache', zyCache);
   filterCourses();
   renderPreviewTT(allCourses.filter(c => c.selected), '当前已选');
@@ -2180,42 +2267,10 @@ async function launch() {
 
     planData = plan;
     allCourses = mergeStaticData(catalog, volData, plan);
-    const zyCacheInit = (await store.get('zyCache')) || {};
-    let cacheUpdatedInit = false;
-    const missingZyInit = [];
     const selMap = {};
     selectedCourses.forEach(s => { selMap[s.code + '_' + s.seq] = s; });
-    allCourses.forEach(c => {
-      const s = selMap[c.code + '_' + (c.seq || '0')];
-      c.selected = !!s;
-      if (s) {
-        if (s.zy > 0) {
-          c.zy = s.zy; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel;
-          zyCacheInit[c.code + '_' + (c.seq || '0')] = { zy: s.zy, typeCode: s.typeCode, typeLabel: s.typeLabel };
-          cacheUpdatedInit = true;
-        } else {
-          const cached = zyCacheInit[c.code + '_' + (c.seq || '0')];
-          if (cached) { c.zy = cached.zy; c.typeCode = cached.typeCode; c.typeLabel = cached.typeLabel; }
-          else { c.zy = 0; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel; missingZyInit.push(c); }
-        }
-      }
-    });
-    if (missingZyInit.length) {
-      const lines = missingZyInit.map((c, i) => `${i+1}. ${c.name}(${c.teacher}) → 第几志愿? (1/2/3)`).join('\n');
-      const input = prompt(
-        `选课系统暂未返回以下课程的志愿信息（可能是选课已结束）。\n请输入各课程的志愿号，格式如：1 2 3（用空格分隔，顺序对应）：\n\n${lines}`
-      );
-      if (input) {
-        const nums = input.trim().split(/[\s,，]+/).map(n => Math.max(1, Math.min(3, parseInt(n) || 0)));
-        missingZyInit.forEach((c, i) => {
-          if (nums[i] > 0) {
-            c.zy = nums[i];
-            zyCacheInit[c.code + '_' + (c.seq || '0')] = { zy: c.zy, typeCode: c.typeCode, typeLabel: c.typeLabel };
-            cacheUpdatedInit = true;
-          }
-        });
-      }
-    }
+    const zyCacheInit = (await store.get('zyCache')) || {};
+    const cacheUpdatedInit = await resolveCourseZy(allCourses, selMap, zyCacheInit);
     if (cacheUpdatedInit) await store.set('zyCache', zyCacheInit);
 
     renderCourses(allCourses);
