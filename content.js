@@ -1311,32 +1311,50 @@ async function refreshSelected() {
   const selMap = {};
   selected.forEach(s => { selMap[s.code + '_' + s.seq] = s; });
 
-  // Load cached zy data from previous successful fetch
   const zyCache = (await store.get('zyCache')) || {};
   let cacheUpdated = false;
+  const missingZy = []; // courses needing manual input
 
   allCourses.forEach(c => {
     const s = selMap[c.code + '_' + (c.seq || '0')];
     c.selected = !!s;
     if (s) {
       if (s.zy > 0) {
-        // Fresh data with volunteer info — update cache
         c.zy = s.zy; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel;
         zyCache[c.code + '_' + (c.seq || '0')] = { zy: s.zy, typeCode: s.typeCode, typeLabel: s.typeLabel };
         cacheUpdated = true;
       } else {
-        // zy=0 (e.g. selection period ended) — try cache
         const cached = zyCache[c.code + '_' + (c.seq || '0')];
         if (cached) {
           c.zy = cached.zy; c.typeCode = cached.typeCode; c.typeLabel = cached.typeLabel;
         } else {
           c.zy = 0; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel;
+          missingZy.push(c);
         }
       }
     } else {
       c.zy = 0; c.typeCode = ''; c.typeLabel = '';
     }
   });
+
+  // If some selected courses have no zy data and no cache, ask user
+  if (missingZy.length) {
+    const lines = missingZy.map((c, i) => `${i+1}. ${c.name}(${c.teacher}) → 第几志愿? (1/2/3)`).join('\n');
+    const input = prompt(
+      `选课系统暂未返回以下课程的志愿信息（可能是选课已结束）。\n请输入各课程的志愿号，格式如：1 2 3（用空格分隔，顺序对应）：\n\n${lines}`
+    );
+    if (input) {
+      const nums = input.trim().split(/[\s,，]+/).map(n => Math.max(1, Math.min(3, parseInt(n) || 0)));
+      missingZy.forEach((c, i) => {
+        if (nums[i] > 0) {
+          c.zy = nums[i];
+          zyCache[c.code + '_' + (c.seq || '0')] = { zy: c.zy, typeCode: c.typeCode, typeLabel: c.typeLabel };
+          cacheUpdated = true;
+        }
+      });
+    }
+  }
+
   if (cacheUpdated) await store.set('zyCache', zyCache);
   filterCourses();
   renderPreviewTT(allCourses.filter(c => c.selected), '当前已选');
@@ -2162,9 +2180,9 @@ async function launch() {
 
     planData = plan;
     allCourses = mergeStaticData(catalog, volData, plan);
-    // Load zy cache for fallback
     const zyCacheInit = (await store.get('zyCache')) || {};
     let cacheUpdatedInit = false;
+    const missingZyInit = [];
     const selMap = {};
     selectedCourses.forEach(s => { selMap[s.code + '_' + s.seq] = s; });
     allCourses.forEach(c => {
@@ -2178,10 +2196,26 @@ async function launch() {
         } else {
           const cached = zyCacheInit[c.code + '_' + (c.seq || '0')];
           if (cached) { c.zy = cached.zy; c.typeCode = cached.typeCode; c.typeLabel = cached.typeLabel; }
-          else { c.zy = 0; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel; }
+          else { c.zy = 0; c.typeCode = s.typeCode; c.typeLabel = s.typeLabel; missingZyInit.push(c); }
         }
       }
     });
+    if (missingZyInit.length) {
+      const lines = missingZyInit.map((c, i) => `${i+1}. ${c.name}(${c.teacher}) → 第几志愿? (1/2/3)`).join('\n');
+      const input = prompt(
+        `选课系统暂未返回以下课程的志愿信息（可能是选课已结束）。\n请输入各课程的志愿号，格式如：1 2 3（用空格分隔，顺序对应）：\n\n${lines}`
+      );
+      if (input) {
+        const nums = input.trim().split(/[\s,，]+/).map(n => Math.max(1, Math.min(3, parseInt(n) || 0)));
+        missingZyInit.forEach((c, i) => {
+          if (nums[i] > 0) {
+            c.zy = nums[i];
+            zyCacheInit[c.code + '_' + (c.seq || '0')] = { zy: c.zy, typeCode: c.typeCode, typeLabel: c.typeLabel };
+            cacheUpdatedInit = true;
+          }
+        });
+      }
+    }
     if (cacheUpdatedInit) await store.set('zyCache', zyCacheInit);
 
     renderCourses(allCourses);
