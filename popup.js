@@ -1,7 +1,8 @@
+const _browser = typeof browser !== 'undefined' ? browser : chrome;
 const statusEl = document.getElementById('status');
 const launchBtn = document.getElementById('launch');
 
-chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+_browser.tabs.query({ active: true, currentWindow: true }, tabs => {
   const tab = tabs[0];
   if (!tab) { statusEl.textContent = '无法获取标签页'; return; }
   const url = tab.url || '';
@@ -15,10 +16,10 @@ chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
 });
 
 launchBtn.onclick = () => {
-  chrome.tabs.query({ active: true, currentWindow: true }, tabs => {
+  _browser.tabs.query({ active: true, currentWindow: true }, tabs => {
     if (!tabs[0]) return;
-    chrome.tabs.sendMessage(tabs[0].id, { action: 'nextthuxk-toggle' }, resp => {
-      if (chrome.runtime.lastError) {
+    _browser.tabs.sendMessage(tabs[0].id, { action: 'nextthuxk-toggle' }, resp => {
+      if (_browser.runtime.lastError) {
         statusEl.textContent = '⚠️ 请先打开清华选课网站并刷新';
         statusEl.className = 'status err';
       } else {

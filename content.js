@@ -4,6 +4,8 @@
 (function () {
 'use strict';
 
+const _browser = typeof browser !== 'undefined' ? browser : chrome;
+
 // ─── §1. Entry Guard ──────────────────────────────────────
 if (window.parent !== window) return;
 if (!/zhjwxk|zhjw\.cic|webvpn/.test(location.hostname)) return;
@@ -26,8 +28,8 @@ let $; // will be shadow.getElementById
 
 // ─── §4. Storage ──────────────────────────────────────────
 const store = {
-  get(k) { return new Promise(r => chrome.storage.local.get(SP+k, d => r(d[SP+k]))); },
-  set(k, v) { return new Promise(r => chrome.storage.local.set({[SP+k]:v}, r)); },
+  get(k) { return new Promise(r => _browser.storage.local.get(SP+k, d => r(d[SP+k]))); },
+  set(k, v) { return new Promise(r => _browser.storage.local.set({[SP+k]:v}, r)); },
 };
 
 // ─── §5. Network ──────────────────────────────────────────
@@ -2124,7 +2126,7 @@ function fmtTime(ts) {
   return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-const CUR_VER = '1.2.5';
+const CUR_VER = '1.2.6';
 const DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 let updateTimer = null;
 
@@ -2405,7 +2407,7 @@ $('nextthuxk-preview-reset').onclick = () => {
 // Modal close
 $('nextthuxk-modal-close').onclick = () => $('nextthuxk-modal').classList.remove('show');
 $('nextthuxk-modal').onclick = e => { if (e.target === $('nextthuxk-modal')) $('nextthuxk-modal').classList.remove('show'); };
-chrome.runtime.onMessage.addListener(msg => {
+_browser.runtime.onMessage.addListener(msg => {
   if (msg.action === 'nextthuxk-toggle') launch();
 });
 
