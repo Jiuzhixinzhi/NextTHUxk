@@ -511,6 +511,130 @@ async function fetchCourseDetail(teacherId, code) {
   } catch(e) { console.warn(TAG, 'detail fetch:', e); return null; }
 }
 
+// ─── §6d. Queue Data (课余量 + 排队人数) ──────────────────
+async function fetchQueueData() {
+  if (!isZhjwxk) return { map: {}, phase: false };
+  try {
+    const map = {};
+    // Phase 1: Fetch paginated capacity/remaining data
+    // First page: GET xkqkSearch
+    const firstHtml = await fetchPage(`${BASE}/xkBks.vxkBksXkbBs.do?m=xkqkSearch&p_xnxq=${SEM}`);
+    if (!firstHtml.includes('gridData') || firstHtml.includes('accessDenied')) return { map: {}, phase: false };
+
+    const gridRegex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
+    let gm;
+    while ((gm = gridRegex.exec(firstHtml)) !== null) {
+      const key = gm[1] + '_' + gm[2];
+      map[key] = { code: gm[1], seq: gm[2], qCapacity: parseInt(gm[3]) || 0, qRemaining: parseInt(gm[4]) || 0, qQueue: 0 };
+    }
+
+    // Extract token from first page for pagination
+    const tokenMatch = firstHtml.match(/name="token"\s+value="([^"]+)"/);
+    const token = tokenMatch ? tokenMatch[1] : '';
+    const formAction = `${BASE}/xkBks.vxkBksJxjhBs.do`;
+
+    // Subsequent pages: POST kylSearch with token
+    if (token) {
+      for (let p = 0; p <= 200; p++) {
+        const body = new URLSearchParams({
+          m: 'kylSearch', page: String(p), token,
+          'p_sort.p1': '', 'p_sort.p2': '', 'p_sort.asc1': '', 'p_sort.asc2': '',
+          p_xnxq: SEM, pathContent: '',
+        });
+        try {
+          const resp = await fetch(formAction, { method: 'POST', credentials: 'include', body });
+          const buf = await resp.arrayBuffer();
+          const html = new TextDecoder('gbk').decode(buf);
+          if (!html.includes('gridData')) break;
+          const pgRegex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
+          let pm; let batchCount = 0;
+          while ((pm = pgRegex.exec(html)) !== null) {
+            const key = pm[1] + '_' + pm[2];
+            if (!map[key]) {
+              map[key] = { code: pm[1], seq: pm[2], qCapacity: parseInt(pm[3]) || 0, qRemaining: parseInt(pm[4]) || 0, qQueue: 0 };
+            }
+            batchCount++;
+          }
+          if (batchCount === 0) break;
+        } catch (e) { console.warn(TAG, 'queue page', p, e); break; }
+      }
+    }
+
+    if (!Object.keys(map).length) return { map: {}, phase: false };
+
+    // Phase 2: Fetch real-time queue counts via selectBksDlCount
+    const parts = Object.values(map).map(q => `${SEM}_${q.code}_${q.seq}`);
+    const batchSize = 100;
+    for (let i = 0; i < parts.length; i += batchSize) {
+      const batch = parts.slice(i, i + batchSize);
+      const kcMsg = batch.join(';');
+      try {
+        const qResp = await fetch(`${BASE}/xkBks.vxkBksXkbBs.do?m=selectBksDlCount&kc_message=${encodeURIComponent(kcMsg)}`, {
+          credentials: 'include',
+        });
+        if (qResp.ok) {
+          const qBuf = await qResp.arrayBuffer();
+          const qText = new TextDecoder('gbk').decode(qBuf);
+          const qData = JSON.parse(qText);
+          if (Array.isArray(qData)) {
+            qData.forEach(obj => {
+              const key = obj.kch + '_' + obj.kxh;
+              if (map[key]) map[key].qQueue = parseInt(obj.dlrs) || 0;
+            });
+          }
+        }
+      } catch (e) { console.warn(TAG, 'queue count batch:', e); }
+    }
+    console.log(TAG, 'queue data:', Object.keys(map).length, 'courses');
+    return { map, phase: true };
+  } catch (e) {
+    console.warn(TAG, 'queue data fetch:', e);
+    return { map: {}, phase: false };
+  }
+}
+
+// ─── §6e. Candidate Courses (候补队列) ────────────────────
+async function fetchCandidateCourses() {
+  if (!isZhjwxk) return [];
+  try {
+    // dlSearch returns: 选课属性, 选课志愿, 课程号, 课程名, 课序号, 队列人数, 本人所在位置, 上课时间, 任课教师
+    const html = await fetchPage(`${BASE}/xkBks.vxkBksXkbBs.do?m=dlSearch&p_xnxq=${SEM}`);
+    if (html.includes('accessDenied') || !html.includes('trr2')) return [];
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const rows = doc.querySelectorAll('tr.trr2');
+    const candidates = [];
+    rows.forEach(row => {
+      const tds = row.querySelectorAll('td');
+      if (tds.length < 9) return;
+      const cell = i => (tds[i]?.textContent || '').trim().replace(/\s+/g, ' ');
+      const typeLabel = cell(0);  // 选课属性: 必修/限选/任选
+      const zyStr = cell(1);      // 选课志愿: 第X志愿
+      const code = cell(2);       // 课程号
+      const name = cell(3);       // 课程名
+      const seq = cell(4);        // 课序号
+      const queueTotal = parseInt(cell(5)) || 0;  // 队列人数
+      const myPos = parseInt(cell(6)) || 0;       // 本人所在位置
+      const time = cell(7);       // 上课时间
+      const teacher = cell(8);    // 任课教师
+      const zyNum = zyStr.match(/第([一二三])志愿/);
+      const typeCode = typeLabel === '必修' ? '006' : typeLabel === '限选' ? '008' : '007';
+      candidates.push({
+        code, seq: seq || '0', name, teacher, time,
+        credits: 0, typeLabel, typeCode,
+        zy: zyNum ? ({ '一': 1, '二': 2, '三': 3 }[zyNum[1]] || 3) : 3,
+        queueTotal, myPos,
+        isCandidate: true,
+        selected: false,
+      });
+    });
+    console.log(TAG, 'candidate courses:', candidates.length);
+    return candidates;
+  } catch (e) {
+    console.warn(TAG, 'candidate fetch:', e);
+    return [];
+  }
+}
+
 // ─── §7. Shadow DOM Host ──────────────────────────────────
 const host = document.createElement('div');
 host.id = 'nextthuxk-host';
@@ -696,12 +820,13 @@ const HTML = `
     </div>
   </div>
     <div class="nx-header">
-      <div class="nx-logo">✨ NextTHUxk &nbsp;|&nbsp; 下一代选课</div>
+      <div class="nx-logo">✨ NextTHUxk &nbsp;|&nbsp; 下一代选课 <span id="nextthuxk-phase-tag" style="display:none;font-size:11px;background:rgba(255,149,0,.15);color:#ff9500;padding:2px 8px;border-radius:6px;margin-left:6px"></span></div>
       <div style="display:flex;gap:8px;align-items:center">
         <span id="nextthuxk-cache-info" style="font-size:11px;color:#86868b"></span>
         <button id="nextthuxk-sem" style="padding:5px 12px;border-radius:8px;border:1px solid rgba(124,106,239,.3);background:rgba(124,106,239,.08);color:#7c6aef;font-size:11px;cursor:pointer;font-family:inherit;font-weight:600" title="点击修改学期"></button>
         <button id="nextthuxk-grade" style="padding:5px 12px;border-radius:8px;border:1px solid rgba(52,199,89,.3);background:rgba(52,199,89,.08);color:#34c759;font-size:11px;cursor:pointer;font-family:inherit;font-weight:600" title="点击修改年级"></button>
         <button id="nextthuxk-refresh" style="padding:5px 12px;border-radius:8px;border:1px solid rgba(0,0,0,.1);background:#fff;font-size:11px;cursor:pointer;font-family:inherit">🔄 刷新数据</button>
+        <button id="nextthuxk-refresh-queue" style="display:none;padding:5px 12px;border-radius:8px;border:1px solid rgba(255,149,0,.3);background:rgba(255,149,0,.08);color:#ff9500;font-size:11px;cursor:pointer;font-family:inherit;font-weight:600">📊 刷新队列</button>
         <button id="nextthuxk-check-update" style="padding:5px 12px;border-radius:8px;border:1px solid rgba(0,0,0,.1);background:#fff;font-size:11px;cursor:pointer;font-family:inherit">🔔 检查更新</button>
         <button class="nx-exit" id="nextthuxk-exit">❌ 返回原选课系统</button>
       </div>
@@ -720,9 +845,15 @@ const HTML = `
             <button class="nx-chip" data-f="required">必修</button>
             <button class="nx-chip" data-f="elective">限选</button>
             <button class="nx-chip" data-f="sports">体育</button>
+            <button class="nx-chip" data-f="queue">我的队列</button>
             <button class="nx-chip" data-f="plan">培养方案</button>
           </div>
           <div style="display:flex;gap:6px;margin-top:6px">
+            <select id="nx-filter-conflict" class="nx-zy-select" style="flex:1">
+              <option value="">不限制冲突</option>
+              <option value="noconflict">仅无冲突</option>
+              <option value="conflict">仅冲突</option>
+            </select>
             <select id="nx-filter-credits" class="nx-zy-select" style="flex:1">
               <option value="">全部学分</option>
               <option value="1">1学分</option>
@@ -801,6 +932,9 @@ shadow.innerHTML = `<style>${CSS}</style>${HTML}`;
 // ─── §10. State ───────────────────────────────────────────
 let allCourses = [], planData = [], activeGroup = null;
 let stageCart = [], savedDrafts = [];
+let queueDataMap = {}; // code_seq → { qCapacity, qRemaining, qQueue }
+let isQueuePhase = false; // true when pre-selection results are out
+let candidateCourses = []; // courses in candidate queue (候补队列) from kbSearch
 
 function parseTimeSlots(timeStr) {
   if (!timeStr) return [];
@@ -902,6 +1036,36 @@ function detectConflicts(courses) {
       const k = day + '|' + slot;
       if (slotMap[k]) conflicts.push({day, slot, a: slotMap[k], b: c.name});
       else slotMap[k] = c.name;
+    });
+  });
+  return conflicts;
+}
+
+function findPreviewConflicts(course) {
+  let previewCourses = [];
+  if (previewMode === 'selected') {
+    previewCourses = allCourses.filter(c => c.selected);
+  } else if (previewMode === 'stage') {
+    previewCourses = stageCart;
+  } else if (previewMode === 'draft' && previewDraftIdx >= 0 && savedDrafts[previewDraftIdx]) {
+    previewCourses = savedDrafts[previewDraftIdx].courses;
+  }
+  if (!previewCourses.length) return [];
+  const slots = parseTimeSlots(course.time || '');
+  if (!slots.length) return [];
+  const conflicts = [];
+  previewCourses.forEach(pc => {
+    if (pc.code === course.code && String(pc.seq || '0') === String(course.seq || '0')) return;
+    const pcSlots = parseTimeSlots(pc.time || '');
+    slots.forEach(s => {
+      pcSlots.forEach(ps => {
+        if (s.day === ps.day && s.slot === ps.slot) {
+          const name = pc.name || pc.code;
+          if (!conflicts.some(c => c.name === name && c.day === s.day && c.slot === s.slot)) {
+            conflicts.push({ name, day: s.day, slot: s.slot });
+          }
+        }
+      });
     });
   });
   return conflicts;
@@ -1041,6 +1205,35 @@ function renderCourses(list) {
     const currentZy = c.selected ? (c.zy || 3) : 3;
     const currentProbHtml = currentProbLine(c, currentFlag, currentZy);
     const probHtml = fullProbGrid(c, defFlag);
+    // Queue phase display
+    const qKey = c.code + '_' + (c.seq || '0');
+    const qd = queueDataMap[qKey];
+    const cand = candidateCourses.find(cc => cc.code === c.code && String(cc.seq) === String(c.seq || '0'));
+    let queueInfoHtml = '';
+    if (isQueuePhase && (qd || cand)) {
+      if (cand) {
+        // Candidate/queued course: show my queue position
+        queueInfoHtml = `<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">`
+          + `<span style="background:rgba(255,149,0,.12);color:#ff9500;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600">排队第${cand.myPos}名</span>`
+          + `<span style="background:rgba(142,142,147,.1);color:#86868b;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600">共${cand.queueTotal}人排队</span>`
+          + (qd ? `<span style="background:rgba(${qd.qRemaining > 0 ? '52,199,89' : '255,59,48'},.12);color:${qd.qRemaining > 0 ? '#34c759' : '#ff3b30'};padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600">余${qd.qRemaining}/${qd.qCapacity}</span>` : '')
+          + `<span style="font-size:10px;font-weight:700;color:#ff9500">${cand.typeLabel} · 第${cand.zy}志愿</span></div>`;
+      } else if (qd) {
+        const rc = qd.qRemaining > 0 ? '#34c759' : '#ff3b30';
+        const rl = qd.qRemaining > 0 ? `余${qd.qRemaining}/${qd.qCapacity}` : `已满(容量${qd.qCapacity})`;
+        const hope = qd.qRemaining > 0 ? '排入希望：高' : qd.qQueue > 0 ? `排入希望：低(队${qd.qQueue}人)` : '暂无排队';
+        const hc = qd.qRemaining > 0 ? '#34c759' : qd.qQueue > 0 ? '#ff9500' : '#86868b';
+        queueInfoHtml = `<div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap">`
+          + `<span style="background:rgba(${qd.qRemaining > 0 ? '52,199,89' : '255,59,48'},.12);color:${rc};padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600">${rl}</span>`
+          + (qd.qQueue > 0 ? `<span style="background:rgba(255,149,0,.12);color:#ff9500;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:600">排队 ${qd.qQueue}人</span>` : '')
+          + `<span style="font-size:10px;font-weight:700;color:${hc}">${hope}</span></div>`;
+      }
+    }
+    // Conflict detection with preview timetable
+    const pConflicts = findPreviewConflicts(c);
+    const conflictHtml = pConflicts.length
+      ? `<div style="font-size:10px;color:#ff3b30;margin-top:3px;display:flex;gap:4px;align-items:center;flex-wrap:wrap"><span>⚠ 冲突:</span>${pConflicts.slice(0,3).map(cf => `<span style="background:rgba(255,59,48,.1);padding:1px 6px;border-radius:4px">${cf.day}${cf.slot} ${esc(cf.name)}</span>`).join('')}</div>`
+      : '';
     const detail = [
       c.capacity ? `容量${c.capacity}` : '',
       c.remaining !== undefined ? `余${c.remaining}` : '',
@@ -1050,7 +1243,9 @@ function renderCourses(list) {
     if (c.selected) {
       const volLabel = c.zy ? `<span class="nx-vol-info">第${c.zy}志愿 · ${esc(c.typeLabel||'')}</span>` : '';
       const p = currentProbMeta(c, currentFlag, currentZy);
-      const probInline = `<span class="nx-inline-prob nx-card-inline-prob" data-code="${esc(c.code)}" data-seq="${esc(c.seq||'0')}" style="color:${p.color}">${p.percentLabel || p.label}</span>`;
+      const probInline = isQueuePhase && (qd || cand)
+        ? `<span class="nx-inline-prob" style="color:${cand ? '#ff9500' : qd.qRemaining > 0 ? '#34c759' : '#ff3b30'}">${cand ? `排队第${cand.myPos}名` : qd.qRemaining > 0 ? '余' + qd.qRemaining : '已满'}</span>`
+        : `<span class="nx-inline-prob nx-card-inline-prob" data-code="${esc(c.code)}" data-seq="${esc(c.seq||'0')}" style="color:${p.color}">${p.percentLabel || p.label}</span>`;
       const canUp = c.zy && c.zy > 1 && canAdjustZy(c.code, c.seq||'0', c.zy - 1);
       const canDown = c.zy && c.zy < 3 && canAdjustZy(c.code, c.seq||'0', c.zy + 1);
       const upBtn = canUp ? `<button class="nx-vol-btn" data-dir="up" data-code="${esc(c.code)}" data-seq="${esc(c.seq||'0')}" data-zy="${c.zy}">▲</button>` : (c.zy > 1 ? `<button class="nx-vol-btn" disabled title="该志愿名额已满">▲</button>` : '');
@@ -1063,7 +1258,9 @@ function renderCourses(list) {
       const aFlags = allowedFlags(defFlag);
       const flagOpts = aFlags.map(f => `<option value="${f}"${defFlag===f?' selected':''}>${f==='bx'?'必修':f==='xx'?'限选':f==='rx'?'任选':'体育'}</option>`).join('');
       const p = currentProbMeta(c, currentFlag, currentZy);
-      const probInline = `<span class="nx-inline-prob nx-card-inline-prob" data-code="${esc(c.code)}" data-seq="${esc(c.seq||'0')}" style="color:${p.color}">${p.percentLabel || p.label}</span>`;
+      const probInline = isQueuePhase && (qd || cand)
+        ? `<span class="nx-inline-prob" style="color:${cand ? '#ff9500' : qd.qRemaining > 0 ? '#34c759' : '#ff3b30'}">${cand ? `排队第${cand.myPos}名` : qd.qRemaining > 0 ? '余' + qd.qRemaining : '已满'}</span>`
+        : `<span class="nx-inline-prob nx-card-inline-prob" data-code="${esc(c.code)}" data-seq="${esc(c.seq||'0')}" style="color:${p.color}">${p.percentLabel || p.label}</span>`;
       selectBtn = `<select class="nx-type-select" data-code="${esc(c.code)}" data-seq="${esc(c.seq||'0')}">${flagOpts}</select><select class="nx-zy-select" data-code="${esc(c.code)}" data-seq="${esc(c.seq||'0')}"><option value="3">3志愿</option><option value="2">2志愿</option><option value="1">1志愿</option></select>${probInline}<button class="nx-select-btn" data-code="${esc(c.code)}" data-seq="${esc(c.seq||'0')}">选课</button><button class="nx-stage-btn nx-add-stage" data-code="${esc(c.code)}" data-seq="${esc(c.seq||'0')}"${inStage?' disabled':''}>${inStage?'已暂存':'暂存'}</button>`;
     } else {
       selectBtn = `<span style="font-size:11px;color:#86868b">已满</span>`;
@@ -1072,7 +1269,7 @@ function renderCourses(list) {
       <div class="nx-card-head"><span class="nx-card-name">${esc(c.name)}</span><span class="nx-card-credit">${c.credits}学分</span></div>
       <div style="font-size:11px;color:#86868b;margin-bottom:3px">${esc(c.code)}${c.seq?' · '+esc(c.seq)+'课序':''}</div>
       <div class="nx-tags">${tags.join('')}</div>
-      ${volHtml}${compHtml}${currentProbHtml}${probHtml}
+      ${isQueuePhase && (qd || cand) ? queueInfoHtml : volHtml + compHtml + currentProbHtml + probHtml}${conflictHtml}
       <div class="nx-card-detail"><div class="nx-card-detail-inner">${detail}</div></div>
       <div class="nx-card-actions">
         <button class="nx-detail-btn" data-code="${esc(c.code)}" data-tid="${esc(c.teacherId||'')}">📄 简介</button>
@@ -1426,6 +1623,15 @@ async function resolveCourseZy(courses, selMap, zyCache) {
     }
   }
   if (missingZy.length) {
+    // In queue phase, auto-assign zy=3 instead of showing modal
+    if (isQueuePhase) {
+      missingZy.forEach(c => {
+        c.zy = 3;
+        zyCache[c.code + '_' + (c.seq || '0')] = { zy: 3, typeCode: c.typeCode, typeLabel: c.typeLabel, confirmed: false };
+      });
+      cacheUpdated = true;
+      return cacheUpdated;
+    }
     const values = await showZyModal(missingZy);
     missingZy.forEach((c, i) => {
       if (values[i] > 0) {
@@ -1446,7 +1652,7 @@ async function refreshSelected() {
   const cacheUpdated = await resolveCourseZy(allCourses, selMap, zyCache);
   if (cacheUpdated) await store.set('zyCache', zyCache);
   filterCourses();
-  renderPreviewTT(allCourses.filter(c => c.selected), '当前已选');
+  renderPreviewTT(allCourses.filter(c => c.selected).concat(candidateCourses.filter(cc => !allCourses.some(ac => ac.selected && ac.code === cc.code))), '当前已选');
 }
 
 // Track current preview state for interactive removal
@@ -1472,7 +1678,35 @@ function renderPreviewTT(courses, label) {
     let cellColor = '';
     let probLabel = '';
     let probBgColor = '';
-    if (previewMode === 'selected' && c.zy) {
+    if (isQueuePhase) {
+      const qKey = c.code + '_' + (c.seq || '0');
+      const qd = queueDataMap[qKey];
+      const cand = candidateCourses.find(cc => cc.code === c.code && String(cc.seq) === String(c.seq || '0'));
+      if (c.isCandidate && cand) {
+        // Candidate/queued course: show queue position
+        cellColor = '#ff9500';
+        probLabel = `排队第${cand.myPos}/${cand.queueTotal}人`;
+        probBgColor = 'rgba(255,149,0,.14)';
+      } else if (previewMode === 'selected') {
+        probLabel = '已选';
+        cellColor = '#34c759';
+        probBgColor = 'rgba(52,199,89,.14)';
+      } else if (qd) {
+        if (qd.qRemaining > 0) {
+          cellColor = '#34c759';
+          probLabel = `余${qd.qRemaining}`;
+          probBgColor = 'rgba(52,199,89,.14)';
+        } else if (qd.qQueue > 0) {
+          cellColor = '#ff9500';
+          probLabel = `排队${qd.qQueue}人`;
+          probBgColor = 'rgba(255,149,0,.14)';
+        } else {
+          cellColor = '#ff3b30';
+          probLabel = '已满';
+          probBgColor = 'rgba(255,59,48,.14)';
+        }
+      }
+    } else if (previewMode === 'selected' && c.zy) {
       const sf = typeCodeToFlag(c.typeCode);
       const p = calcProb(c, sf, c.zy);
       if (p.prob >= 0) {
@@ -1574,6 +1808,15 @@ async function handlePreviewRemove(code, seq) {
 function stageProbHtml(c) {
   const ac = allCourses.find(x => x.code === c.code && String(x.seq||'0') === String(c.seq||'0'));
   if (!ac) return '';
+  if (isQueuePhase) {
+    const qKey = c.code + '_' + (c.seq || '0');
+    const qd = queueDataMap[qKey];
+    if (qd) {
+      const rc = qd.qRemaining > 0 ? '#34c759' : '#ff3b30';
+      return `<div style="margin-top:2px;display:flex;gap:4px;align-items:center;flex-wrap:wrap"><span style="background:rgba(${qd.qRemaining > 0 ? '52,199,89' : '255,59,48'},.12);color:${rc};padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600">余${qd.qRemaining}/${qd.qCapacity}</span>${qd.qQueue > 0 ? `<span style="background:rgba(255,149,0,.12);color:#ff9500;padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600">排队${qd.qQueue}人</span>` : ''}</div>`;
+    }
+    return '';
+  }
   const bf = c.baseFlag || baseFlag(ac);
   return fullProbGrid(ac, bf).replace(/margin-top:3px/, 'margin-top:2px');
 }
@@ -1642,6 +1885,15 @@ let expandedDraft = -1;
 function draftCourseProbHtml(c) {
   const ac = allCourses.find(x => x.code === c.code && String(x.seq||'0') === String(c.seq||'0'));
   if (!ac) return '';
+  if (isQueuePhase) {
+    const qKey = c.code + '_' + (c.seq || '0');
+    const qd = queueDataMap[qKey];
+    if (qd) {
+      const rc = qd.qRemaining > 0 ? '#34c759' : '#ff3b30';
+      return `<div style="margin-top:2px;display:flex;gap:4px;align-items:center;flex-wrap:wrap"><span style="background:rgba(${qd.qRemaining > 0 ? '52,199,89' : '255,59,48'},.12);color:${rc};padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600">余${qd.qRemaining}/${qd.qCapacity}</span>${qd.qQueue > 0 ? `<span style="background:rgba(255,149,0,.12);color:#ff9500;padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600">排队${qd.qQueue}人</span>` : ''}</div>`;
+    }
+    return '';
+  }
   const bf = c.baseFlag || baseFlag(ac);
   return fullProbGrid(ac, bf).replace(/margin-top:3px/, 'margin-top:2px');
 }
@@ -1930,8 +2182,9 @@ function filterCourses() {
   if (f==='available') list = list.filter(c => c.available);
   else if (f==='selected') {
     const seen = new Set();
+    const candCodes = new Set(candidateCourses.map(c => c.code));
     list = list.filter(c => {
-      if (!c.selected) return false;
+      if (!c.selected && !c.isCandidate && !candCodes.has(c.code)) return false;
       const k = c.code + '_' + (c.seq || '0');
       if (seen.has(k)) return false;
       seen.add(k);
@@ -1941,6 +2194,10 @@ function filterCourses() {
   else if (f==='required') list = list.filter(c => c.attr==='必修');
   else if (f==='elective') list = list.filter(c => c.attr==='限选');
   else if (f==='sports') list = list.filter(c => c.attr==='体育' || (c.department||'').includes('体育') || (c.department||'').includes('体武'));
+  else if (f==='queue') {
+    const qCodes = new Set(candidateCourses.map(c => c.code));
+    list = list.filter(c => qCodes.has(c.code));
+  }
   if (activeGroup) list = list.filter(c => (c.group||c.attr)===activeGroup);
   // Credits filter
   const cf = $('nx-filter-credits')?.value;
@@ -1957,6 +2214,14 @@ function filterCourses() {
       if (df && pf) return c.time.includes(`${df}-${pf}(`);
       if (df) return new RegExp(`${df}-\\d`).test(c.time);
       return new RegExp(`\\d+-${pf}\\(`).test(c.time);
+    });
+  }
+  // Conflict filter
+  const cf2 = $('nx-filter-conflict')?.value;
+  if (cf2) {
+    list = list.filter(c => {
+      const conflicts = findPreviewConflicts(c);
+      return cf2 === 'noconflict' ? conflicts.length === 0 : conflicts.length > 0;
     });
   }
   renderCourses(list);
@@ -2126,7 +2391,7 @@ function fmtTime(ts) {
   return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${String(d.getMinutes()).padStart(2,'0')}`;
 }
 
-const CUR_VER = '1.2.6';
+const CUR_VER = '1.2.7';
 const DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 let updateTimer = null;
 
@@ -2264,8 +2529,27 @@ async function launch() {
     if (needCatalog) sd.ts = Date.now();
     await store.set('staticData', sd);
 
-    // 3) Personal data: always real-time
-    const selectedCourses = await fetchSelectedCourses().catch(e=>{ console.warn(TAG,'selected:',e); return []; });
+    // 3) Personal data: always real-time — run queue + selected in parallel
+    const [selectedCourses, qResult] = await Promise.all([
+      fetchSelectedCourses().catch(e=>{ console.warn(TAG,'selected:',e); return []; }),
+      fetchQueueData(),
+    ]);
+
+    queueDataMap = qResult.map;
+    isQueuePhase = qResult.phase;
+
+    // 3c) Candidate courses (候补队列) - only in queue phase
+    if (isQueuePhase) {
+      candidateCourses = await fetchCandidateCourses();
+      if (candidateCourses.length) {
+        const candCodes = new Set(candidateCourses.map(c => c.code));
+        allCourses.forEach(c => {
+          if (candCodes.has(c.code)) c.isCandidate = true;
+        });
+      }
+    } else {
+      candidateCourses = [];
+    }
 
     planData = plan;
     allCourses = mergeStaticData(catalog, volData, plan);
@@ -2279,7 +2563,7 @@ async function launch() {
     renderPlan(planData);
 
     // Preview timetable from selected courses
-    renderPreviewTT(allCourses.filter(c => c.selected), '当前已选');
+    renderPreviewTT(allCourses.filter(c => c.selected).concat(candidateCourses.filter(cc => !allCourses.some(ac => ac.selected && ac.code === cc.code))), '当前已选');
 
     // Load staging data
     stageCart = (await store.get('stageCart')) || [];
@@ -2300,7 +2584,9 @@ async function launch() {
     const cacheEl = $('nextthuxk-cache-info');
     if (cacheEl) {
       const catAge = Math.round((Date.now() - sd.ts) / 60000);
-      cacheEl.innerHTML = `课程数据 ${catAge}分钟前 · 志愿排队 ${fmtTime(volTs)}`;
+      cacheEl.innerHTML = isQueuePhase
+        ? `课余量实时数据 · ${Object.keys(queueDataMap).length}门`
+        : `课程数据 ${catAge}分钟前 · 志愿排队 ${fmtTime(volTs)}`;
     }
 
     // Restore AI config
@@ -2311,7 +2597,19 @@ async function launch() {
       if(cfg.token) $('nextthuxk-token').value=cfg.token;
       if(cfg.pref) $('nextthuxk-pref').value=cfg.pref;
     }
-    console.log(TAG, `loaded ${allCourses.length} courses (${selectedCourses.length} selected)`, needVol ? '(vol refreshed)' : '(vol cached)');
+    console.log(TAG, `loaded ${allCourses.length} courses (${selectedCourses.length} selected)`, needVol ? '(vol refreshed)' : '(vol cached)', isQueuePhase ? '(queue phase)' : '');
+    // Show phase indicator
+    const phaseTag = $('nextthuxk-phase-tag');
+    if (phaseTag) {
+      if (isQueuePhase) {
+        phaseTag.style.display = 'inline';
+        phaseTag.textContent = '📊 课余量模式';
+      } else {
+        phaseTag.style.display = 'none';
+      }
+    }
+    const qRefreshBtn = $('nextthuxk-refresh-queue');
+    if (qRefreshBtn) qRefreshBtn.style.display = (isQueuePhase || candidateCourses.length) ? 'inline-block' : 'none';
   } catch(e) {
     listEl.innerHTML = `<div class="nx-empty nx-st err">❌ ${esc(e.message)}</div>`;
   }
@@ -2325,6 +2623,20 @@ $('nextthuxk-refresh').onclick = async () => {
   await store.set('staticData', null);
   launch();
 };
+$('nextthuxk-refresh-queue').onclick = async () => {
+  const btn = $('nextthuxk-refresh-queue');
+  if (btn) { btn.textContent = '⏳ 刷新中...'; btn.disabled = true; }
+  const qResult = await fetchQueueData();
+  queueDataMap = qResult.map;
+  isQueuePhase = qResult.phase;
+  candidateCourses = await fetchCandidateCourses();
+  const candCodes = new Set(candidateCourses.map(c => c.code));
+  allCourses.forEach(c => { c.isCandidate = candCodes.has(c.code); });
+  filterCourses();
+  renderPreviewTT(allCourses.filter(c => c.selected).concat(candidateCourses.filter(cc => !allCourses.some(ac => ac.selected && ac.code === cc.code))), '当前已选');
+  if (btn) { btn.textContent = '📊 刷新队列'; btn.disabled = false; }
+  showXkResult({ ok: true, msg: `队列数据已刷新 · ${Object.keys(queueDataMap).length}门课余量 · ${candidateCourses.length}门我的队列` });
+};
 $('nextthuxk-search').oninput = filterCourses;
 $('nextthuxk-search-clear').onclick = () => {
   $('nextthuxk-search').value = '';
@@ -2334,6 +2646,7 @@ $('nextthuxk-search-clear').onclick = () => {
 $('nx-filter-credits').onchange = filterCourses;
 $('nx-filter-day').onchange = filterCourses;
 $('nx-filter-period').onchange = filterCourses;
+$('nx-filter-conflict').onchange = filterCourses;
 $('nextthuxk-sem').onclick = async () => {
   const s = prompt('修改学期（格式：2026-2027-1）：', SEM);
   if (s && s.trim()) {
@@ -2402,7 +2715,7 @@ $('nextthuxk-import-cancel').onclick = () => {
   $('nextthuxk-import-area').style.display = 'none';
 };
 $('nextthuxk-preview-reset').onclick = () => {
-  renderPreviewTT(allCourses.filter(c => c.selected), '当前已选');
+  renderPreviewTT(allCourses.filter(c => c.selected).concat(candidateCourses.filter(cc => !allCourses.some(ac => ac.selected && ac.code === cc.code))), '当前已选');
 };
 // Modal close
 $('nextthuxk-modal-close').onclick = () => $('nextthuxk-modal').classList.remove('show');
