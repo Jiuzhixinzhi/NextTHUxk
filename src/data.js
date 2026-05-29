@@ -1,0 +1,592 @@
+// ═══════════════════════════════════════════════════════════════
+// NextTHUxk — Data: 数据抓取与解析（课程目录、志愿、选退课 API）
+// ═══════════════════════════════════════════════════════════════
+var NX = NX || {};
+
+// ─── Parsing Helpers ──────────────────────────────────────────
+
+NX.parsePlan = function (doc) {
+  const rows = doc.querySelectorAll('table#kcTable tr');
+  const out = [];
+  let sem = '', season = '';
+  for (const row of rows) {
+    const tds = row.querySelectorAll('td');
+    if (!tds.length) continue;
+    const cells = [...tds].map(td => td.textContent.trim().replace(/\s+/g, ' '));
+    for (const td of tds) {
+      const t = td.textContent.trim();
+      const sm = t.match(/(\d{4}-\d{4}学年)/); if (sm) sem = sm[1];
+      const sn = t.match(/^(秋|春|夏)$/);         if (sn) season = sn[1];
+    }
+    const code = cells.find(c => /^\d{8}$/.test(c));
+    if (!code) continue;
+    const name = cells.find(c => c.length > 1 && !/^\d+$/.test(c) && !['必修','限选','任选','秋','春','夏'].includes(c) && !c.includes('学年'));
+    const attr = cells.find(c => ['必修','限选','任选'].includes(c));
+    const credit = cells.find(c => /^\d{1,2}(\.\d)?$/.test(c) && c !== code);
+    const group = cells.find(c => c.length > 2 && !['必修','限选','任选'].includes(c) && !/^\d/.test(c) && !c.includes('学年') && c !== name);
+    if (name) out.push({ semester: sem + ' ' + season, code, name: name.replace(/\s+/g, ''), attr: attr || '', credits: parseFloat(credit) || 0, group: group || '' });
+  }
+  return out;
+};
+
+NX.parseFullProgram = function (doc) {
+  const rows = doc.querySelectorAll('#content_1 table tbody tr.trr2');
+  const out = [];
+  let grp = '', attr = '';
+  for (const row of rows) {
+    const cells = [...row.querySelectorAll('td')].map(td => td.textContent.trim());
+    if (cells.length >= 9) { grp = cells[0]; attr = cells[1] || attr; }
+    const idx = cells.length >= 9 ? 2 : 0;
+    const code = cells[idx], name = cells[idx + 1];
+    if (code && name && /^\d+$/.test(code))
+      out.push({ code, name, credits: parseFloat(cells[idx + 2]) || 0, attr, group: grp, semester: '' });
+  }
+  return out;
+};
+
+NX.parseCatalog = function (doc) {
+  const out = [];
+  doc.querySelectorAll('tr.trr2').forEach(row => {
+    const tds = row.querySelectorAll('td');
+    if (tds.length < 11) return;
+    const cell = i => (tds[i]?.textContent || '').trim().replace(/\s+/g, ' ');
+    const code = cell(1);
+    const name = cell(3);
+    if (!code || !name || !/^\d+$/.test(code)) return;
+    const bksCap = parseInt(cell(6)) || 0;
+    const bksRem = parseInt(cell(7)) || 0;
+    const teacherLink = tds[5]?.querySelector('a[href*="showJsDetail"]');
+    const teacherHref = teacherLink?.getAttribute('href') || '';
+    const teacherIdMatch = teacherHref.match(/p_jsh=([^&]+)/);
+    const teacherId = teacherIdMatch ? teacherIdMatch[1] : '';
+    const courseLink = tds[3]?.querySelector('a[href*="showToXs"]');
+    const detailHref = courseLink?.getAttribute('href') || '';
+    out.push({
+      code,
+      seq: cell(2),
+      name,
+      credits: parseFloat(cell(4)) || 0,
+      teacher: cell(5),
+      teacherId,
+      department: cell(0),
+      time: cell(10),
+      capacity: bksCap,
+      remaining: bksRem,
+      available: bksRem > 0,
+      selected: false,
+      queue: '',
+      group: cell(0),
+      attr: '',
+      detailUrl: detailHref,
+      xkTextNote: cell(11),
+      courseFeature: cell(12),
+      grade: cell(13),
+      tongshiGroup: cell(18),
+      gradCapacity: parseInt(cell(8)) || 0,
+      gradRemaining: parseInt(cell(9)) || 0,
+      volRequired: '', volElective: '', volOptional: '', volSports: '',
+    });
+  });
+  return out;
+};
+
+NX.parseVolFromHtml = function (html) {
+  const map = {};
+  const regex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"(.*?)"\s*,\s*"(.*?)"\s*,\s*"(.*?)"\s*\]/g;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const key = m[1] + '_' + m[2];
+    map[key] = {
+      code: m[1], seq: m[2],
+      capacity: parseInt(m[3]) || 0,
+      applied: parseInt(m[4]) || 0,
+      volRequired: m[5],
+      volElective: m[6],
+      volOptional: m[7],
+    };
+  }
+  return map;
+};
+
+NX.parseVolSportsFromHtml = function (html) {
+  const map = {};
+  const regex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"(.*?)"\s*\]/g;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    const key = m[1] + '_' + m[2];
+    map[key] = {
+      code: m[1], seq: m[2],
+      capacity: parseInt(m[3]) || 0,
+      applied: parseInt(m[4]) || 0,
+      volSports: m[5],
+    };
+  }
+  return map;
+};
+
+// ─── Course Type Helpers ──────────────────────────────────────
+
+NX.courseFlag = function (course) {
+  const a = (course.attr || '').trim();
+  if (a === '限选') return 'xx';
+  if (a === '任选') return 'rx';
+  if (a === '体育') return 'ty';
+  if (a === '必修') return 'bx';
+  return 'rx';
+};
+
+NX.isSportsCourse = function (course) {
+  return (course.attr || '') === '体育'
+    || (course.department || '').includes('体育')
+    || (course.name || '').includes('体育')
+    || course.typeLabel === '体育'
+    || course.typeCode === 'ty';
+};
+
+NX.baseFlag = function (course) {
+  if (NX.isSportsCourse(course)) return 'ty';
+  return NX.courseFlag(course);
+};
+
+NX.allowedFlags = function (bf) {
+  if (bf === 'ty') return ['ty'];
+  if (bf === 'bx') return ['bx', 'xx', 'rx'];
+  if (bf === 'xx') return ['xx', 'rx'];
+  return ['rx'];
+};
+
+NX.typeCodeToFlag = function (typeCode) {
+  return typeCode === '006' ? 'bx' : typeCode === '008' ? 'xx' : typeCode === '007' ? 'rx' : typeCode === 'ty' ? 'ty' : 'bx';
+};
+
+NX.zyTypeOf = function (course) {
+  if (course.typeLabel === '体育' || course.typeCode === 'ty') return 'ty';
+  return { '006': 'bx', '008': 'xx', '007': 'rx' }[course.typeCode] || 'bx';
+};
+
+// ─── Data Fetching ────────────────────────────────────────────
+
+NX.fetchTrainingPlan = async function () {
+  const { state, fetchPage, parsePlan, parseFullProgram } = NX;
+  const { SEM, BASE, isZhjwxk, isZhjw } = state;
+  if (isZhjwxk) {
+    const html = await fetchPage(BASE + '/jhBks.vjhBksPyfakcbBs.do?m=showBksZxZdxjxjhXmxqkclist&p_xnxq=' + SEM);
+    return parsePlan(new DOMParser().parseFromString(html, 'text/html'));
+  }
+  if (isZhjw) {
+    const listHtml = await fetchPage(BASE + '/jhBks.vjhBksPyfakcbBs.do?m=grPyfabks&theRole=bks&theModule=pyfa');
+    if (listHtml.includes('accessDenied')) return [];
+    const m = /fajhh=(\d+)/.exec(listHtml);
+    if (!m) return [];
+    const html = await fetchPage(BASE + '/jhBks.vjhBksPyfakcbBs.do?m=index2&theModule=pyfa&p_fajhh=' + m[1]);
+    return parseFullProgram(new DOMParser().parseFromString(html, 'text/html'));
+  }
+  return [];
+};
+
+NX.fetchCourseCatalog = async function () {
+  const { state, fetchPage, parseCatalog } = NX;
+  if (!state.isZhjwxk) return [];
+  const { SEM, BASE } = state;
+  const all = [];
+  for (let p = -1; p <= 200; p++) {
+    const url = p === -1
+      ? BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM
+      : BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM + '&page=' + p;
+    try {
+      const html = await fetchPage(url);
+      const batch = parseCatalog(new DOMParser().parseFromString(html, 'text/html'));
+      if (!batch.length && p >= 0) break;
+      all.push(...batch);
+      if (p > 0 && batch.length === 0) break;
+    } catch (e) {
+      console.warn(NX.TAG, 'catalog page', p, e);
+      break;
+    }
+  }
+  console.log(NX.TAG, 'catalog total:', all.length, 'courses');
+  return all;
+};
+
+NX.fetchVolunteer = async function () {
+  const { state, fetchPage, parseVolFromHtml, parseVolSportsFromHtml } = NX;
+  if (!state.isZhjwxk) return {};
+  const { SEM, BASE } = state;
+  try {
+    const allMap = {};
+    for (let p = -1; p <= 200; p++) {
+      const url = p === -1
+        ? BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchBR&p_xnxq=' + SEM
+        : BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchBR&p_xnxq=' + SEM + '&page=' + p;
+      const html = await fetchPage(url);
+      const batch = parseVolFromHtml(html);
+      if (!Object.keys(batch).length && p >= 0) break;
+      Object.assign(allMap, batch);
+      if (p > 0 && !Object.keys(batch).length) break;
+    }
+    console.log(NX.TAG, 'volunteer data:', Object.keys(allMap).length, 'courses');
+    try {
+      const sportsMap = {};
+      for (let p = -1; p <= 20; p++) {
+        const url = p === -1
+          ? BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchTy&p_xnxq=' + SEM
+          : BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchTy&p_xnxq=' + SEM + '&page=' + p;
+        const html = await fetchPage(url);
+        const batch = parseVolSportsFromHtml(html);
+        if (!Object.keys(batch).length && p >= 0) break;
+        Object.assign(sportsMap, batch);
+        if (p > 0 && !Object.keys(batch).length) break;
+      }
+      for (const [key, val] of Object.entries(sportsMap)) {
+        if (allMap[key]) Object.assign(allMap[key], val);
+        else allMap[key] = val;
+      }
+      console.log(NX.TAG, 'sports volunteer data:', Object.keys(sportsMap).length, 'courses');
+    } catch (e) { console.warn(NX.TAG, 'sports volunteer fetch:', e); }
+    return allMap;
+  } catch (e) { console.warn(NX.TAG, 'volunteer fetch:', e); return {}; }
+};
+
+// ─── Course Selection/Drop API ────────────────────────────────
+
+NX.iframeFormSubmit = function (searchUrl, postFields) {
+  const { state } = NX;
+  const BASE = state.BASE;
+  return new Promise((resolve) => {
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'width:0;height:0;border:none;position:absolute;left:-9999px';
+    document.documentElement.appendChild(iframe);
+    let settled = false;
+    const finish = (result) => { if (!settled) { settled = true; iframe.remove(); resolve(result); } };
+    iframe.onload = () => {
+      try {
+        iframe.contentWindow.alert = () => {};
+        const doc = iframe.contentDocument;
+        const token = doc.querySelector('input[name="token"]')?.value;
+        if (!token) { finish({ ok: false, msg: '无法获取 token' }); return; }
+        const form = doc.createElement('form');
+        form.method = 'POST';
+        form.action = BASE + '/xkBks.vxkBksXkbBs.do';
+        postFields.token = token;
+        for (const [k, v] of Object.entries(postFields)) {
+          const inp = doc.createElement('input');
+          inp.type = 'hidden'; inp.name = k; inp.value = v;
+          form.appendChild(inp);
+        }
+        doc.body.appendChild(form);
+        iframe.onload = () => {
+          try { iframe.contentWindow.alert = () => {}; } catch (e) {}
+          setTimeout(() => finish({ ok: true, submitted: true }), 500);
+        };
+        form.submit();
+      } catch (e) { finish({ ok: false, msg: e.message }); }
+    };
+    iframe.src = searchUrl;
+    setTimeout(() => finish({ ok: false, msg: '加载超时' }), 30000);
+  });
+};
+
+NX.submitCourse = async function (code, seq, zy, flag) {
+  const { state, iframeFormSubmit, fetchSelectedCourses } = NX;
+  const { SEM, BASE } = state;
+  zy = zy || 3;
+  flag = flag || 'bx';
+  const mSearch = { bx: 'bxSearch', xx: 'xxSearch', rx: 'rxSearch', ty: 'tySearch' }[flag] || 'bxSearch';
+  const mVal = { bx: 'saveBxKc', xx: 'saveXxKc', rx: 'saveRxKc', ty: 'saveTyKc' }[flag] || 'saveBxKc';
+  const extra = flag === 'rx' ? '&is_zyrxk=1' : '';
+  const searchUrl = BASE + '/xkBks.vxkBksXkbBs.do?m=' + mSearch + '&p_xnxq=' + SEM + '&tokenPriFlag=' + flag + extra;
+  const idName = { bx: 'p_bxk_id', xx: 'p_xxk_id', rx: 'p_rx_id', ty: 'p_rxTy_id' }[flag];
+  const zyName = { bx: 'p_bxk_xkzy', xx: 'p_xxk_xkzy', rx: 'p_rx_xkzy', ty: 'p_rxTy_xkzy' }[flag];
+  const fields = { m: mVal, p_xnxq: SEM, tokenPriFlag: flag, page: '' };
+  fields[idName] = SEM + ';' + code + ';' + seq + ';';
+  fields[zyName] = String(zy);
+  if (flag === 'rx') { fields.is_zyrxk = '1'; fields.p_rxklxm = ''; }
+  if (flag === 'ty') { fields.rxTyType = ''; }
+  const res = await iframeFormSubmit(searchUrl, fields);
+  if (!res.submitted) return res;
+  await new Promise(r => setTimeout(r, 1500));
+  const sel = await fetchSelectedCourses();
+  const found = sel.some(s => s.code === code && String(s.seq) === String(seq));
+  return found ? { ok: true, msg: '选课成功' } : { ok: false, msg: '选课未生效，请确认课程类型是否正确' };
+};
+
+NX.dropCourse = async function (code, seq) {
+  const { state, iframeFormSubmit, fetchSelectedCourses } = NX;
+  const { SEM, BASE } = state;
+  const searchUrl = BASE + '/xkBks.vxkBksXkbBs.do?m=yxSearchTab&p_xnxq=' + SEM + '&tokenPriFlag=yx';
+  const res = await iframeFormSubmit(searchUrl, {
+    m: 'deleteYxk', p_xnxq: SEM, page: '',
+    tokenPriFlag: 'yx', tk: '', jhzy_kch: '', jhzy_kxh: '', jhzy_zy: '',
+    'p_del_id': SEM + ';' + code + ';' + seq + ';',
+  });
+  if (!res.submitted) return res;
+  await new Promise(r => setTimeout(r, 1500));
+  const sel = await fetchSelectedCourses();
+  const still = sel.some(s => s.code === code && String(s.seq) === String(seq));
+  return still ? { ok: false, msg: '退选未生效，请稍后重试' } : { ok: true, msg: '退选成功' };
+};
+
+NX.changeVolunteer = async function (code, seq, targetZy) {
+  const { state, iframeFormSubmit } = NX;
+  const { SEM, BASE } = state;
+  const searchUrl = BASE + '/xkBks.vxkBksXkbBs.do?m=yxSearchTab&p_xnxq=' + SEM + '&tokenPriFlag=yx';
+  const res = await iframeFormSubmit(searchUrl, {
+    m: 'changeZY', p_xnxq: SEM, tokenPriFlag: 'yx', page: '',
+    tk: '', jhzy_kch: code, jhzy_kxh: seq, jhzy_zy: String(targetZy),
+  });
+  if (!res.submitted) return { ok: false, msg: '志愿调整提交失败' };
+  await new Promise(r => setTimeout(r, 1000));
+  return { ok: true, msg: '志愿已调整为第' + targetZy + '志愿' };
+};
+
+NX.fetchSelectedCourses = async function () {
+  const { state, fetchPage } = NX;
+  if (!state.isZhjwxk) return [];
+  const { SEM, BASE } = state;
+  try {
+    const _t = Date.now();
+    const html = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=yxSearchTab&p_xnxq=' + SEM + '&tokenPriFlag=yx&_t=' + _t);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const zyMap = {};
+    const zyRe = /\[\s*"(\d+),(\d+)"\s*,\s*"(\d+)"\s*,\s*"(\d+)"\s*,\s*"([^"]*)"\s*,\s*"[^"]*"\s*\]/g;
+    let zm;
+    while ((zm = zyRe.exec(html)) !== null) {
+      const [_, code, seq, zy, typeCode, isSports] = zm;
+      const typeLabel = isSports === '是' ? '体育' : ({ '006': '必修', '008': '限选', '007': '任选' }[typeCode] || '');
+      zyMap[code + '_' + seq] = { zy: parseInt(zy), typeCode, typeLabel };
+    }
+    const rows = doc.querySelectorAll('tr.trr2');
+    const selected = [];
+    rows.forEach(row => {
+      const radio = row.querySelector('input[name="p_del_id"]');
+      const val = radio?.getAttribute('value') || '';
+      const parts = val.split(';');
+      const code = parts[1] || '';
+      const seq = parts[2] || '';
+      if (!code) return;
+      const tds = row.querySelectorAll('td');
+      const cell = i => (tds[i]?.textContent || '').trim().replace(/\s+/g, ' ');
+      const zyInfo = zyMap[code + '_' + seq] || {};
+      const cell2 = cell(2) || '';
+      const zyFromCell = cell2.match(/第([一二三])志愿/);
+      const isSportsCourse = !cell(1) && zyFromCell;
+      const zyNum = zyInfo.zy || (zyFromCell ? ({ '一': 1, '二': 2, '三': 3 }[zyFromCell[1]]) : 0);
+      const typeLabel = isSportsCourse ? '体育' : (cell(1) || zyInfo.typeLabel || '');
+      selected.push({
+        code, seq, name: cell(3) || cell(1), teacher: cell(7) || cell(2),
+        time: cell(6) || cell(3), credits: parseFloat(cell(8) || cell(4)) || 0,
+        typeLabel,
+        zy: zyNum,
+        typeCode: isSportsCourse ? 'ty' : (zyInfo.typeCode || ''),
+      });
+    });
+    console.log(NX.TAG, 'selected courses:', selected.length);
+    return selected;
+  } catch (e) { console.warn(NX.TAG, 'fetch selected:', e); return []; }
+};
+
+NX.fetchLevelTable = async function () {
+  const { state, fetchPage } = NX;
+  if (!state.isZhjwxk) return {};
+  const { SEM, BASE } = state;
+  try {
+    const url = BASE + '/xkBks.vxkBksXkbBs.do?p_xnxq=' + SEM + '&pathContent=' + encodeURIComponent('一级课表');
+    const html = await fetchPage(url);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const rows = doc.querySelectorAll('tr.trr2');
+    const map = {};
+    rows.forEach(row => {
+      const rawCells = [...row.querySelectorAll('td')].map(td => td.textContent.trim().replace(/\s+/g, ' '));
+      let code = '', seq = '', attr = '';
+      for (let i = 0; i < rawCells.length; i++) {
+        if (/^\d{8}$/.test(rawCells[i]) && !code) {
+          code = rawCells[i]; seq = rawCells[i + 1] || '0';
+          attr = rawCells[i + 2] || '';
+          if (!/^(必修|限选|任选)$/.test(attr)) attr = '';
+        }
+      }
+      if (!code) return;
+      const isSports = !attr;
+      const typeLabel = isSports ? '体育' : attr;
+      const typeCode = isSports ? 'ty' : attr === '必修' ? '006' : attr === '限选' ? '008' : attr === '任选' ? '007' : '';
+      map[code + '_' + seq] = { typeCode, typeLabel, attr };
+    });
+    console.log(NX.TAG, 'level table:', Object.keys(map).length, 'courses');
+    return map;
+  } catch (e) { console.warn(NX.TAG, 'level table:', e); return {}; }
+};
+
+NX.fetchCourseDetail = async function (teacherId, code) {
+  const { state, fetchPage } = NX;
+  if (!state.isZhjwxk) return null;
+  const url = state.BASE + '/js.vjsKcbBs.do?m=showToXs&p_id=' + encodeURIComponent(teacherId + ';' + code);
+  try {
+    const html = await fetchPage(url);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const table = doc.querySelector('form table table.table-striped') || doc.querySelector('form table.table-striped') || doc.querySelector('table.table-striped');
+    if (!table) return null;
+    const rows = table.querySelectorAll('tr');
+    const fields = {};
+    const skipLabels = new Set(['课程名', '课程号']);
+    rows.forEach(tr => {
+      const tds = tr.querySelectorAll('td');
+      if (tds.length < 2) return;
+      const l1 = tds[0]?.textContent?.trim().replace(/：/g, '') || '';
+      const v1 = tds[1]?.textContent?.trim() || '';
+      if (l1 && v1 && l1.length < 20 && !/^\d+$/.test(l1) && !skipLabels.has(l1)) fields[l1] = v1;
+      if (tds.length >= 4) {
+        const l2 = tds[2]?.textContent?.trim().replace(/：/g, '') || '';
+        const v2 = tds[3]?.textContent?.trim() || '';
+        if (l2 && v2 && l2.length < 20 && !/^\d+$/.test(l2) && !skipLabels.has(l2)) fields[l2] = v2;
+      }
+    });
+    return fields;
+  } catch (e) { console.warn(NX.TAG, 'detail fetch:', e); return null; }
+};
+
+// ─── Queue Data (课余量 + 排队人数) ──────────────────────────
+
+NX.fetchQueueData = async function () {
+  const { state, fetchPage } = NX;
+  if (!state.isZhjwxk) return { map: {}, phase: false };
+  const { SEM, BASE } = state;
+  try {
+    const map = {};
+    const firstHtml = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=xkqkSearch&p_xnxq=' + SEM);
+    if (!firstHtml.includes('gridData') || firstHtml.includes('accessDenied')) return { map: {}, phase: false };
+    const gridRegex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
+    let gm;
+    while ((gm = gridRegex.exec(firstHtml)) !== null) {
+      const key = gm[1] + '_' + gm[2];
+      map[key] = { code: gm[1], seq: gm[2], qCapacity: parseInt(gm[3]) || 0, qRemaining: parseInt(gm[4]) || 0, qQueue: 0 };
+    }
+    const tokenMatch = firstHtml.match(/name="token"\s+value="([^"]+)"/);
+    const token = tokenMatch ? tokenMatch[1] : '';
+    const formAction = BASE + '/xkBks.vxkBksJxjhBs.do';
+    if (token) {
+      for (let p = 0; p <= 200; p++) {
+        const body = new URLSearchParams({
+          m: 'kylSearch', page: String(p), token,
+          'p_sort.p1': '', 'p_sort.p2': '', 'p_sort.asc1': '', 'p_sort.asc2': '',
+          p_xnxq: SEM, pathContent: '',
+        });
+        try {
+          const resp = await fetch(formAction, { method: 'POST', credentials: 'include', body });
+          const buf = await resp.arrayBuffer();
+          const html = new TextDecoder('gbk').decode(buf);
+          if (!html.includes('gridData')) break;
+          const pgRegex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
+          let pm; let batchCount = 0;
+          while ((pm = pgRegex.exec(html)) !== null) {
+            const key = pm[1] + '_' + pm[2];
+            if (!map[key]) {
+              map[key] = { code: pm[1], seq: pm[2], qCapacity: parseInt(pm[3]) || 0, qRemaining: parseInt(pm[4]) || 0, qQueue: 0 };
+            }
+            batchCount++;
+          }
+          if (batchCount === 0) break;
+        } catch (e) { console.warn(NX.TAG, 'queue page', p, e); break; }
+      }
+    }
+    if (!Object.keys(map).length) return { map: {}, phase: false };
+    // Fetch real-time queue counts
+    const parts = Object.values(map).map(q => SEM + '_' + q.code + '_' + q.seq);
+    const batchSize = 100;
+    for (let i = 0; i < parts.length; i += batchSize) {
+      const batch = parts.slice(i, i + batchSize);
+      const kcMsg = batch.join(';');
+      try {
+        const qResp = await fetch(BASE + '/xkBks.vxkBksXkbBs.do?m=selectBksDlCount&kc_message=' + encodeURIComponent(kcMsg), {
+          credentials: 'include',
+        });
+        if (qResp.ok) {
+          const qBuf = await qResp.arrayBuffer();
+          const qText = new TextDecoder('gbk').decode(qBuf);
+          const qData = JSON.parse(qText);
+          if (Array.isArray(qData)) {
+            qData.forEach(obj => {
+              const key = obj.kch + '_' + obj.kxh;
+              if (map[key]) map[key].qQueue = parseInt(obj.dlrs) || 0;
+            });
+          }
+        }
+      } catch (e) { console.warn(NX.TAG, 'queue count batch:', e); }
+    }
+    console.log(NX.TAG, 'queue data:', Object.keys(map).length, 'courses');
+    return { map, phase: true };
+  } catch (e) {
+    console.warn(NX.TAG, 'queue data fetch:', e);
+    return { map: {}, phase: false };
+  }
+};
+
+// ─── Candidate Courses (候补队列) ─────────────────────────────
+
+NX.fetchCandidateCourses = async function () {
+  const { state, fetchPage } = NX;
+  if (!state.isZhjwxk) return [];
+  const { SEM, BASE } = state;
+  try {
+    const html = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=dlSearch&p_xnxq=' + SEM);
+    if (html.includes('accessDenied') || !html.includes('trr2')) return [];
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const rows = doc.querySelectorAll('tr.trr2');
+    const candidates = [];
+    rows.forEach(row => {
+      const tds = row.querySelectorAll('td');
+      if (tds.length < 9) return;
+      const cell = i => (tds[i]?.textContent || '').trim().replace(/\s+/g, ' ');
+      const typeLabel = cell(0);
+      const zyStr = cell(1);
+      const code = cell(2);
+      const name = cell(3);
+      const seq = cell(4);
+      const queueTotal = parseInt(cell(5)) || 0;
+      const myPos = parseInt(cell(6)) || 0;
+      const time = cell(7);
+      const teacher = cell(8);
+      const zyNum = zyStr.match(/第([一二三])志愿/);
+      const typeCode = typeLabel === '必修' ? '006' : typeLabel === '限选' ? '008' : '007';
+      candidates.push({
+        code, seq: seq || '0', name, teacher, time,
+        credits: 0, typeLabel, typeCode,
+        zy: zyNum ? ({ '一': 1, '二': 2, '三': 3 }[zyNum[1]] || 3) : 3,
+        queueTotal, myPos,
+        isCandidate: true,
+        selected: false,
+      });
+    });
+    console.log(NX.TAG, 'candidate courses:', candidates.length);
+    return candidates;
+  } catch (e) {
+    console.warn(NX.TAG, 'candidate fetch:', e);
+    return [];
+  }
+};
+
+// ─── Merge ────────────────────────────────────────────────────
+
+NX.mergeStaticData = function (catalog, volData, plan) {
+  const { baseFlag } = NX;
+  const courses = catalog.length ? catalog : plan.map(c => ({ ...c, available: true, teacher: '', time: '', capacity: '', selected: false, queue: '' }));
+  if (Object.keys(volData).length) {
+    courses.forEach(c => {
+      const key = c.seq ? c.code + '_' + c.seq : null;
+      const v = (key && volData[key]) ? volData[key] : Object.values(volData).find(v => v.code === c.code);
+      if (v) {
+        c.volRequired = v.volRequired; c.volElective = v.volElective; c.volOptional = v.volOptional;
+        c.volSports = v.volSports || '';
+        c.volCapacity = v.capacity || c.capacity; c.volApplied = v.applied || 0;
+        if ((c.attr === '体育' || c.department?.includes('体育') || c.name?.includes('体育')) && v.volSports) {
+          c.volApplied = v.applied || 0;
+          c.volCapacity = v.capacity || c.volCapacity;
+        }
+      }
+    });
+  }
+  if (plan.length) {
+    const pm = {}; plan.forEach(p => { pm[p.code] = p.attr; });
+    courses.forEach(c => { if (!c.attr && pm[c.code]) c.attr = pm[c.code]; });
+  }
+  return courses;
+};

@@ -66,7 +66,7 @@
 - 已选课程可**调整志愿顺序**（▲▼），系统自动校验志愿名额上限
   - 必修 / 限选 / 任选：1 志愿最多 1 门，2 志愿最多 2 门
   - 体育：1 志愿最多 1 门，2 志愿最多 1 门
-  - 3 志愿不限数量
+- 3 志愿不限数量
 - 操作后实时刷新选课状态
 
 ### 课表预览
@@ -138,12 +138,20 @@
 ## 文件结构
 
 ```
-├── manifest.json    # 浏览器扩展配置 (Manifest V3)
-├── content.js       # 主逻辑（全部功能 ~2700 行）
-├── content.css      # 样式（备用）
-├── popup.html       # 扩展弹出页
-├── popup.js         # 弹出页逻辑
-└── README.md        # 本文件
+├── manifest.json        # 浏览器扩展配置 (Manifest V3)
+├── content.css          # 全部样式
+├── content.js           # 入口：HTML 模板 + Shadow DOM + 事件绑定 + 启动流程
+├── src/
+│   ├── config.js        # 命名空间 NX、常量、工具函数、存储、网络
+│   ├── data.js          # 数据抓取与解析（课程目录、志愿、选退课 API）
+│   ├── probability.js   # 中签概率计算、志愿格式化
+│   ├── state.js         # 暂存/草稿管理、课表解析、冲突检测、选课状态
+│   ├── render.js        # 所有渲染函数 + 筛选逻辑
+│   ├── ai.js            # AI 搜索 + 智能排课
+│   └── update.js        # 版本更新检查
+├── popup.html           # 扩展弹出页
+├── popup.js             # 弹出页逻辑
+└── README.md            # 本文件
 ```
 
 ## License
