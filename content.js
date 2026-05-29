@@ -226,16 +226,17 @@ NX.launch = async function launch() {
 
     if (state.isQueuePhase) {
       state.candidateCourses = await fetchCandidateCourses();
-      if (state.candidateCourses.length) {
-        const candCodes = new Set(state.candidateCourses.map(c => c.code));
-        state.allCourses.forEach(c => { if (candCodes.has(c.code)) c.isCandidate = true; });
-      }
     } else {
       state.candidateCourses = [];
     }
 
     state.planData = plan;
     state.allCourses = mergeStaticData(catalog, volData, plan);
+    // isCandidate 必须在 mergeStaticData 之后设置，否则新数组会丢失标记
+    if (state.candidateCourses.length) {
+      const candCodes = new Set(state.candidateCourses.map(c => c.code));
+      state.allCourses.forEach(c => { if (candCodes.has(c.code)) c.isCandidate = true; });
+    }
     const selMap = {};
     selectedCourses.forEach(s => { selMap[s.code + '_' + s.seq] = s; });
     const zyCacheInit = (await store.get('zyCache')) || {};
@@ -360,7 +361,7 @@ $('nextthuxk-check-update').onclick = async () => {
   if (!$('nextthuxk-update-banner') && !$('nextthuxk-danger-banner')) {
     const toast = document.createElement('div');
     toast.id = 'nextthuxk-update-banner';
-    toast.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#34c759;color:#fff;font-size:13px;border-radius:8px;margin:8px 0;"><span>当前已是最新版本 v' + '1.3.0' + '</span><button onclick="this.closest(\'#nextthuxk-update-banner\').remove()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;">✕</button></div>';
+    toast.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#34c759;color:#fff;font-size:13px;border-radius:8px;margin:8px 0;"><span>当前已是最新版本 v' + '1.3.1' + '</span><button onclick="this.closest(\'#nextthuxk-update-banner\').remove()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;">✕</button></div>';
     $('nextthuxk-dashboard')?.prepend(toast);
   }
 };

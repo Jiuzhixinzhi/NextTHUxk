@@ -169,17 +169,27 @@ NX.resolveCourseZy = async function (courses, selMap, zyCache) {
 };
 
 NX.refreshSelected = async function () {
-  const { state, store, fetchSelectedCourses, resolveCourseZy, filterCourses, renderPreviewTT } = NX;
-  const { allCourses, candidateCourses } = state;
+  const { state, store, fetchSelectedCourses, fetchCandidateCourses, resolveCourseZy, filterCourses, renderPreviewTT } = NX;
+  const { allCourses } = state;
+  // 重新获取已选课程
   const selected = await fetchSelectedCourses();
   const selMap = {};
   selected.forEach(s => { selMap[s.code + '_' + s.seq] = s; });
   const zyCache = (await store.get('zyCache')) || {};
   const cacheUpdated = await resolveCourseZy(allCourses, selMap, zyCache);
   if (cacheUpdated) await store.set('zyCache', zyCache);
+  // 重新获取候补队列（排队选课后状态会变化）
+  try {
+    state.candidateCourses = await fetchCandidateCourses();
+  } catch (e) { /* 保持现有候补数据不变 */ }
+  // 同步 isCandidate 标记
+  const candKeys = new Set(state.candidateCourses.map(c => c.code + '_' + c.seq));
+  allCourses.forEach(c => {
+    c.isCandidate = candKeys.has(c.code + '_' + (c.seq || '0'));
+  });
   filterCourses();
   renderPreviewTT(
-    allCourses.filter(c => c.selected).concat(candidateCourses.filter(cc => !allCourses.some(ac => ac.selected && ac.code === cc.code))),
+    allCourses.filter(c => c.selected).concat(state.candidateCourses.filter(cc => !allCourses.some(ac => ac.selected && ac.code === cc.code))),
     '当前已选'
   );
 };
@@ -337,7 +347,8 @@ NX.promoteDraft = async function (draft) {
       const c = draft.courses[i];
       prog('⏳ 选课 ' + (i + 1) + '/' + draft.courses.length + ': ' + c.name);
       await submitCourse(c.code, c.seq, c.zy || 3, c.flag || 'bx');
-      await new Promise(r => setTimeout(r, 1500));
+      // 排队选课内部已有 1.5s 延时，这里额外等 2s 避免触发验证码
+      await new Promise(r => setTimeout(r, 2000));
     }
     await refreshSelected();
     showXkResult({ ok: true, msg: '课表「' + draft.name + '」已全部提交！' });

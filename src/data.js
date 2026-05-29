@@ -249,45 +249,66 @@ NX.fetchVolunteer = async function () {
 
 // ─── Course Selection/Drop API ────────────────────────────────
 
-NX.iframeFormSubmit = function (searchUrl, postFields) {
-  const { state } = NX;
+// 通用：fetch GET 搜索页拿 token → fetch POST 表单 → 从响应 HTML 检测结果
+NX.fetchFormSubmit = async function (searchUrl, postFields) {
+  const { state, fetchPage } = NX;
   const BASE = state.BASE;
-  return new Promise((resolve) => {
-    const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'width:0;height:0;border:none;position:absolute;left:-9999px';
-    document.documentElement.appendChild(iframe);
-    let settled = false;
-    const finish = (result) => { if (!settled) { settled = true; iframe.remove(); resolve(result); } };
-    iframe.onload = () => {
-      try {
-        iframe.contentWindow.alert = () => {};
-        const doc = iframe.contentDocument;
-        const token = doc.querySelector('input[name="token"]')?.value;
-        if (!token) { finish({ ok: false, msg: '无法获取 token' }); return; }
-        const form = doc.createElement('form');
-        form.method = 'POST';
-        form.action = BASE + '/xkBks.vxkBksXkbBs.do';
-        postFields.token = token;
-        for (const [k, v] of Object.entries(postFields)) {
-          const inp = doc.createElement('input');
-          inp.type = 'hidden'; inp.name = k; inp.value = v;
-          form.appendChild(inp);
-        }
-        doc.body.appendChild(form);
-        iframe.onload = () => {
-          try { iframe.contentWindow.alert = () => {}; } catch (e) {}
-          setTimeout(() => finish({ ok: true, submitted: true }), 500);
-        };
-        form.submit();
-      } catch (e) { finish({ ok: false, msg: e.message }); }
-    };
-    iframe.src = searchUrl;
-    setTimeout(() => finish({ ok: false, msg: '加载超时' }), 30000);
-  });
+  try {
+    // 1) GET 搜索页，提取 token
+    const html = await fetchPage(searchUrl);
+    const tokenMatch = html.match(/name="token"\s+value="([^"]+)"/);
+    if (!tokenMatch) return { ok: false, msg: '无法获取 token' };
+
+    // 2) POST 表单数据
+    postFields.token = tokenMatch[1];
+    const resp = await fetch(BASE + '/xkBks.vxkBksXkbBs.do', {
+      method: 'POST',
+      credentials: 'include',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams(postFields),
+    });
+    if (!resp.ok) return { ok: false, msg: 'HTTP ' + resp.status };
+
+    // 3) 读响应 HTML，检测是否需要排队
+    const buf = await resp.arrayBuffer();
+    const respText = new TextDecoder('gbk').decode(buf);
+    if (respText.includes('accessDenied')) return { ok: false, msg: '操作被拒绝' };
+    if (respText.includes('加入队列成功')) return { ok: true, submitted: true, msg: '已加入候补队列' };
+    if (respText.includes('选课成功')) return { ok: true, submitted: true, msg: '选课成功' };
+
+    // 4) 检测是否弹出"是否排队"的 confirm
+    // 服务器返回 confirm("课程xxx 已满...是否排队？") → 需要再次 POST m=saveBksKcDl
+    // 关键：第二次 POST 必须用响应页面里的新 token（第一次的 token 已被消耗）
+    const isQueueConfirm = respText.includes('是否排队') && respText.includes('saveBksKcDl');
+    if (isQueueConfirm) {
+      await new Promise(r => setTimeout(r, 1500));
+      // 从第一次 POST 响应中提取新 token（原 token 已被消耗）
+      const newTokenMatch = respText.match(/name="token"\s+value="([^"]+)"/);
+      const queueFields = { ...postFields, m: 'saveBksKcDl' };
+      if (newTokenMatch) queueFields.token = newTokenMatch[1];
+      const queueResp = await fetch(BASE + '/xkBks.vxkBksXkbBs.do', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams(queueFields),
+      });
+      if (!queueResp.ok) return { ok: false, msg: '排队提交 HTTP ' + queueResp.status };
+      const qBuf = await queueResp.arrayBuffer();
+      const qText = new TextDecoder('gbk').decode(qBuf);
+      if (qText.includes('加入队列成功')) return { ok: true, submitted: true, msg: '已加入候补队列' };
+      if (qText.includes('选课成功')) return { ok: true, submitted: true, msg: '选课成功' };
+      return { ok: true, submitted: true };
+    }
+
+    return { ok: true, submitted: true };
+  } catch (e) {
+    console.error('[NextTHUxk] fetchFormSubmit ERROR:', e);
+    return { ok: false, msg: e.message };
+  }
 };
 
 NX.submitCourse = async function (code, seq, zy, flag) {
-  const { state, iframeFormSubmit, fetchSelectedCourses } = NX;
+  const { state, fetchFormSubmit, fetchSelectedCourses } = NX;
   const { SEM, BASE } = state;
   zy = zy || 3;
   flag = flag || 'bx';
@@ -302,19 +323,42 @@ NX.submitCourse = async function (code, seq, zy, flag) {
   fields[zyName] = String(zy);
   if (flag === 'rx') { fields.is_zyrxk = '1'; fields.p_rxklxm = ''; }
   if (flag === 'ty') { fields.rxTyType = ''; }
-  const res = await iframeFormSubmit(searchUrl, fields);
+  const res = await fetchFormSubmit(searchUrl, fields);
   if (!res.submitted) return res;
-  await new Promise(r => setTimeout(r, 1500));
+  // 等待服务器处理（排队流程内部已有 1.5s + POST 时间，这里再等 2s 让候补列表更新）
+  await new Promise(r => setTimeout(r, 2000));
+  // 验证：已选列表或候补队列中出现即视为成功
   const sel = await fetchSelectedCourses();
-  const found = sel.some(s => s.code === code && String(s.seq) === String(seq));
-  return found ? { ok: true, msg: '选课成功' } : { ok: false, msg: '选课未生效，请确认课程类型是否正确' };
+  const foundSelected = sel.some(s => s.code === code && String(s.seq) === String(seq));
+  if (foundSelected) return { ok: true, msg: '选课成功' };
+  // 已满课提交后可能进入候补队列而非直接选上
+  const cand = await NX.fetchCandidateCourses();
+  const foundQueue = cand.some(s => s.code === code && String(s.seq) === String(seq));
+  return foundQueue ? { ok: true, msg: '已加入候补队列' } : { ok: false, msg: '选课未生效，请确认课程类型是否正确' };
 };
 
 NX.dropCourse = async function (code, seq) {
-  const { state, iframeFormSubmit, fetchSelectedCourses } = NX;
+  const { state, fetchFormSubmit, fetchSelectedCourses } = NX;
   const { SEM, BASE } = state;
+  // 判断是候补课程还是已选课程
+  const cand = state.candidateCourses || [];
+  const isQueue = cand.some(c => c.code === code && String(c.seq) === String(seq));
+  if (isQueue) {
+    // 候补课程：m=dlDelete，从 dlSearchTab 页面拿 token
+    const searchUrl = BASE + '/xkBks.vxkBksXkbBs.do?m=dlSearchTab&p_xnxq=' + SEM;
+    const res = await fetchFormSubmit(searchUrl, {
+      m: 'dlDelete', p_xnxq: SEM, page: '',
+      'p_del_id': SEM + ';' + code + ';' + seq + ';',
+    });
+    if (!res.submitted) return res;
+    await new Promise(r => setTimeout(r, 1500));
+    const newCand = await NX.fetchCandidateCourses();
+    const still = newCand.some(s => s.code === code && String(s.seq) === String(seq));
+    return still ? { ok: false, msg: '退出队列未生效，请稍后重试' } : { ok: true, msg: '已退出候补队列' };
+  }
+  // 已选课程：m=deleteYxk
   const searchUrl = BASE + '/xkBks.vxkBksXkbBs.do?m=yxSearchTab&p_xnxq=' + SEM + '&tokenPriFlag=yx';
-  const res = await iframeFormSubmit(searchUrl, {
+  const res = await fetchFormSubmit(searchUrl, {
     m: 'deleteYxk', p_xnxq: SEM, page: '',
     tokenPriFlag: 'yx', tk: '', jhzy_kch: '', jhzy_kxh: '', jhzy_zy: '',
     'p_del_id': SEM + ';' + code + ';' + seq + ';',
@@ -327,10 +371,10 @@ NX.dropCourse = async function (code, seq) {
 };
 
 NX.changeVolunteer = async function (code, seq, targetZy) {
-  const { state, iframeFormSubmit } = NX;
+  const { state, fetchFormSubmit } = NX;
   const { SEM, BASE } = state;
   const searchUrl = BASE + '/xkBks.vxkBksXkbBs.do?m=yxSearchTab&p_xnxq=' + SEM + '&tokenPriFlag=yx';
-  const res = await iframeFormSubmit(searchUrl, {
+  const res = await fetchFormSubmit(searchUrl, {
     m: 'changeZY', p_xnxq: SEM, tokenPriFlag: 'yx', page: '',
     tk: '', jhzy_kch: code, jhzy_kxh: seq, jhzy_zy: String(targetZy),
   });

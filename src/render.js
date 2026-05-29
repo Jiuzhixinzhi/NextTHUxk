@@ -92,8 +92,25 @@ NX.renderCourses = function (list) {
         ? '<span class="nx-inline-prob" style="color:' + (cand ? '#ff9500' : qd.qRemaining > 0 ? '#34c759' : '#ff3b30') + '">' + (cand ? '排队第' + cand.myPos + '名' : qd.qRemaining > 0 ? '余' + qd.qRemaining : '已满') + '</span>'
         : '<span class="nx-inline-prob nx-card-inline-prob" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" style="color:' + p.color + '">' + (p.percentLabel || p.label) + '</span>';
       selectBtn = '<select class="nx-type-select" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '">' + flagOpts + '</select><select class="nx-zy-select" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '"><option value="3">3志愿</option><option value="2">2志愿</option><option value="1">1志愿</option></select>' + probInline + '<button class="nx-select-btn" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '">选课</button><button class="nx-stage-btn nx-add-stage" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '"' + (inStage ? ' disabled' : '') + '>' + (inStage ? '已暂存' : '暂存') + '</button>';
+    } else if (c.isCandidate && cand) {
+      // 已在候补队列中：显示排队位置 + 删除按钮
+      selectBtn = '<span style="font-size:11px;color:#ff9500;font-weight:600">排队第' + cand.myPos + '名 / 共' + cand.queueTotal + '人</span>' +
+        '<button class="nx-drop-btn" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '">删除</button>';
     } else {
-      selectBtn = '<span style="font-size:11px;color:#86868b">已满</span>';
+      // 已满但未在队列：允许排队选课
+      const inStage = stageCart.some(s => s.code === c.code && String(s.seq) === String(c.seq || '0'));
+      const aFlags = allowedFlags(defFlag);
+      const flagOpts = aFlags.map(f => '<option value="' + f + '"' + (defFlag === f ? ' selected' : '') + '>' + (f === 'bx' ? '必修' : f === 'xx' ? '限选' : f === 'rx' ? '任选' : '体育') + '</option>').join('');
+      const p = currentProbMeta(c, currentFlag, currentZy);
+      const probInline = isQueuePhase && (qd || cand)
+        ? '<span class="nx-inline-prob" style="color:' + (cand ? '#ff9500' : qd.qRemaining > 0 ? '#34c759' : '#ff3b30') + '">' + (cand ? '排队第' + cand.myPos + '名' : qd.qRemaining > 0 ? '余' + qd.qRemaining : '已满') + '</span>'
+        : '<span class="nx-inline-prob nx-card-inline-prob" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" style="color:' + p.color + '">' + (p.percentLabel || p.label) + '</span>';
+      selectBtn = '<span style="font-size:10px;color:#ff3b30;font-weight:600;margin-right:2px">⚠ 已满</span>' +
+        '<select class="nx-type-select" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '">' + flagOpts + '</select>' +
+        '<select class="nx-zy-select" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '"><option value="3">3志愿</option><option value="2">2志愿</option><option value="1">1志愿</option></select>' +
+        probInline +
+        '<button class="nx-select-btn" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" style="background:linear-gradient(135deg,#ff9500,#f59e0b)">排队选课</button>' +
+        '<button class="nx-stage-btn nx-add-stage" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '"' + (inStage ? ' disabled' : '') + '>' + (inStage ? '已暂存' : '暂存') + '</button>';
     }
     return '<div class="nx-card' + (c.selected ? ' nx-selected' : '') + '" data-code="' + esc(c.code) + '" data-tid="' + esc(c.teacherId || '') + '">' +
       '<div class="nx-card-head"><span class="nx-card-name">' + esc(c.name) + '</span><span class="nx-card-credit">' + c.credits + '学分</span></div>' +
@@ -152,25 +169,27 @@ NX.renderCourses = function (list) {
       const actions = btn.parentElement;
       const flag = actions.querySelector('.nx-type-select')?.value || 'bx';
       const zy = actions.querySelector('.nx-zy-select')?.value || '3';
+      const origText = btn.textContent;
       btn.disabled = true; btn.textContent = '提交中…';
       try {
         const res = await submitCourse(code, seq, parseInt(zy), flag);
         showXkResult(res);
         if (res.ok) await refreshSelected();
       } catch (e) { showXkResult({ ok: false, msg: e.message }); }
-      finally { btn.disabled = false; btn.textContent = '选课'; }
+      finally { btn.disabled = false; btn.textContent = origText; }
     };
   });
   el.querySelectorAll('.nx-drop-btn').forEach(btn => {
     btn.onclick = async e => {
       e.stopPropagation();
-      btn.disabled = true; btn.textContent = '退选中…';
+      const origText = btn.textContent;
+      btn.disabled = true; btn.textContent = origText.includes('删除') ? '退出中…' : '退选中…';
       try {
         const res = await dropCourse(btn.dataset.code, btn.dataset.seq);
         showXkResult(res);
         if (res.ok) await refreshSelected();
       } catch (e) { showXkResult({ ok: false, msg: e.message }); }
-      finally { btn.disabled = false; btn.textContent = '退选'; }
+      finally { btn.disabled = false; btn.textContent = origText; }
     };
   });
   el.querySelectorAll('.nx-vol-btn').forEach(btn => {
@@ -631,9 +650,9 @@ NX.filterCourses = function () {
   if (f === 'available') list = list.filter(c => c.available);
   else if (f === 'selected') {
     const seen = new Set();
-    const candCodes = new Set(candidateCourses.map(c => c.code));
+    const candKeys = new Set(candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
     list = list.filter(c => {
-      if (!c.selected && !c.isCandidate && !candCodes.has(c.code)) return false;
+      if (!c.selected && !c.isCandidate && !candKeys.has(c.code + '_' + (c.seq || '0'))) return false;
       const k = c.code + '_' + (c.seq || '0');
       if (seen.has(k)) return false;
       seen.add(k); return true;
@@ -643,8 +662,8 @@ NX.filterCourses = function () {
   else if (f === 'elective') list = list.filter(c => c.attr === '限选');
   else if (f === 'sports') list = list.filter(c => c.attr === '体育' || (c.department || '').includes('体育') || (c.department || '').includes('体武'));
   else if (f === 'queue') {
-    const qCodes = new Set(candidateCourses.map(c => c.code));
-    list = list.filter(c => qCodes.has(c.code));
+    const qKeys = new Set(candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
+    list = list.filter(c => qKeys.has(c.code + '_' + (c.seq || '0')));
   }
   if (activeGroup) list = list.filter(c => (c.group || c.attr) === activeGroup);
   const cf = $('nx-filter-credits')?.value;
