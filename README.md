@@ -6,6 +6,8 @@
 
 > **建议使用方式二（解压加载）**。Chrome / Edge 已收紧外部 .crx 安装策略，直接拖入 .crx 可能被拦截。解压加载在所有浏览器均可正常使用。
 
+> 🚀 校内访问 [git.tsinghua.edu.cn/gjl25/NextTHUxk](https://git.tsinghua.edu.cn/gjl25/NextTHUxk) 下载速度更快。
+
 ### 方式一：.crx 拖入安装（Chrome / Arc）
 
 1. 从 [Releases](https://github.com/smartThise/NextTHUxk/releases) 下载 `NextTHUxk.crx`
