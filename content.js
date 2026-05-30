@@ -195,27 +195,37 @@ NX.launch = async function launch() {
       state.GRADE = 0;
     }
     const needCatalog = !sd || !sd.catalog || sd.catalog.length < 100;
-    const needVol = volNeedsRefresh(sd?.volTs);
+    const needVol = !needCatalog && volNeedsRefresh(sd?.volTs);
     let catalog = sd?.catalog || [];
     let plan = sd?.plan || [];
-    let volData = sd?.volData || {};
     let volTs = sd?.volTs || 0;
     if (needCatalog) {
-      console.log(TAG, 'fetching catalog + plan...');
-      const [p, c] = await Promise.all([
+      console.log(TAG, 'fetching catalog + plan + volunteer...');
+      [plan, catalog] = await Promise.all([
         fetchTrainingPlan().catch(e => { console.warn(TAG, 'plan:', e); return []; }),
         fetchCourseCatalog().catch(e => { console.warn(TAG, 'catalog:', e); return []; }),
       ]);
-      plan = p; catalog = c;
-    }
-    if (needCatalog || needVol) {
-      console.log(TAG, needVol ? 'volunteer data stale, refreshing...' : 'fetching volunteer data...');
-      volData = await fetchVolunteer().catch(e => { console.warn(TAG, 'volunteer:', e); return {}; });
       volTs = Date.now();
+    } else if (needVol) {
+      console.log(TAG, 'volunteer data stale, refreshing...');
+      volTs = Date.now();
+    } else if (sd?.courses?.length) {
+      // 🚀 缓存命中！直接用 merge 好的 courses，跳过所有爬虫
+      console.log(TAG, 'using cached', sd.courses.length, 'courses');
+      state.planData = sd.plan || [];
+      state.allCourses = sd.courses;
+      plan = sd.plan; volTs = sd.volTs || 0;
     }
-    sd = { ver: DATA_VER, plan, catalog, volData, volTs, ts: sd?.ts || Date.now() };
-    if (needCatalog) sd.ts = Date.now();
-    await store.set('staticData', sd);
+    // 需要 merge: needCatalog / needVol / 旧格式没有 courses 缓存
+    const needMerge = needCatalog || needVol || !sd?.courses?.length;
+    if (needMerge) {
+      const volData = await fetchVolunteer().catch(e => { console.warn(TAG, 'volunteer:', e); return {}; });
+      state.planData = plan;
+      state.allCourses = mergeStaticData(catalog, volData, plan);
+      // 存 catalog（供下次 re-merge）+ merged courses（供下次秒加载），不存 volData
+      sd = { ver: DATA_VER, plan, catalog, courses: state.allCourses, volTs, ts: needCatalog ? Date.now() : (sd?.ts || Date.now()) };
+      await store.set('staticData', sd);
+    }
 
     const [selectedCourses, qResult] = await Promise.all([
       fetchSelectedCourses().catch(e => { console.warn(TAG, 'selected:', e); return []; }),
@@ -229,9 +239,6 @@ NX.launch = async function launch() {
     } else {
       state.candidateCourses = [];
     }
-
-    state.planData = plan;
-    state.allCourses = mergeStaticData(catalog, volData, plan);
     // isCandidate 必须在 mergeStaticData 之后设置，否则新数组会丢失标记
     if (state.candidateCourses.length) {
       const candCodes = new Set(state.candidateCourses.map(c => c.code));
