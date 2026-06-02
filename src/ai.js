@@ -64,6 +64,7 @@ NX.aiSearch = async function () {
         conflictWith: conflicts.map(cf => cf.name).join(', '),
         available: c.available, selected: c.selected,
         tongshiGroup: c.tongshiGroup, courseFeature: c.courseFeature, grade: c.grade,
+        note: c.xkTextNote || '',
       };
     });
 
@@ -136,7 +137,7 @@ NX.callAI = async function () {
   try {
     const { allCourses, savedDrafts, SEM, GRADE } = state;
     const bxTyCourses = allCourses.filter(c => c.attr === '必修' || c.attr === '体育' || (c.department || '').includes('体育')).map(c =>
-      ({ name: c.name, code: c.code, seq: c.seq || '', credits: c.credits, time: c.time || '', teacher: c.teacher || '', available: c.available, attr: c.attr, remaining: c.remaining }));
+      ({ name: c.name, code: c.code, seq: c.seq || '', credits: c.credits, time: c.time || '', teacher: c.teacher || '', available: c.available, attr: c.attr, remaining: c.remaining, note: c.xkTextNote || '' }));
     const selectedInfo = allCourses.filter(c => c.selected).map(c => ({ name: c.name, code: c.code, seq: c.seq, credits: c.credits, time: c.time, zy: c.zy, typeLabel: c.typeLabel }));
     const selectedCredits = selectedInfo.reduce((s, c) => s + (c.credits || 0), 0);
     const draftsInfo = savedDrafts.map(d => ({ name: d.name, courses: d.courses.map(c => ({ name: c.name, code: c.code, seq: c.seq, time: c.time, flag: c.flag, zy: c.zy, credits: c.credits })) }));

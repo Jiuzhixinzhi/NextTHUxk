@@ -69,6 +69,7 @@ NX.renderCourses = function (list) {
       ? '<div style="font-size:10px;color:#ff3b30;margin-top:3px;display:flex;gap:4px;align-items:center;flex-wrap:wrap"><span>⚠ 冲突:</span>' + pConflicts.slice(0, 3).map(cf => '<span style="background:rgba(255,59,48,.1);padding:1px 6px;border-radius:4px">' + cf.day + cf.slot + ' ' + esc(cf.name) + '</span>').join('') + '</div>'
       : '';
     const detail = [c.capacity ? '容量' + c.capacity : '', c.remaining !== undefined ? '余' + c.remaining : ''].filter(Boolean).join(' · ');
+    const noteHtml = c.xkTextNote ? '<div style="font-size:11px;color:#ff9500;margin-top:4px;padding:3px 8px;background:rgba(255,149,0,.06);border-radius:4px;line-height:1.4">📝 ' + esc(c.xkTextNote) + '</div>' : '';
     let selectBtn;
     if (c.selected) {
       const volLabel = c.zy ? '<span class="nx-vol-info">第' + c.zy + '志愿 · ' + esc(c.typeLabel || '') + '</span>' : '';
@@ -116,7 +117,7 @@ NX.renderCourses = function (list) {
       '<div class="nx-card-head"><span class="nx-card-name">' + esc(c.name) + '</span><span class="nx-card-credit">' + c.credits + '学分</span></div>' +
       '<div style="font-size:11px;color:#86868b;margin-bottom:3px">' + esc(c.code) + (c.seq ? ' · ' + esc(c.seq) + '课序' : '') + '</div>' +
       '<div class="nx-tags">' + tags.join('') + '</div>' +
-      (isQueuePhase && (qd || cand) ? queueInfoHtml : volHtml + compHtml + currentProbHtml + probHtml) + conflictHtml +
+      (isQueuePhase && (qd || cand) ? queueInfoHtml : volHtml + compHtml + currentProbHtml + probHtml) + conflictHtml + noteHtml +
       '<div class="nx-card-detail"><div class="nx-card-detail-inner">' + detail + '</div></div>' +
       '<div class="nx-card-actions">' +
       '<button class="nx-detail-btn" data-code="' + esc(c.code) + '" data-tid="' + esc(c.teacherId || '') + '">📄 简介</button>' +
