@@ -189,7 +189,7 @@ NX.fetchCourseCatalog = async function () {
   if (!state.isZhjwxk) return [];
   const { SEM, BASE } = state;
   const all = [];
-  for (let p = -1; p <= 200; p++) {
+  for (let p = -1; p <= 300; p++) {
     const url = p === -1
       ? BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM
       : BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM + '&page=' + p;
