@@ -10,7 +10,7 @@ NX.browser = typeof browser !== 'undefined' ? browser : chrome;
 NX.TAG = '[NextTHUxk]';
 NX.SP = 'nextthuxk_';
 NX.DATA_VER = 5;
-NX.CUR_VER = '1.3.14';
+NX.CUR_VER = '1.3.15';
 NX.DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 NX.ZY_LIMITS = {
   bx: [[1,1],[2,2],[3,Infinity]], // 必修：1志愿1门, 2志愿2门, 3志愿无限
@@ -60,9 +60,18 @@ NX.store = {
     );
   },
   set(k, v) {
-    return new Promise(r =>
-      NX.browser.storage.local.set({ [NX.SP + k]: v }, r)
-    );
+    // Promise 形式：Chrome (MV3, callback 无参，错误走 runtime.lastError) 与
+    // Firefox (Promise API) 均兼容；配额写失败会 reject + 打日志，不再静默。
+    return new Promise((resolve, reject) => {
+      try {
+        let p = NX.browser.storage.local.set({ [NX.SP + k]: v });
+        if (p && typeof p.then === 'function') {
+          p.then(resolve, err => { console.warn(NX.TAG, 'storage.set', NX.SP + k, 'FAILED:', (err && err.message) || err); reject(err); });
+        } else {
+          resolve();
+        }
+      } catch (e) { console.warn(NX.TAG, 'storage.set threw:', e); reject(e); }
+    });
   },
 };
 

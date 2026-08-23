@@ -18,11 +18,11 @@ NX.fmtVol = function (v) {
 NX.volColor = function (course) {
   const cap = course.volCapacity || course.capacity || 0;
   const applied = course.volApplied || 0;
-  if (!cap || cap === 0) return { level: 'unknown', color: '#86868b', bg: 'rgba(134,134,139,.08)', pct: 0 };
+  if (!cap || cap === 0) return { level: 'unknown', color: '#9aa1ac', bg: 'rgba(154,161,172,.08)', pct: 0 };
   const ratio = applied / cap;
-  if (ratio <= 0.8) return { level: 'easy', color: '#34c759', bg: 'rgba(52,199,89,.1)', pct: Math.min(ratio * 100, 100) };
-  if (ratio <= 1.2) return { level: 'medium', color: '#ff9500', bg: 'rgba(255,149,0,.1)', pct: Math.min(ratio * 100, 100) };
-  return { level: 'hard', color: '#ff3b30', bg: 'rgba(255,59,48,.1)', pct: Math.min(ratio * 100, 100) };
+  if (ratio <= 0.8) return { level: 'easy', color: '#07c160', bg: 'rgba(7,193,96,.1)', pct: Math.min(ratio * 100, 100) };
+  if (ratio <= 1.2) return { level: 'medium', color: '#ff9f1a', bg: 'rgba(255,159,26,.1)', pct: Math.min(ratio * 100, 100) };
+  return { level: 'hard', color: '#ee4d4d', bg: 'rgba(238,77,77,.1)', pct: Math.min(ratio * 100, 100) };
 };
 
 NX.parseVolArr = function (s) {
@@ -39,14 +39,14 @@ NX.parseVolArr = function (s) {
 
 NX.calcProb = function (course, flag, zy) {
   const cap = parseInt(course.volCapacity || course.capacity || 0, 10) || 0;
-  if (!cap) return { prob: -1, label: '无数据', color: '#86868b' };
+  if (!cap) return { prob: -1, label: '无数据', color: '#9aa1ac' };
 
   const zyIdx = zy - 1;
 
   // 体育：独立级联，只看体育志愿
   if (flag === 'ty') {
     const vols = NX.parseVolArr(course.volSports);
-    if (!vols) return { prob: -1, label: '无数据', color: '#86868b' };
+    if (!vols) return { prob: -1, label: '无数据', color: '#9aa1ac' };
     let rem = cap;
     for (let i = 0; i < zyIdx; i++) rem -= vols[i];
     return NX.probResult(rem, vols[zyIdx]);
@@ -89,22 +89,22 @@ NX.calcProb = function (course, flag, zy) {
     for (let i = 0; i < 3; i++) rem -= rxV[i];
   }
 
-  return { prob: -1, label: '无数据', color: '#86868b' };
+  return { prob: -1, label: '无数据', color: '#9aa1ac' };
 };
 
 NX.probResult = function (rem, applicants) {
   if (!Number.isFinite(rem) || !Number.isFinite(applicants)) {
-    return { prob: -1, label: '无数据', percentLabel: '无数据', ratioLabel: '无数据', color: '#86868b' };
+    return { prob: -1, label: '无数据', percentLabel: '无数据', ratioLabel: '无数据', color: '#9aa1ac' };
   }
   const remShown = Math.max(0, Math.round(rem));
   const applicantsShown = Math.max(0, Math.round(applicants));
-  if (rem <= 0) return { prob: 0, label: '0%', percentLabel: '0%', ratioLabel: remShown + '/' + applicantsShown, color: '#ff3b30' };
+  if (rem <= 0) return { prob: 0, label: '0%', percentLabel: '0%', ratioLabel: remShown + '/' + applicantsShown, color: '#ee4d4d' };
   const prob = applicants === 0 ? 1 : Math.min(1, rem / applicants);
-  if (!Number.isFinite(prob)) return { prob: -1, label: '无数据', percentLabel: '无数据', ratioLabel: '无数据', color: '#86868b' };
+  if (!Number.isFinite(prob)) return { prob: -1, label: '无数据', percentLabel: '无数据', ratioLabel: '无数据', color: '#9aa1ac' };
   let color;
-  if (prob >= 0.8) color = '#34c759';
-  else if (prob >= 0.5) color = '#ff9500';
-  else color = '#ff3b30';
+  if (prob >= 0.8) color = '#07c160';
+  else if (prob >= 0.5) color = '#ff9f1a';
+  else color = '#ee4d4d';
   const percentLabel = Math.round(prob * 100) + '%';
   const ratioLabel = remShown + '/' + applicantsShown;
   return { prob, label: percentLabel, percentLabel, ratioLabel, color };
@@ -115,10 +115,10 @@ NX.flagName = function (flag) {
 };
 
 NX.probBg = function (color) {
-  if (color === '#34c759') return 'rgba(52,199,89,.14)';
-  if (color === '#ff9500') return 'rgba(255,149,0,.14)';
-  if (color === '#ff3b30') return 'rgba(255,59,48,.14)';
-  return 'rgba(142,142,147,.12)';
+  if (color === '#07c160') return 'rgba(7,193,96,.14)';
+  if (color === '#ff9f1a') return 'rgba(255,159,26,.14)';
+  if (color === '#ee4d4d') return 'rgba(238,77,77,.14)';
+  return 'rgba(154,161,172,.12)';
 };
 
 NX.currentProbMeta = function (course, flag, zy) {
@@ -151,10 +151,10 @@ NX.fullProbGrid = function (courseOrAc, bf) {
       if (p.prob >= 0) {
         cells.push('<span style="color:' + p.color + ';font-weight:600">' + z + '志愿:' + p.label + '</span>');
       } else {
-        cells.push('<span style="color:#86868b">' + z + '志愿:' + p.label + '</span>');
+        cells.push('<span style="color:#9aa1ac">' + z + '志愿:' + p.label + '</span>');
       }
     }
-    rows.push('<span style="color:#86868b;font-size:9px">' + NX.flagName(f) + '</span> ' + cells.join(' '));
+    rows.push('<span style="color:#9aa1ac;font-size:9px">' + NX.flagName(f) + '</span> ' + cells.join(' '));
   }
   return rows.length ? '<div style="margin-top:3px;line-height:1.4;font-size:9px">' + rows.join('<br>') + '</div>' : '';
 };
