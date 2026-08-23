@@ -162,6 +162,13 @@ function toggle(show) {
 
 // ─── Launch (expose globally for handlePreviewRemove) ─────────
 NX.launch = async function launch() {
+  if (state.launching) {   // 并发锁：双击刷新/多入口同时触发会双倍抓取流量
+    NX.showXkResult({ ok: false, msg: '正在加载中，请稍候…' });
+    return;
+  }
+  state.launching = true;
+  const FIN = () => { state.launching = false; };
+  const SEM0 = state.SEM;   // 学期切换竞态防护：写缓存前校验
   const { fmtTime } = NX;
   toggle(true);
   // Resolve semester
@@ -194,9 +201,11 @@ NX.launch = async function launch() {
       await store.set('grade', 0);
       state.GRADE = 0;
     }
-    const needCatalog = !sd || !sd.catalog || sd.catalog.length < 100;
+    const needCatalog = !sd || !sd.courses || sd.courses.length < 100;
     const needVol = !needCatalog && volNeedsRefresh(sd?.volTs);
-    let catalog = sd?.catalog || [];
+    // re-merge 数据源：新缓存无 catalog 副本（v1.3.5 起只存 merged courses，存储减半），
+    // courses 是 catalog 字段超集，可直接作 merge 输入；旧缓存仍可用 catalog
+    let catalog = sd?.catalog || sd?.courses || [];
     let plan = sd?.plan || [];
     let volTs = sd?.volTs || 0;
     if (needCatalog) {
@@ -222,9 +231,12 @@ NX.launch = async function launch() {
       const volData = await fetchVolunteer().catch(e => { console.warn(TAG, 'volunteer:', e); return {}; });
       state.planData = plan;
       state.allCourses = mergeStaticData(catalog, volData, plan);
-      // 存 catalog（供下次 re-merge）+ merged courses（供下次秒加载），不存 volData
-      sd = { ver: DATA_VER, plan, catalog, courses: state.allCourses, volTs, ts: needCatalog ? Date.now() : (sd?.ts || Date.now()) };
-      await store.set('staticData', sd);
+      // 只存 merged courses（不存 catalog 副本，体积约减半）；
+      // 若期间用户切换了学期（SEM 变化），弃写缓存以免旧学期数据覆盖新学期空缓存
+      if (state.SEM === SEM0) {
+        sd = { ver: DATA_VER, plan, courses: state.allCourses, volTs, ts: needCatalog ? Date.now() : (sd?.ts || Date.now()) };
+        await store.set('staticData', sd);
+      }
     }
 
     const [selectedCourses, qResult] = await Promise.all([
@@ -249,6 +261,7 @@ NX.launch = async function launch() {
     const zyCacheInit = (await store.get('zyCache')) || {};
     const cacheUpdatedInit = await resolveCourseZy(state.allCourses, selMap, zyCacheInit);
     if (cacheUpdatedInit) await store.set('zyCache', zyCacheInit);
+    NX.rebuildCourseMap();   // code+seq → course 索引，渲染/查询统一 O(1)
 
     renderCourses(state.allCourses);
     renderPlan(state.planData);
@@ -272,7 +285,7 @@ NX.launch = async function launch() {
 
     const cacheEl = $('nextthuxk-cache-info');
     if (cacheEl) {
-      const catAge = Math.round((Date.now() - sd.ts) / 60000);
+      const catAge = Math.round((Date.now() - (sd?.ts || Date.now())) / 60000);
       cacheEl.innerHTML = state.isQueuePhase
         ? '课余量实时数据 · ' + Object.keys(state.queueDataMap).length + '门'
         : '课程数据 ' + catAge + '分钟前 · 志愿排队 ' + fmtTime(volTs);
@@ -295,7 +308,7 @@ NX.launch = async function launch() {
     if (qRefreshBtn) qRefreshBtn.style.display = (state.isQueuePhase || state.candidateCourses.length) ? 'inline-block' : 'none';
   } catch (e) {
     listEl.innerHTML = '<div class="nx-empty nx-st err">❌ ' + NX.esc(e.message) + '</div>';
-  }
+  } finally { FIN(); }
   checkUpdate();
 };
 
@@ -323,7 +336,7 @@ $('nextthuxk-refresh-queue').onclick = async () => {
   if (btn) { btn.textContent = '📊 刷新队列'; btn.disabled = false; }
   showXkResult({ ok: true, msg: '队列数据已刷新 · ' + Object.keys(state.queueDataMap).length + '门课余量 · ' + state.candidateCourses.length + '门我的队列' });
 };
-$('nextthuxk-search').oninput = filterCourses;
+$('nextthuxk-search').oninput = NX.debounce(NX.filterCourses, 120);
 $('nextthuxk-search-clear').onclick = () => {
   $('nextthuxk-search').value = '';
   filterCourses();
@@ -338,7 +351,7 @@ $('nx-filter-feature').onchange = filterCourses;
 $('nx-filter-grade-filter').onchange = filterCourses;
 $('nx-filter-bksrem').onchange = filterCourses;
 $('nx-filter-yjsrem').onchange = filterCourses;
-$('nx-filter-xknote').oninput = filterCourses;
+$('nx-filter-xknote').oninput = NX.debounce(NX.filterCourses, 120);
 $('nextthuxk-sem').onclick = async () => {
   const s = prompt('修改学期（格式：2026-2027-1）：', state.SEM);
   if (s && s.trim()) {
@@ -346,6 +359,8 @@ $('nextthuxk-sem').onclick = async () => {
     await store.set('sem', state.SEM);
     $('nextthuxk-sem').textContent = state.SEM;
     await store.set('staticData', null);
+    // 等待进行中的旧 launch 结束（其会在 SEM 已变时弃写缓存），再以新学期重启
+    while (state.launching) await new Promise(r => setTimeout(r, 200));
     NX.launch();
   }
 };

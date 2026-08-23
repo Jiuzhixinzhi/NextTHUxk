@@ -4,14 +4,14 @@
 var NX = NX || {};
 
 // ─── Course Card Rendering ────────────────────────────────────
+// 渐进渲染：只渲染视口内+预载距离的卡片（原实现一次 innerHTML 全量 6000+ 卡，
+// 数十万 DOM 节点 + 每按钮闭包，是内存占用巨大/卡顿的主因）
+NX.RENDER_CHUNK = 80;
 
-NX.renderCourses = function (list) {
-  const { esc, state, volColor, fmtVol, baseFlag, allowedFlags, currentProbMeta, currentProbLine, fullProbGrid, typeCodeToFlag, calcProb, probBg, findPreviewConflicts, showCourseModal, submitCourse, dropCourse, changeVolunteer, addToStage, refreshSelected, showXkResult } = NX;
-  const { allCourses, stageCart, queueDataMap, isQueuePhase, candidateCourses } = state;
-  const $ = state.$;
-  const el = $('nextthuxk-list');
-  if (!list.length) { el.innerHTML = '<div class="nx-empty">暂无匹配课程</div>'; return; }
-  el.innerHTML = list.map(c => {
+NX.courseCardHtml = function (c, ctx) {
+  const { esc, state, volColor, fmtVol, baseFlag, allowedFlags, currentProbMeta, currentProbLine, fullProbGrid, typeCodeToFlag, findPreviewConflicts } = NX;
+  const { queueDataMap, isQueuePhase } = state;
+  const stageSet = ctx.stageSet;
     const tags = [];
     if (c.available) tags.push('<span class="nx-tag nx-tag-ok">可选</span>');
     else tags.push('<span class="nx-tag nx-tag-no">已满</span>');
@@ -44,7 +44,7 @@ NX.renderCourses = function (list) {
     const probHtml = fullProbGrid(c, defFlag);
     const qKey = c.code + '_' + (c.seq || '0');
     const qd = queueDataMap[qKey];
-    const cand = candidateCourses.find(cc => cc.code === c.code && String(cc.seq) === String(c.seq || '0'));
+    const cand = ctx.candMap.get(qKey);
     let queueInfoHtml = '';
     if (isQueuePhase && (qd || cand)) {
       if (cand) {
@@ -82,10 +82,10 @@ NX.renderCourses = function (list) {
       const upBtn = canUp ? '<button class="nx-vol-btn" data-dir="up" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" data-zy="' + c.zy + '">▲</button>' : (c.zy > 1 ? '<button class="nx-vol-btn" disabled title="该志愿名额已满">▲</button>' : '');
       const downBtn = canDown ? '<button class="nx-vol-btn" data-dir="down" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" data-zy="' + c.zy + '">▼</button>' : (c.zy < 3 ? '<button class="nx-vol-btn" disabled title="该志愿名额已满">▼</button>' : '');
       const sFlag = typeCodeToFlag(c.typeCode);
-      const inStage = stageCart.some(s => s.code === c.code && String(s.seq) === String(c.seq || '0'));
+      const inStage = stageSet.has(c.code + '_' + String(c.seq || '0'));
       selectBtn = volLabel + probInline + upBtn + downBtn + '<button class="nx-stage-btn nx-add-stage-sel" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" data-flag="' + sFlag + '" data-zy="' + (c.zy || 3) + '"' + (inStage ? ' disabled' : '') + '>' + (inStage ? '已暂存' : '暂存') + '</button><button class="nx-drop-btn" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '">退选</button>';
     } else if (c.available) {
-      const inStage = stageCart.some(s => s.code === c.code && String(s.seq) === String(c.seq || '0'));
+      const inStage = stageSet.has(c.code + '_' + String(c.seq || '0'));
       const aFlags = allowedFlags(defFlag);
       const flagOpts = aFlags.map(f => '<option value="' + f + '"' + (defFlag === f ? ' selected' : '') + '>' + (f === 'bx' ? '必修' : f === 'xx' ? '限选' : f === 'rx' ? '任选' : '体育') + '</option>').join('');
       const p = currentProbMeta(c, currentFlag, currentZy);
@@ -99,7 +99,7 @@ NX.renderCourses = function (list) {
         '<button class="nx-drop-btn" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '">删除</button>';
     } else {
       // 已满但未在队列：允许排队选课
-      const inStage = stageCart.some(s => s.code === c.code && String(s.seq) === String(c.seq || '0'));
+      const inStage = stageSet.has(c.code + '_' + String(c.seq || '0'));
       const aFlags = allowedFlags(defFlag);
       const flagOpts = aFlags.map(f => '<option value="' + f + '"' + (defFlag === f ? ' selected' : '') + '>' + (f === 'bx' ? '必修' : f === 'xx' ? '限选' : f === 'rx' ? '任选' : '体育') + '</option>').join('');
       const p = currentProbMeta(c, currentFlag, currentZy);
@@ -122,24 +122,77 @@ NX.renderCourses = function (list) {
       '<div class="nx-card-actions">' +
       '<button class="nx-detail-btn" data-code="' + esc(c.code) + '" data-tid="' + esc(c.teacherId || '') + '">📄 简介</button>' +
       selectBtn + '</div></div>';
-  }).join('');
+};
 
-  // ── Bind Events on Cards ──
-  el.querySelectorAll('.nx-card').forEach(card => {
-    card.onclick = () => card.classList.toggle('open');
-  });
-  el.querySelectorAll('.nx-detail-btn').forEach(btn => {
-    btn.onclick = e => { e.stopPropagation(); showCourseModal(btn.dataset.code, btn.dataset.tid); };
-  });
+// ─── 渐进渲染 + 事件委托 ─────────────────────────────────────
+
+// 通用课程查找（优先 Map 索引，回退线性扫）
+NX.getCourse = function (code, seq) {
+  const { courseMap, allCourses } = NX.state;
+  const k = code + '_' + String(seq || '0');
+  if (courseMap) { const hit = courseMap.get(k); if (hit) return hit; }
+  return allCourses.find(x => x.code === code && String(x.seq || '0') === String(seq || '0'));
+};
+
+NX.rebuildCourseMap = function () {
+  const m = new Map();
+  for (const c of NX.state.allCourses) m.set(c.code + '_' + (c.seq || '0'), c);
+  NX.state.courseMap = m;
+};
+
+NX.renderCourses = function (list) {
+  const { state } = NX;
+  const $ = state.$;
+  const el = $('nextthuxk-list');
+  if (!el) return;
+  if (state.renderObserver) { state.renderObserver.disconnect(); state.renderObserver = null; }
+  state.renderList = list;
+  state.renderCursor = 0;
+  if (!list.length) { el.innerHTML = '<div class="nx-empty">暂无匹配课程</div>'; return; }
+  state.renderCtx = {
+    candMap: new Map(state.candidateCourses.map(cc => [cc.code + '_' + String(cc.seq || '0'), cc])),
+    stageSet: new Set(state.stageCart.map(s => s.code + '_' + String(s.seq || '0'))),
+  };
+  NX.bindCardDelegation(el);
+  el.innerHTML = '';
+  const sentinel = document.createElement('div');
+  sentinel.className = 'nx-render-sentinel';
+  el.appendChild(sentinel);
+  state.renderSentinel = sentinel;
+  NX.renderMoreCourses();
+  const io = new IntersectionObserver(entries => {
+    if (entries.some(en => en.isIntersecting)) NX.renderMoreCourses();
+  }, { root: el, rootMargin: '800px' });
+  io.observe(sentinel);
+  state.renderObserver = io;
+};
+
+NX.renderMoreCourses = function () {
+  const { state, courseCardHtml } = NX;
+  const { renderList, renderCursor, renderSentinel, renderCtx, renderObserver } = state;
+  if (!renderList || !renderSentinel) return;
+  if (renderCursor >= renderList.length) { if (renderObserver) renderObserver.disconnect(); return; }
+  const end = Math.min(renderCursor + NX.RENDER_CHUNK, renderList.length);
+  const parts = [];
+  for (let i = renderCursor; i < end; i++) parts.push(courseCardHtml(renderList[i], renderCtx));
+  renderSentinel.insertAdjacentHTML('beforebegin', parts.join(''));
+  state.renderCursor = end;
+  if (end >= renderList.length && renderObserver) renderObserver.disconnect();
+};
+
+// 事件委托：容器级 click/change 两个监听器，替代每批 8 次 querySelectorAll + 每按钮闭包
+NX.bindCardDelegation = function (el) {
+  if (el.dataset.nxDelegated) return;
+  el.dataset.nxDelegated = '1';
+  const { showCourseModal, submitCourse, dropCourse, changeVolunteer, addToStage, refreshSelected, showXkResult, baseFlag } = NX;
   const syncCardProb = node => {
     const card = node.closest('.nx-card');
     if (!card) return;
-    const code = card.dataset.code;
-    const course = allCourses.find(x => x.code === code && String(x.seq || '0') === String(node.dataset.seq || '0'));
+    const course = NX.getCourse(card.dataset.code, node.dataset.seq);
     if (!course || course.selected) return;
     const flag = card.querySelector('.nx-type-select')?.value || baseFlag(course);
     const zy = parseInt(card.querySelector('.nx-zy-select')?.value) || 3;
-    const meta = currentProbMeta(course, flag, zy);
+    const meta = NX.currentProbMeta(course, flag, zy);
     const line = card.querySelector('.nx-current-prob');
     if (line) {
       line.dataset.flag = flag;
@@ -159,73 +212,60 @@ NX.renderCourses = function (list) {
       inline.style.color = meta.color;
     }
   };
-  el.querySelectorAll('.nx-type-select,.nx-zy-select').forEach(sel => {
-    sel.onchange = e => { e.stopPropagation(); syncCardProb(sel); };
-  });
-  el.querySelectorAll('.nx-select-btn').forEach(btn => {
-    btn.onclick = async e => {
-      e.stopPropagation();
-      const code = btn.dataset.code;
-      const seq = btn.dataset.seq;
+  el.addEventListener('click', e => {
+    const btn = e.target.closest('button');
+    if (!btn) {
+      const card = e.target.closest('.nx-card');
+      if (card) card.classList.toggle('open');
+      return;
+    }
+    const cls = btn.classList;
+    if (cls.contains('nx-detail-btn')) {
+      showCourseModal(btn.dataset.code, btn.dataset.tid);
+    } else if (cls.contains('nx-select-btn')) {
       const actions = btn.parentElement;
       const flag = actions.querySelector('.nx-type-select')?.value || 'bx';
       const zy = actions.querySelector('.nx-zy-select')?.value || '3';
       const origText = btn.textContent;
       btn.disabled = true; btn.textContent = '提交中…';
-      try {
-        const res = await submitCourse(code, seq, parseInt(zy), flag);
-        showXkResult(res);
-        if (res.ok) await refreshSelected();
-      } catch (e) { showXkResult({ ok: false, msg: e.message }); }
-      finally { btn.disabled = false; btn.textContent = origText; }
-    };
-  });
-  el.querySelectorAll('.nx-drop-btn').forEach(btn => {
-    btn.onclick = async e => {
-      e.stopPropagation();
+      submitCourse(btn.dataset.code, btn.dataset.seq, parseInt(zy), flag)
+        .then(res => { showXkResult(res); return res.ok ? refreshSelected() : null; })
+        .catch(err => showXkResult({ ok: false, msg: err.message }))
+        .finally(() => { btn.disabled = false; btn.textContent = origText; });
+    } else if (cls.contains('nx-drop-btn')) {
       const origText = btn.textContent;
       btn.disabled = true; btn.textContent = origText.includes('删除') ? '退出中…' : '退选中…';
-      try {
-        const res = await dropCourse(btn.dataset.code, btn.dataset.seq);
-        showXkResult(res);
-        if (res.ok) await refreshSelected();
-      } catch (e) { showXkResult({ ok: false, msg: e.message }); }
-      finally { btn.disabled = false; btn.textContent = origText; }
-    };
-  });
-  el.querySelectorAll('.nx-vol-btn').forEach(btn => {
-    btn.onclick = async e => {
-      e.stopPropagation();
+      dropCourse(btn.dataset.code, btn.dataset.seq)
+        .then(res => { showXkResult(res); return res.ok ? refreshSelected() : null; })
+        .catch(err => showXkResult({ ok: false, msg: err.message }))
+        .finally(() => { btn.disabled = false; btn.textContent = origText; });
+    } else if (cls.contains('nx-vol-btn')) {
       const curZy = parseInt(btn.dataset.zy) || 1;
-      const dir = btn.dataset.dir;
-      const targetZy = dir === 'up' ? curZy - 1 : curZy + 1;
+      const targetZy = btn.dataset.dir === 'up' ? curZy - 1 : curZy + 1;
       if (targetZy < 1) return;
       btn.disabled = true;
-      try {
-        const res = await changeVolunteer(btn.dataset.code, btn.dataset.seq, targetZy);
-        showXkResult(res);
-        if (res.ok) await refreshSelected();
-      } catch (e) { showXkResult({ ok: false, msg: e.message }); }
-      finally { btn.disabled = false; }
-    };
-  });
-  el.querySelectorAll('.nx-add-stage').forEach(btn => {
-    btn.onclick = async e => {
-      e.stopPropagation();
+      changeVolunteer(btn.dataset.code, btn.dataset.seq, targetZy)
+        .then(res => { showXkResult(res); return res.ok ? refreshSelected() : null; })
+        .catch(err => showXkResult({ ok: false, msg: err.message }))
+        .finally(() => { btn.disabled = false; });
+    } else if (cls.contains('nx-add-stage')) {
       const actions = btn.parentElement;
       const flag = actions.querySelector('.nx-type-select')?.value || 'bx';
       const zy = parseInt(actions.querySelector('.nx-zy-select')?.value) || 3;
       addToStage(btn.dataset.code, btn.dataset.seq, flag, zy);
       btn.textContent = '已暂存';
       btn.disabled = true;
-    };
-  });
-  el.querySelectorAll('.nx-add-stage-sel').forEach(btn => {
-    btn.onclick = e => {
-      e.stopPropagation();
+    } else if (cls.contains('nx-add-stage-sel')) {
       addToStage(btn.dataset.code, btn.dataset.seq, btn.dataset.flag || 'bx', parseInt(btn.dataset.zy) || 3);
-      btn.textContent = '已暂存'; btn.disabled = true;
-    };
+      btn.textContent = '已暂存';
+      btn.disabled = true;
+    }
+  });
+  el.addEventListener('change', e => {
+    const t = e.target;
+    if (t.classList && (t.classList.contains('nx-type-select') || t.classList.contains('nx-zy-select'))) {
+      syncCardProb(t);
+    }
   });
 };
 
@@ -266,7 +306,7 @@ NX.renderPreviewTT = function (courses, label) {
       const p = calcProb(c, sf, c.zy);
       if (p.prob >= 0) { cellColor = p.color; probLabel = p.percentLabel || p.label; probBgColor = probBg(p.color); }
     } else if ((state.previewMode === 'stage' || state.previewMode === 'draft') && c.flag && c.zy) {
-      const ac = allCourses.find(x => x.code === c.code && String(x.seq || '0') === String(c.seq || '0'));
+      const ac = NX.getCourse(c.code, c.seq);
       if (ac) { const p = calcProb(ac, c.flag, c.zy); if (p.prob >= 0) { cellColor = p.color; probLabel = p.percentLabel || p.label; probBgColor = probBg(p.color); } }
     }
     parseTimeSlots(c.time).forEach(({ day, slot }) => {
@@ -322,9 +362,9 @@ NX.renderPreviewTT = function (courses, label) {
 // ─── Stage Cart Rendering ─────────────────────────────────────
 
 NX.stageProbHtml = function (c) {
-  const { state, fullProbGrid, baseFlag } = NX;
-  const { isQueuePhase, queueDataMap, allCourses } = state;
-  const ac = allCourses.find(x => x.code === c.code && String(x.seq || '0') === String(c.seq || '0'));
+  const { state, fullProbGrid, baseFlag, getCourse } = NX;
+  const { isQueuePhase, queueDataMap } = state;
+  const ac = getCourse(c.code, c.seq);
   if (!ac) return '';
   if (isQueuePhase) {
     const qKey = c.code + '_' + (c.seq || '0');
@@ -396,9 +436,9 @@ NX.renderStageCart = function () {
 // ─── Drafts Rendering ─────────────────────────────────────────
 
 NX.draftCourseProbHtml = function (c) {
-  const { state, fullProbGrid, baseFlag } = NX;
-  const { isQueuePhase, queueDataMap, allCourses } = state;
-  const ac = allCourses.find(x => x.code === c.code && String(x.seq || '0') === String(c.seq || '0'));
+  const { state, fullProbGrid, baseFlag, getCourse } = NX;
+  const { isQueuePhase, queueDataMap } = state;
+  const ac = getCourse(c.code, c.seq);
   if (!ac) return '';
   if (isQueuePhase) {
     const qKey = c.code + '_' + (c.seq || '0');
@@ -479,6 +519,7 @@ NX.renderDrafts = function () {
       const name = savedDrafts[di].courses[ci].name;
       if (!confirm('从草稿移除「' + name + '」？')) return;
       savedDrafts[di].courses.splice(ci, 1);
+      NX.invalidatePreview();
       store.set('drafts', savedDrafts);
       NX.renderDrafts();
       if (state.previewMode === 'draft' && state.previewDraftIdx === di) renderPreviewTT(savedDrafts[di].courses, '草稿「' + savedDrafts[di].name + '」预览');
@@ -642,15 +683,15 @@ NX.renderPlan = function (plan) {
 // ─── Filters ──────────────────────────────────────────────────
 
 NX.filterCourses = function () {
-  const { state, renderCourses, renderPlanView } = NX;
+  const { state, renderCourses, renderPlanView, lc } = NX;
   const $ = state.$;
   const { allCourses, candidateCourses, activeGroup } = state;
-  const q = $('nextthuxk-search').value.toLowerCase();
+  const q = $('nextthuxk-search').value.toLowerCase();   // 用户输入不入缓存（中间态多），课程字段才走 lc
   NX.updateSearchClear();
   const f = state.shadow.querySelector('.nx-chip.on')?.dataset.f || 'all';
   if (f === 'plan') { renderPlanView(q); return; }
   let list = allCourses;
-  if (q) list = list.filter(c => c.name.toLowerCase().includes(q) || c.code.includes(q) || (c.teacher || '').toLowerCase().includes(q));
+  if (q) list = list.filter(c => lc(c.name).includes(q) || c.code.includes(q) || lc(c.teacher).includes(q));
   if (f === 'available') list = list.filter(c => c.available);
   else if (f === 'selected') {
     const seen = new Set();
@@ -678,11 +719,15 @@ NX.filterCourses = function () {
   const df = $('nx-filter-day')?.value;
   const pf = $('nx-filter-period')?.value;
   if (df || pf) {
+    // 正则预编译（原实现在 filter 回调内每门课 new RegExp，6000 次对象创建）
+    const bothRe = df && pf ? new RegExp(df + '-' + pf + '\\(') : null;
+    const dayRe = df ? new RegExp(df + '-\\d') : null;
+    const periodRe = pf ? new RegExp('\\d+-' + pf + '\\(') : null;
     list = list.filter(c => {
       if (!c.time) return false;
-      if (df && pf) return c.time.includes(df + '-' + pf + '(');
-      if (df) return new RegExp(df + '-\\d').test(c.time);
-      return new RegExp('\\d+-' + pf + '\\(').test(c.time);
+      if (bothRe) return bothRe.test(c.time);
+      if (dayRe) return dayRe.test(c.time);
+      return periodRe.test(c.time);
     });
   }
   const cf2 = $('nx-filter-conflict')?.value;
@@ -706,7 +751,7 @@ NX.filterCourses = function () {
   const yjsVal = $('nx-filter-yjsrem')?.value;
   if (yjsVal === '>0') list = list.filter(c => (c.gradRemaining || 0) > 0);
   const xkNote = ($('nx-filter-xknote')?.value || '').trim().toLowerCase();
-  if (xkNote) list = list.filter(c => (c.xkTextNote || '').toLowerCase().includes(xkNote));
+  if (xkNote) list = list.filter(c => lc(c.xkTextNote).includes(xkNote));
   renderCourses(list);
 };
 

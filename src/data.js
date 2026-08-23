@@ -185,58 +185,56 @@ NX.fetchTrainingPlan = async function () {
 };
 
 NX.fetchCourseCatalog = async function () {
-  const { state, fetchPage, parseCatalog } = NX;
+  const { state, fetchPage, parseCatalog, pagedFetch } = NX;
   if (!state.isZhjwxk) return [];
   const { SEM, BASE } = state;
-  const all = [];
-  for (let p = -1; p <= 300; p++) {
-    const url = p === -1
-      ? BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM
-      : BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM + '&page=' + p;
-    try {
-      const html = await fetchPage(url);
+  const url = p => BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM + '&page=' + p;
+  const firstUrl = BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM;
+  const all = await pagedFetch({
+    fetchFirst: () => fetchPage(firstUrl),
+    fetchPage: p => fetchPage(url(p)),
+    parse: html => {
       const batch = parseCatalog(new DOMParser().parseFromString(html, 'text/html'));
-      if (!batch.length && p >= 0) break;
-      all.push(...batch);
-      if (p > 0 && batch.length === 0) break;
-    } catch (e) {
-      console.warn(NX.TAG, 'catalog page', p, e);
-      break;
-    }
-  }
+      return { items: batch, hasData: batch.length > 0 };
+    },
+    maxPages: 300,
+    concurrency: 5,
+    dedupe: c => c.code + '_' + c.seq,   // 防御：分页边界或重复页导致同一课重复出现
+  });
   console.log(NX.TAG, 'catalog total:', all.length, 'courses');
   return all;
 };
 
 NX.fetchVolunteer = async function () {
-  const { state, fetchPage, parseVolFromHtml, parseVolSportsFromHtml } = NX;
+  const { state, fetchPage, parseVolFromHtml, parseVolSportsFromHtml, pagedFetch } = NX;
   if (!state.isZhjwxk) return {};
   const { SEM, BASE } = state;
   try {
+    const mkUrl = m => p => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM + '&page=' + p;
+    const mkFirst = m => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM;
+    const grab = async (m, parseFn, maxPages) => {
+      const items = await pagedFetch({
+        fetchFirst: () => fetchPage(mkFirst(m)),
+        fetchPage: p => fetchPage(mkUrl(m)(p)),
+        parse: html => {
+          const batch = parseFn(html);
+          const arr = Object.values(batch);
+          return { items: arr, hasData: arr.length > 0 };
+        },
+        maxPages,
+        concurrency: 5,
+        dedupe: v => v.code + '_' + v.seq,
+      });
+      return items;
+    };
+    const volItems = await grab('tbzySearchBR', parseVolFromHtml, 200);
     const allMap = {};
-    for (let p = -1; p <= 200; p++) {
-      const url = p === -1
-        ? BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchBR&p_xnxq=' + SEM
-        : BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchBR&p_xnxq=' + SEM + '&page=' + p;
-      const html = await fetchPage(url);
-      const batch = parseVolFromHtml(html);
-      if (!Object.keys(batch).length && p >= 0) break;
-      Object.assign(allMap, batch);
-      if (p > 0 && !Object.keys(batch).length) break;
-    }
+    volItems.forEach(v => { allMap[v.code + '_' + v.seq] = v; });
     console.log(NX.TAG, 'volunteer data:', Object.keys(allMap).length, 'courses');
     try {
+      const sportsItems = await grab('tbzySearchTy', parseVolSportsFromHtml, 20);
       const sportsMap = {};
-      for (let p = -1; p <= 20; p++) {
-        const url = p === -1
-          ? BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchTy&p_xnxq=' + SEM
-          : BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchTy&p_xnxq=' + SEM + '&page=' + p;
-        const html = await fetchPage(url);
-        const batch = parseVolSportsFromHtml(html);
-        if (!Object.keys(batch).length && p >= 0) break;
-        Object.assign(sportsMap, batch);
-        if (p > 0 && !Object.keys(batch).length) break;
-      }
+      sportsItems.forEach(v => { sportsMap[v.code + '_' + v.seq] = v; });
       for (const [key, val] of Object.entries(sportsMap)) {
         if (allMap[key]) Object.assign(allMap[key], val);
         else allMap[key] = val;
@@ -307,6 +305,15 @@ NX.fetchFormSubmit = async function (searchUrl, postFields) {
   }
 };
 
+// 轮询等待：总时长 >= 原固定 sleep，提前满足提前返回（平均省 1s+，最坏不劣于原来）
+NX.pollUntil = async function (fn, delay, tries) {
+  for (let i = 0; i < tries; i++) {
+    await new Promise(r => setTimeout(r, delay));
+    if (await fn()) return true;
+  }
+  return false;
+};
+
 NX.submitCourse = async function (code, seq, zy, flag) {
   const { state, fetchFormSubmit, fetchSelectedCourses } = NX;
   const { SEM, BASE } = state;
@@ -325,12 +332,10 @@ NX.submitCourse = async function (code, seq, zy, flag) {
   if (flag === 'ty') { fields.rxTyType = ''; }
   const res = await fetchFormSubmit(searchUrl, fields);
   if (!res.submitted) return res;
-  // 等待服务器处理（排队流程内部已有 1.5s + POST 时间，这里再等 2s 让候补列表更新）
-  await new Promise(r => setTimeout(r, 2000));
-  // 验证：已选列表或候补队列中出现即视为成功
-  const sel = await fetchSelectedCourses();
-  const foundSelected = sel.some(s => s.code === code && String(s.seq) === String(seq));
-  if (foundSelected) return { ok: true, msg: '选课成功' };
+  // 轮询验证：已选列表或候补队列中出现即视为成功（总等待 ≥ 原 2s 固定延时）
+  const hitSel = () => fetchSelectedCourses().then(sel =>
+    sel.some(s => s.code === code && String(s.seq) === String(seq)));
+  if (await NX.pollUntil(hitSel, 700, 3)) return { ok: true, msg: '选课成功' };
   // 已满课提交后可能进入候补队列而非直接选上
   const cand = await NX.fetchCandidateCourses();
   const foundQueue = cand.some(s => s.code === code && String(s.seq) === String(seq));
@@ -351,10 +356,10 @@ NX.dropCourse = async function (code, seq) {
       'p_del_id': SEM + ';' + code + ';' + seq + ';',
     });
     if (!res.submitted) return res;
-    await new Promise(r => setTimeout(r, 1500));
-    const newCand = await NX.fetchCandidateCourses();
-    const still = newCand.some(s => s.code === code && String(s.seq) === String(seq));
-    return still ? { ok: false, msg: '退出队列未生效，请稍后重试' } : { ok: true, msg: '已退出候补队列' };
+    const gone = () => NX.fetchCandidateCourses().then(newCand =>
+      !newCand.some(s => s.code === code && String(s.seq) === String(seq)));
+    if (await NX.pollUntil(gone, 500, 3)) return { ok: true, msg: '已退出候补队列' };
+    return { ok: false, msg: '退出队列未生效，请稍后重试' };
   }
   // 已选课程：m=deleteYxk
   const searchUrl = BASE + '/xkBks.vxkBksXkbBs.do?m=yxSearchTab&p_xnxq=' + SEM + '&tokenPriFlag=yx';
@@ -364,10 +369,10 @@ NX.dropCourse = async function (code, seq) {
     'p_del_id': SEM + ';' + code + ';' + seq + ';',
   });
   if (!res.submitted) return res;
-  await new Promise(r => setTimeout(r, 1500));
-  const sel = await fetchSelectedCourses();
-  const still = sel.some(s => s.code === code && String(s.seq) === String(seq));
-  return still ? { ok: false, msg: '退选未生效，请稍后重试' } : { ok: true, msg: '退选成功' };
+  const gone = () => fetchSelectedCourses().then(sel =>
+    !sel.some(s => s.code === code && String(s.seq) === String(seq)));
+  if (await NX.pollUntil(gone, 500, 3)) return { ok: true, msg: '退选成功' };
+  return { ok: false, msg: '退选未生效，请稍后重试' };
 };
 
 NX.changeVolunteer = async function (code, seq, targetZy) {
@@ -507,55 +512,61 @@ NX.fetchQueueData = async function () {
     const tokenMatch = firstHtml.match(/name="token"\s+value="([^"]+)"/);
     const token = tokenMatch ? tokenMatch[1] : '';
     const formAction = BASE + '/xkBks.vxkBksJxjhBs.do';
+    const pgRegex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
     if (token) {
-      for (let p = 0; p <= 200; p++) {
-        const body = new URLSearchParams({
-          m: 'kylSearch', page: String(p), token,
-          'p_sort.p1': '', 'p_sort.p2': '', 'p_sort.asc1': '', 'p_sort.asc2': '',
-          p_xnxq: SEM, pathContent: '',
-        });
-        try {
+      const items = await NX.pagedFetch({
+        firstHtml,
+        fetchPage: async p => {
+          const body = new URLSearchParams({
+            m: 'kylSearch', page: String(p), token,
+            'p_sort.p1': '', 'p_sort.p2': '', 'p_sort.asc1': '', 'p_sort.asc2': '',
+            p_xnxq: SEM, pathContent: '',
+          });
           const resp = await fetch(formAction, { method: 'POST', credentials: 'include', body });
           const buf = await resp.arrayBuffer();
-          const html = new TextDecoder('gbk').decode(buf);
-          if (!html.includes('gridData')) break;
-          const pgRegex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
-          let pm; let batchCount = 0;
+          return new TextDecoder('gbk').decode(buf);
+        },
+        parse: html => {
+          if (!html.includes('gridData')) return { items: [], hasData: false };
+          const items = [];
+          let pm;
           while ((pm = pgRegex.exec(html)) !== null) {
-            const key = pm[1] + '_' + pm[2];
-            if (!map[key]) {
-              map[key] = { code: pm[1], seq: pm[2], qCapacity: parseInt(pm[3]) || 0, qRemaining: parseInt(pm[4]) || 0, qQueue: 0 };
-            }
-            batchCount++;
+            items.push({ code: pm[1], seq: pm[2], qCapacity: parseInt(pm[3]) || 0, qRemaining: parseInt(pm[4]) || 0, qQueue: 0 });
           }
-          if (batchCount === 0) break;
-        } catch (e) { console.warn(NX.TAG, 'queue page', p, e); break; }
-      }
+          return { items, hasData: items.length > 0 };
+        },
+        maxPages: 200,
+        concurrency: 5,
+        dedupe: q => q.code + '_' + q.seq,
+      });
+      items.forEach(q => {
+        const key = q.code + '_' + q.seq;
+        if (!map[key]) map[key] = q;
+      });
     }
     if (!Object.keys(map).length) return { map: {}, phase: false };
-    // Fetch real-time queue counts
+    // Fetch real-time queue counts（并发 4，原为逐批串行）
     const parts = Object.values(map).map(q => SEM + '_' + q.code + '_' + q.seq);
     const batchSize = 100;
-    for (let i = 0; i < parts.length; i += batchSize) {
-      const batch = parts.slice(i, i + batchSize);
-      const kcMsg = batch.join(';');
+    const batches = [];
+    for (let i = 0; i < parts.length; i += batchSize) batches.push(parts.slice(i, i + batchSize));
+    await NX.runPool(batches, 4, async kcMsg => {
       try {
-        const qResp = await fetch(BASE + '/xkBks.vxkBksXkbBs.do?m=selectBksDlCount&kc_message=' + encodeURIComponent(kcMsg), {
+        const qResp = await fetch(BASE + '/xkBks.vxkBksXkbBs.do?m=selectBksDlCount&kc_message=' + encodeURIComponent(kcMsg.join(';')), {
           credentials: 'include',
         });
-        if (qResp.ok) {
-          const qBuf = await qResp.arrayBuffer();
-          const qText = new TextDecoder('gbk').decode(qBuf);
-          const qData = JSON.parse(qText);
-          if (Array.isArray(qData)) {
-            qData.forEach(obj => {
-              const key = obj.kch + '_' + obj.kxh;
-              if (map[key]) map[key].qQueue = parseInt(obj.dlrs) || 0;
-            });
-          }
+        if (!qResp.ok) return;
+        const qBuf = await qResp.arrayBuffer();
+        const qText = new TextDecoder('gbk').decode(qBuf);
+        const qData = JSON.parse(qText);
+        if (Array.isArray(qData)) {
+          qData.forEach(obj => {
+            const key = obj.kch + '_' + obj.kxh;
+            if (map[key]) map[key].qQueue = parseInt(obj.dlrs) || 0;
+          });
         }
       } catch (e) { console.warn(NX.TAG, 'queue count batch:', e); }
-    }
+    });
     console.log(NX.TAG, 'queue data:', Object.keys(map).length, 'courses');
     return { map, phase: true };
   } catch (e) {
@@ -614,9 +625,13 @@ NX.mergeStaticData = function (catalog, volData, plan) {
   const { baseFlag } = NX;
   const courses = catalog.length ? catalog : plan.map(c => ({ ...c, available: true, teacher: '', time: '', capacity: '', selected: false, queue: '' }));
   if (Object.keys(volData).length) {
+    // 预建 code 索引：原实现每门课 Object.values().find() 线性扫，6000 课 × 数千志愿 = O(n²) 卡死主线程
+    const byCode = {};
+    for (const v of Object.values(volData)) {
+      if (!byCode[v.code]) byCode[v.code] = v;
+    }
     courses.forEach(c => {
-      const key = c.seq ? c.code + '_' + c.seq : null;
-      const v = (key && volData[key]) ? volData[key] : Object.values(volData).find(v => v.code === c.code);
+      const v = (c.seq && volData[c.code + '_' + c.seq]) || byCode[c.code];
       if (v) {
         c.volRequired = v.volRequired; c.volElective = v.volElective; c.volOptional = v.volOptional;
         c.volSports = v.volSports || '';
@@ -625,6 +640,10 @@ NX.mergeStaticData = function (catalog, volData, plan) {
           c.volApplied = v.applied || 0;
           c.volCapacity = v.capacity || c.volCapacity;
         }
+      } else if ('volRequired' in c || 'volApplied' in c) {
+        // re-merge 场景（输入为缓存 courses）：志愿已撤下的课清掉旧值，避免展示过期数据
+        c.volRequired = ''; c.volElective = ''; c.volOptional = ''; c.volSports = '';
+        c.volApplied = 0; c.volCapacity = 0;
       }
     });
   }

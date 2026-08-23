@@ -7,6 +7,10 @@ var NX = NX || {};
 
 NX.parseTimeSlots = function (timeStr) {
   if (!timeStr) return [];
+  // 缓存：全校时间串种类有限（几百个），避免每次筛选/渲染重复正则解析
+  if (!NX._slotsCache) NX._slotsCache = new Map();
+  const hit = NX._slotsCache.get(timeStr);
+  if (hit) return hit;
   const slots = [];
   const dayLabels = ['周一','周二','周三','周四','周五','周六','周日'];
   const slotLabels = ['1-2节','3-4节','5-6节','7-8节','9-10节','11-12节'];
@@ -19,6 +23,7 @@ NX.parseTimeSlots = function (timeStr) {
       slots.push({ day: dayLabels[dayNum - 1], slot: slotLabels[dajie - 1] });
     }
   }
+  NX._slotsCache.set(timeStr, slots);
   return slots;
 };
 
@@ -35,35 +40,58 @@ NX.detectConflicts = function (courses) {
   return conflicts;
 };
 
-NX.findPreviewConflicts = function (course) {
-  const { state, parseTimeSlots } = NX;
-  const { allCourses, stageCart, savedDrafts, previewMode, previewDraftIdx } = state;
-  let previewCourses = [];
+// 当前预览课表（selected/stage/draft 三态），多处复用
+NX.getPreviewCourses = function () {
+  const { allCourses, stageCart, savedDrafts, previewMode, previewDraftIdx } = NX.state;
   if (previewMode === 'selected') {
-    previewCourses = allCourses.filter(c => c.selected);
-  } else if (previewMode === 'stage') {
-    previewCourses = stageCart;
-  } else if (previewMode === 'draft' && previewDraftIdx >= 0 && savedDrafts[previewDraftIdx]) {
-    previewCourses = savedDrafts[previewDraftIdx].courses;
+    // selected 集合只在 resolveCourseZy 后变化，用版本号稳定引用（否则每次 filter 出新数组，索引缓存永不命中）
+    const v = NX.state.selVersion || 0;
+    if (NX._selCacheV !== v) { NX._selCache = allCourses.filter(c => c.selected); NX._selCacheV = v; }
+    return NX._selCache;
   }
-  if (!previewCourses.length) return [];
-  const slots = parseTimeSlots(course.time || '');
-  if (!slots.length) return [];
-  const conflicts = [];
-  previewCourses.forEach(pc => {
-    if (pc.code === course.code && String(pc.seq || '0') === String(course.seq || '0')) return;
-    const pcSlots = parseTimeSlots(pc.time || '');
-    slots.forEach(s => {
-      pcSlots.forEach(ps => {
-        if (s.day === ps.day && s.slot === ps.slot) {
-          const name = pc.name || pc.code;
-          if (!conflicts.some(c => c.name === name && c.day === s.day && c.slot === s.slot)) {
-            conflicts.push({ name, day: s.day, slot: s.slot });
-          }
-        }
+  if (previewMode === 'stage') return stageCart;
+  if (previewMode === 'draft' && previewDraftIdx >= 0 && savedDrafts[previewDraftIdx]) return savedDrafts[previewDraftIdx].courses;
+  return [];
+};
+
+// 预览课表槽位索引（引用+长度双重失效）：slotKey → [占用课程列表]
+NX._pvRef = null; NX._pvLen = -1; NX._pvIdx = null;
+NX.invalidatePreview = function () { NX._pvRef = null; NX._pvLen = -1; NX._pvIdx = null; };
+NX.previewSlotIndex = function () {
+  const previewCourses = NX.getPreviewCourses();
+  if (NX._pvRef !== previewCourses || NX._pvLen !== previewCourses.length) {
+    const idx = new Map();
+    previewCourses.forEach(pc => {
+      NX.parseTimeSlots(pc.time || '').forEach(({ day, slot }) => {
+        const k = day + '|' + slot;
+        if (!idx.has(k)) idx.set(k, []);
+        idx.get(k).push({ name: pc.name || pc.code, code: pc.code, seq: String(pc.seq || '0') });
       });
     });
-  });
+    NX._pvRef = previewCourses;
+    NX._pvLen = previewCourses.length;
+    NX._pvIdx = idx;
+  }
+  return NX._pvIdx;
+};
+
+NX.findPreviewConflicts = function (course) {
+  const idx = NX.previewSlotIndex();
+  if (!idx.size) return [];
+  const selfSeq = String(course.seq || '0');
+  const conflicts = [];
+  const seen = new Set();
+  for (const { day, slot } of NX.parseTimeSlots(course.time || '')) {
+    const hits = idx.get(day + '|' + slot);
+    if (!hits) continue;
+    for (const h of hits) {
+      if (h.code === course.code && h.seq === selfSeq) continue;
+      const k = h.name + '|' + day + '|' + slot;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      conflicts.push({ name: h.name, day, slot });
+    }
+  }
   return conflicts;
 };
 
@@ -121,9 +149,11 @@ NX.resolveCourseZy = async function (courses, selMap, zyCache) {
   let cacheUpdated = false;
   const missingZy = [];
   let levelMap = null;
+  let selectedChanged = false;
   for (const c of courses) {
     const key = c.code + '_' + (c.seq || '0');
     const s = selMap[key];
+    if (c.selected !== !!s) selectedChanged = true;
     c.selected = !!s;
     if (s) {
       if (s.zy > 0) {
@@ -154,6 +184,7 @@ NX.resolveCourseZy = async function (courses, selMap, zyCache) {
         zyCache[c.code + '_' + (c.seq || '0')] = { zy: 3, typeCode: c.typeCode, typeLabel: c.typeLabel, confirmed: false };
       });
       cacheUpdated = true;
+      if (selectedChanged) NX.state.selVersion = (NX.state.selVersion || 0) + 1;
       return cacheUpdated;
     }
     const values = await showZyModal(missingZy);
@@ -165,6 +196,7 @@ NX.resolveCourseZy = async function (courses, selMap, zyCache) {
       }
     });
   }
+  if (selectedChanged) NX.state.selVersion = (NX.state.selVersion || 0) + 1;
   return cacheUpdated;
 };
 
@@ -215,8 +247,9 @@ NX.addToStage = function (code, seq, flag, zy) {
 };
 
 NX.removeFromStage = function (idx) {
-  const { state, store, renderStageCart, filterCourses } = NX;
+  const { state, store, renderStageCart, filterCourses, invalidatePreview } = NX;
   state.stageCart.splice(idx, 1);
+  NX.invalidatePreview();
   renderStageCart();
   store.set('stageCart', state.stageCart);
   filterCourses();
@@ -324,6 +357,7 @@ NX.importToStage = function (jsonStr) {
         added++;
       }
     });
+    NX.invalidatePreview();
     renderStageCart();
     store.set('stageCart', stageCart);
     showXkResult({ ok: true, msg: '已导入 ' + added + ' 门课程到暂存区' });
@@ -386,7 +420,11 @@ NX.handlePreviewRemove = async function (code, seq) {
     if (!confirm('确认退选「' + name + '」？')) return;
     const res = await dropCourse(code, seq);
     showXkResult(res);
-    if (res.ok) await NX.launch();
+    // 增量刷新（原实现 NX.launch() 全量重启：重新拉目录/队列/渲染整个面板）
+    if (res.ok) {
+      await NX.refreshSelected();
+      NX.renderPlan(state.planData);
+    }
   } else if (previewMode === 'stage') {
     const idx = stageCart.findIndex(s => s.code === code && String(s.seq) === String(seq));
     const name = idx >= 0 ? stageCart[idx].name : code;
@@ -400,6 +438,7 @@ NX.handlePreviewRemove = async function (code, seq) {
     const name = idx >= 0 ? draft.courses[idx].name : code;
     if (!confirm('从草稿移除「' + name + '」？')) return;
     draft.courses.splice(idx, 1);
+    NX.invalidatePreview();
     await NX.store.set('drafts', savedDrafts);
     renderDrafts();
     renderPreviewTT(draft.courses, '草稿「' + draft.name + '」预览');
