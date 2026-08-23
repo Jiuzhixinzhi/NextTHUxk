@@ -213,9 +213,12 @@ NX.fetchCourseCatalog = async function () {
       return { items: batch, hasData: batch.length > 0 };
     },
     maxPages: 320,
-    concurrency: 5,
+    // ⚠️ 必须顺序抓取（concurrency=1）：教务分页是 session 有状态的，
+    // 乱序并发请求会打乱服务器端游标 → 294 页后返回空壳页（实测 v1.3.5~1.3.8）
+    concurrency: 1,
+    throttle: 50,
     dedupe: c => c.code + '_' + c.seq,   // 防御：分页边界或重复页导致同一课重复出现
-    expectPages: pager.pages,            // 已知总页数 → 抓完自动补缺页（v1.3.6）
+    expectPages: pager.pages,            // 已知总页数 → 抓完自动补缺页
     label: 'catalog',
   });
   if (pager.total > 0 && all.length < pager.total) {
@@ -247,7 +250,8 @@ NX.fetchVolunteer = async function () {
           return { items: arr, hasData: arr.length > 0 };
         },
         maxPages,
-        concurrency: 5,
+        concurrency: 1,   // ⚠️ 顺序抓取：session 有状态分页，乱序会致空壳页（同 catalog）
+        throttle: 50,
         dedupe: v => v.code + '_' + v.seq,
         expectPages: pager.pages,
         label: m,
@@ -564,7 +568,8 @@ NX.fetchQueueData = async function () {
           return { items, hasData: items.length > 0 };
         },
         maxPages: 320,
-        concurrency: 5,
+        concurrency: 1,   // ⚠️ 顺序抓取：session 游标制分页，乱序会致空壳页（同 catalog）
+        throttle: 50,
         dedupe: q => q.code + '_' + q.seq,
         expectPages: pager.pages,
         label: 'kylSearch',
