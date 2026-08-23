@@ -10,7 +10,7 @@ NX.browser = typeof browser !== 'undefined' ? browser : chrome;
 NX.TAG = '[NextTHUxk]';
 NX.SP = 'nextthuxk_';
 NX.DATA_VER = 5;
-NX.CUR_VER = '1.3.7';
+NX.CUR_VER = '1.3.8';
 NX.DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 NX.ZY_LIMITS = {
   bx: [[1,1],[2,2],[3,Infinity]], // 必修：1志愿1门, 2志愿2门, 3志愿无限
@@ -136,12 +136,25 @@ NX.pagedFetch = async function (opts) {
   // 带重试的单页抓取：网络错误与空页都重试；重试期间 pause 铺新页（避免越界请求）；
   // 重试后仍空 → 返回 'EMPTY'（真末页）
   let pause = false;
+  // 空页诊断（v1.3.8）：区分「真没数据」与「被拦截」，只记录第一例避免刷屏
+  let emptyDiag = null;
+  const diagEmpty = html => {
+    if (emptyDiag) return;
+    const h = html || '';
+    const feats = [];
+    if (h.includes('accessDenied')) feats.push('accessDenied(被拒绝)');
+    if (/重新登录|登录超时|请先登录/.test(h)) feats.push('登录失效');
+    if (h.includes('gridData')) feats.push('gridData(数组存在)');
+    if (/<table/i.test(h)) feats.push('有表格结构');
+    emptyDiag = 'len=' + h.length + (feats.length ? ' 特征=[' + feats.join(', ') + ']' : ' 无已知特征') + ' head="' + h.slice(0, 100).replace(/\s+/g, ' ') + '"';
+  };
   const fetchOne = async p => {
     for (let attempt = 0; ; attempt++) {
-      let r;
+      let r, html = '';
       try {
         if (throttle > 0) await gate();
-        r = parse(await fetchPage(p));
+        html = await fetchPage(p);
+        r = parse(html);
       }
       catch (e) {
         pause = true;   // 失败即暂停铺新页（含首次），等本页终态
@@ -149,6 +162,7 @@ NX.pagedFetch = async function (opts) {
         pause = false; return 'ERR:' + (e && e.message ? e.message : 'unknown');
       }
       if (r.hasData) { pause = false; return r; }
+      diagEmpty(html);
       pause = true;
       if (attempt < retry) { await sleep(retryDelay * (attempt + 1)); continue; }
       pause = false; return 'EMPTY';
@@ -188,7 +202,7 @@ NX.pagedFetch = async function (opts) {
     launch();
   });
 
-  // ── 总数校验补抓（v1.3.7：两轮 + 冷却；round1 立即低速，仍缺则等限流窗口过再 round2）──
+  // ── 总数校验补抓（v1.3.8：纯 EMPTY 免冷却——服务器稳定返回空页时，等待重试无意义）──
   if (expectPages > 0) {
     const cap = Math.min(expectPages, maxPages);
     let missing = [];
@@ -198,24 +212,35 @@ NX.pagedFetch = async function (opts) {
     if (missing.length) {
       console.warn(NX.TAG, label, 'first pass missing', missing.length, 'pages, retrying:', missing.slice(0, 10).join(','), missing.length > 10 ? '…' : '');
       const recover = async (list, conc) => {
-        let errStreak = 0;
+        let errStreak = 0, empties = 0, errs = 0;
         await NX.runPool(list, conc, async p => {
           if (errStreak >= 5) return;          // 熔断：连续 5 页失败视为系统性故障
           const r = await fetchOne(p);
-          if (typeof r === 'string') { errStreak++; console.warn(NX.TAG, label, 'page', p, 'failed:', r); return; }
+          if (typeof r === 'string') {
+            errStreak++;
+            if (r === 'EMPTY') empties++; else errs++;
+            console.warn(NX.TAG, label, 'page', p, 'failed:', r);
+            return;
+          }
           errStreak = 0;
           absorb(p, r.items);
         });
+        return { empties, errs };
       };
-      await recover(missing, 2);
+      const r1 = await recover(missing, 2);
       let still = missing.filter(p => !pages.has(p));
-      if (still.length && cooldown > 0) {      // 仍缺 → 冷却后第二轮（等服务器限流解除）
+      if (still.length && cooldown > 0 && (r1.errs > 0 || r1.empties === 0)) {
+        // 只有出现网络错误（可能瞬态）或首轮全成功却仍缺（异常态）才值得冷却后再试；
+        // 全部 EMPTY = 服务器稳定认为这些页没数据 → 不冷却（省 8s+，v1.3.8 修"变慢"）
         console.warn(NX.TAG, label, still.length, 'pages still missing, cooling down', cooldown, 'ms before final round…');
         await sleep(cooldown);
         await recover(still, 1);
         still = still.filter(p => !pages.has(p));
       }
-      if (still.length) console.warn(NX.TAG, label, 'STILL MISSING after recovery:', still.length, 'pages →', still.slice(0, 20).join(','));
+      if (still.length) {
+        console.warn(NX.TAG, label, 'STILL MISSING after recovery:', still.length, 'pages →', still.slice(0, 20).join(','));
+        if (emptyDiag) console.warn(NX.TAG, label, 'empty-page diagnostic:', emptyDiag);
+      }
     }
   }
 

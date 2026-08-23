@@ -198,7 +198,7 @@ NX.fetchCourseCatalog = async function () {
   const { state, fetchPage, parseCatalog, pagedFetch, parsePagerInfo } = NX;
   if (!state.isZhjwxk) return [];
   const { SEM, BASE } = state;
-  const url = p => BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM + '&page=' + p;
+  const url = p => BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM + '&page=' + p + '&_t=' + Date.now();
   const firstUrl = BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM;
   let firstHtml = '';
   try { firstHtml = await fetchPage(firstUrl); }
@@ -231,7 +231,7 @@ NX.fetchVolunteer = async function () {
   if (!state.isZhjwxk) return {};
   const { SEM, BASE } = state;
   try {
-    const mkUrl = m => p => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM + '&page=' + p;
+    const mkUrl = m => p => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM + '&page=' + p + '&_t=' + Date.now();
     const mkFirst = m => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM;
     const grab = async (m, parseFn, maxPages) => {
       let fh = '';
