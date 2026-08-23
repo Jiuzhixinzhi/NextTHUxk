@@ -220,6 +220,7 @@ NX.fetchCourseCatalog = async function () {
   });
   if (pager.total > 0 && all.length < pager.total) {
     console.warn(NX.TAG, 'catalog got', all.length, '/', pager.total, '— data may be incomplete');
+    NX.state.fetchWarn = '⚠ 课程数据可能不完整：' + all.length + '/' + pager.total + '（详见 Console，可稍后再点刷新）';
   }
   console.log(NX.TAG, 'catalog total:', all.length, 'courses');
   return all;
@@ -597,6 +598,11 @@ NX.fetchQueueData = async function () {
       } catch (e) { console.warn(NX.TAG, 'queue count batch:', e); }
     });
     console.log(NX.TAG, 'queue data:', Object.keys(map).length, 'courses');
+    const qPager = NX.parsePagerInfo(firstHtml);
+    if (qPager.total > 0 && Object.keys(map).length < qPager.total) {
+      console.warn(NX.TAG, 'queue data got', Object.keys(map).length, '/', qPager.total, '— may be incomplete');
+      if (!NX.state.fetchWarn) NX.state.fetchWarn = '⚠ 课余量数据可能不完整：' + Object.keys(map).length + '/' + qPager.total + '（详见 Console）';
+    }
     return { map, phase: true };
   } catch (e) {
     console.warn(NX.TAG, 'queue data fetch:', e);

@@ -10,7 +10,7 @@ NX.browser = typeof browser !== 'undefined' ? browser : chrome;
 NX.TAG = '[NextTHUxk]';
 NX.SP = 'nextthuxk_';
 NX.DATA_VER = 5;
-NX.CUR_VER = '1.3.6';
+NX.CUR_VER = '1.3.7';
 NX.DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 NX.ZY_LIMITS = {
   bx: [[1,1],[2,2],[3,Infinity]], // 必修：1志愿1门, 2志愿2门, 3志愿无限
@@ -107,11 +107,21 @@ NX.pagedFetch = async function (opts) {
     retryDelay = 300,    // 重试退避 ms
     expectPages = 0,     // 已知总页数（含首页）；抓完后不足则补抓
     label = '',          // 日志标签
+    throttle = 100,      // 请求节流 ms（≥服务器限流安全速率；0=不节流）
+    cooldown = 8000,     // 补抓两轮之间的冷却等待 ms（等服务器限流窗口解除）
   } = opts;
   const pages = new Map();          // pageNum -> items
   const seen = dedupe ? new Set() : null;
   let stop = false;
   const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  // 节流闸：预约式占用槽位（同步更新 lastReq），保证任意两次实际请求发起间隔 ≥ throttle
+  let lastReq = 0;
+  const gate = () => new Promise(r => {
+    const at = Math.max(Date.now(), lastReq + throttle);
+    lastReq = at;
+    setTimeout(r, Math.max(0, at - Date.now()));
+  });
 
   const absorb = (p, items) => {
     // 合并语义：p=0 与首页可能都有数据（0 基分页），不能覆盖（v1.3.6 修复：曾致首页数据丢失）
@@ -129,11 +139,14 @@ NX.pagedFetch = async function (opts) {
   const fetchOne = async p => {
     for (let attempt = 0; ; attempt++) {
       let r;
-      try { r = parse(await fetchPage(p)); }
+      try {
+        if (throttle > 0) await gate();
+        r = parse(await fetchPage(p));
+      }
       catch (e) {
         pause = true;   // 失败即暂停铺新页（含首次），等本页终态
         if (attempt < retry) { await sleep(retryDelay * (attempt + 1)); continue; }
-        pause = false; return 'ERR';
+        pause = false; return 'ERR:' + (e && e.message ? e.message : 'unknown');
       }
       if (r.hasData) { pause = false; return r; }
       pause = true;
@@ -161,8 +174,7 @@ NX.pagedFetch = async function (opts) {
         active++;
         fetchOne(p)
           .then(r => {
-            if (r === 'ERR') { stop = true; return; }
-            if (r === 'EMPTY') { stop = true; return; }
+            if (typeof r === 'string') { stop = true; return; }
             absorb(p, r.items);
           })
           .finally(() => {
@@ -176,24 +188,33 @@ NX.pagedFetch = async function (opts) {
     launch();
   });
 
-  // ── 总数校验补抓：expectPages 已知且有缺页 → 低并发逐个补（连续失败熔断，防 session 失效慢砸） ──
+  // ── 总数校验补抓（v1.3.7：两轮 + 冷却；round1 立即低速，仍缺则等限流窗口过再 round2）──
   if (expectPages > 0) {
     const cap = Math.min(expectPages, maxPages);
-    const missing = [];
+    let missing = [];
     for (let p = 0; p <= cap; p++) {           // <=cap：兼容 1 基分页（多抓一页由 dedupe 吸收）
       if (!pages.has(p)) missing.push(p);
     }
     if (missing.length) {
       console.warn(NX.TAG, label, 'first pass missing', missing.length, 'pages, retrying:', missing.slice(0, 10).join(','), missing.length > 10 ? '…' : '');
-      let errStreak = 0;
-      await NX.runPool(missing, 2, async p => {
-        if (errStreak >= 5) return;            // 熔断：连续 5 页失败视为系统性故障（如 session 失效）
-        const r = await fetchOne(p);
-        if (r === 'ERR' || r === 'EMPTY') { errStreak++; return; }
-        errStreak = 0;
-        absorb(p, r.items);
-      });
-      const still = missing.filter(p => !pages.has(p));
+      const recover = async (list, conc) => {
+        let errStreak = 0;
+        await NX.runPool(list, conc, async p => {
+          if (errStreak >= 5) return;          // 熔断：连续 5 页失败视为系统性故障
+          const r = await fetchOne(p);
+          if (typeof r === 'string') { errStreak++; console.warn(NX.TAG, label, 'page', p, 'failed:', r); return; }
+          errStreak = 0;
+          absorb(p, r.items);
+        });
+      };
+      await recover(missing, 2);
+      let still = missing.filter(p => !pages.has(p));
+      if (still.length && cooldown > 0) {      // 仍缺 → 冷却后第二轮（等服务器限流解除）
+        console.warn(NX.TAG, label, still.length, 'pages still missing, cooling down', cooldown, 'ms before final round…');
+        await sleep(cooldown);
+        await recover(still, 1);
+        still = still.filter(p => !pages.has(p));
+      }
       if (still.length) console.warn(NX.TAG, label, 'STILL MISSING after recovery:', still.length, 'pages →', still.slice(0, 20).join(','));
     }
   }

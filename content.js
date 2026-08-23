@@ -169,6 +169,7 @@ NX.launch = async function launch() {
   state.launching = true;
   const FIN = () => { state.launching = false; };
   const SEM0 = state.SEM;   // 学期切换竞态防护：写缓存前校验
+  state.fetchWarn = '';     // 清空上次加载的不完整提示（本次加载结束时会按实际结果重设）
   const { fmtTime } = NX;
   toggle(true);
   // Resolve semester
@@ -299,6 +300,7 @@ NX.launch = async function launch() {
       if (cfg.pref) $('nextthuxk-pref').value = cfg.pref;
     }
     console.log(TAG, 'loaded', state.allCourses.length, 'courses (', selectedCourses.length, 'selected)', needVol ? '(vol refreshed)' : '(vol cached)', state.isQueuePhase ? '(queue phase)' : '');
+    if (state.fetchWarn) { showXkResult({ ok: false, msg: state.fetchWarn }); state.fetchWarn = ''; }
     const phaseTag = $('nextthuxk-phase-tag');
     if (phaseTag) {
       if (state.isQueuePhase) { phaseTag.style.display = 'inline'; phaseTag.textContent = '📊 课余量模式'; }
