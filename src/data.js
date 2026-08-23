@@ -212,11 +212,11 @@ NX.extractFormFields = function (html) {
 
 // catalog 查询的 POST 基础字段：结构字段照抄表单，查询条件一律置空（等价"全部"），
 // 分批时仅 p_kkdwnm 填值。pathContent 置空规避 GBK 编码差异。
-NX.catalogPostFields = function (formFields, page, dept) {
+NX.catalogPostFields = function (formFields, page, dept, token) {
   const f = {
     m: 'kkxxSearch',
     page: String(page),
-    token: formFields.token || '',
+    token: token || formFields.token || '',
     'p_sort.p1': '', 'p_sort.p2': '',
     'p_sort.asc1': formFields['p_sort.asc1'] || 'true',
     'p_sort.asc2': formFields['p_sort.asc2'] || 'true',
@@ -259,12 +259,11 @@ NX.fetchCourseCatalog = async function () {
   };
   const formFields = NX.extractFormFields(firstHtml);
   const formAction = BASE + '/xkBks.vxkBksJxjhBs.do';
-  // v1.3.11：完整表单 POST 翻页（UI 同款请求路径）。GET 翻页被服务器限制在 ~293 页
-  //（v1.3.5~1.3.10 实测：并发/顺序/节流均无效；POST 表单才是 UI 的翻页方式）
-  const postPage = async (p, dept) => {
+  // v1.3.12：链式 POST（每页新 token）。GET 翻页被限制在 ~293 页（v1.3.5~1.3.11 实测）
+  const postPage = async (p, dept, token) => {
     const resp = await fetch(formAction, {
       method: 'POST', credentials: 'include',
-      body: NX.catalogPostFields(formFields || {}, p, dept),
+      body: NX.catalogPostFields(formFields || {}, p, dept, token),
     });
     const buf = await resp.arrayBuffer();
     return new TextDecoder('gbk').decode(buf);
@@ -279,79 +278,36 @@ NX.fetchCourseCatalog = async function () {
     dedupe: c => c.code + '_' + c.seq,
     expectPages: pager.pages, label: 'catalog',
   });
+
+  // ── A. 链式 POST 翻页（v1.3.12：每页换新 token，复刻 UI turn()；旧 token 复用是
+  //    v1.3.5~1.3.11 深页空壳的根因）──
+  const chainAll = () => NX.chainFetch({
+    fetchFirst: () => Promise.resolve(firstHtml),
+    parse: parseCat,
+    fetchPage: (p, token) => postPage(p, '', token),
+    maxPages: 320, throttle: 50,
+    dedupe: c => c.code + '_' + c.seq,
+    expectPages: pager.pages,
+    label: 'catalog',
+  });
   const finishWhole = (all, tag) => {
     if (pager.total > 0 && all.length < pager.total) {
       console.warn(NX.TAG, 'catalog got', all.length, '/', pager.total, '— data may be incomplete');
       NX.state.fetchWarn = '⚠ 课程数据可能不完整：' + all.length + '/' + pager.total + '（详见 Console）';
+    } else if (pager.total > 0) {
+      console.log(NX.TAG, 'catalog COMPLETE:', all.length, '/', pager.total);
     }
     console.log(NX.TAG, 'catalog total:', all.length, 'courses (' + tag + ')');
     return all;
   };
 
-  // ── A. 完整表单 POST 全量翻页（UI 同款；探测第 1 页有效性）──
-  let postOk = false;
-  try {
-    const probeHtml = await postPage(1, '');
-    postOk = parseCat(probeHtml).hasData;
-  } catch (e) { postOk = false; }
-  if (!postOk) {
-    console.warn(NX.TAG, 'form-POST pagination unavailable, fallback to GET');
+  const all = await chainAll();
+  if (!all.length && pager.pages > 1) {
+    // 链式完全失败（异常网络/表单变更）→ GET 兜底（旧行为，仍会截断但至少有数据）
+    console.warn(NX.TAG, 'chain-post empty, fallback to GET');
     return finishWhole(await fetchWholeGet(), 'get-fallback');
   }
-
-  // ── B. 院系分批（完整表单 + p_kkdwnm；探针校验过滤生效）──
-  const deptCodes = NX.parseDeptCodes(firstHtml);
-  const grabDept = async code => {
-    let fh = '';
-    try { fh = await postPage(0, code); }
-    catch (e) { return { items: [], total: 0, pages: 0 }; }
-    const dp = parsePagerInfo(fh);
-    const items = await pagedFetch({
-      firstHtml: fh,
-      fetchPage: p => postPage(p, code),
-      parse: parseCat,
-      maxPages: 100, concurrency: 1, throttle: 30,
-      dedupe: c => c.code + '_' + c.seq,
-      expectPages: dp.pages, label: 'catalog/' + code,
-    });
-    return { items, total: dp.total, pages: dp.pages };
-  };
-  if (deptCodes.length && pager.pages > 12) {
-    const probe = await grabDept(deptCodes[0]);
-    if (probe.pages > 0 && probe.pages < pager.pages) {
-      console.log(NX.TAG, 'dept-split engaged:', deptCodes.length, 'depts, probe', deptCodes[0], 'has', probe.pages, 'pages vs global', pager.pages);
-      const all = [...probe.items];
-      let sumTotals = probe.total, incompleteDepts = probe.items.length < probe.total ? 1 : 0;
-      await NX.runPool(deptCodes.slice(1), 4, async code => {
-        try {
-          const r = await grabDept(code);
-          all.push(...r.items);
-          sumTotals += r.total;
-          if (r.items.length < r.total) incompleteDepts++;
-        } catch (e) { incompleteDepts++; console.warn(NX.TAG, 'dept', code, e); }
-      });
-      const seen = new Set(); const uniq = [];
-      for (const c of all) { const k = c.code + '_' + c.seq; if (!seen.has(k)) { seen.add(k); uniq.push(c); } }
-      if (incompleteDepts > 0) {
-        console.warn(NX.TAG, incompleteDepts, 'depts incomplete');
-        NX.state.fetchWarn = '⚠ ' + incompleteDepts + ' 个院系的课程数据可能不完整（详见 Console）';
-      }
-      console.log(NX.TAG, 'catalog total:', uniq.length, 'unique · 院系条目合计', sumTotals, '· 全局分页计数', pager.total);
-      return uniq;
-    }
-    console.warn(NX.TAG, 'p_kkdwnm filter ineffective even via form-POST');
-  }
-
-  // ── C. POST 全量翻页（无院系分批）──
-  const all = await pagedFetch({
-    firstHtml,
-    fetchPage: p => postPage(p, ''),
-    parse: parseCat,
-    maxPages: 320, concurrency: 1, throttle: 50,
-    dedupe: c => c.code + '_' + c.seq,
-    expectPages: pager.pages, label: 'catalog',
-  });
-  return finishWhole(all, 'form-post');
+  return finishWhole(all, 'chain-post');
 };
 
 NX.fetchVolunteer = async function () {
@@ -711,11 +667,10 @@ NX.fetchQueueData = async function () {
         }
         return { items, hasData: items.length > 0 };
       };
-      // v1.3.11：完整表单 POST（UI 同款字段）+ 课号前缀分批
-      //（kylSearch 表单无院系字段，仅支持课号/课序/课名过滤；深翻页同样会被限制）
-      const kylPost = async (p, kch) => {
+      // v1.3.12：链式 POST（每页新 token，同 catalog 根因）；课号前缀分批保留
+      const kylPost = async (p, kch, token) => {
         const body = new URLSearchParams({
-          m: 'kylSearch', page: String(p), token,
+          m: 'kylSearch', page: String(p), token: token || '',
           'p_sort.p1': '', 'p_sort.p2': '', 'p_sort.asc1': 'true', 'p_sort.asc2': 'true',
           p_xnxq: SEM, pathContent: '',
           p_kch: kch || '', p_kxh: '', p_kcm: '', p_skxq: '', p_skjc: '', bt: '',
@@ -725,48 +680,18 @@ NX.fetchQueueData = async function () {
         return new TextDecoder('gbk').decode(buf);
       };
       const addToMap = list => list.forEach(q => { const key = q.code + '_' + q.seq; if (!map[key]) map[key] = q; });
-      const grabKyl = async kch => {
-        let fh = '';
-        try { fh = await kylPost(0, kch); }
-        catch (e) { return { items: [], pages: 0 }; }
-        const dp = NX.parsePagerInfo(fh);
-        const items = await NX.pagedFetch({
-          firstHtml: fh,
-          fetchPage: p => kylPost(p, kch),
-          parse: parseKyl,
-          maxPages: 100, concurrency: 1, throttle: 30,
-          dedupe: q => q.code + '_' + q.seq,
-          expectPages: dp.pages, label: 'kyl' + (kch ? '/' + kch : ''),
-        });
-        return { items, pages: dp.pages };
-      };
-      // 课号前 2 位分组（来自已抓好的课程目录）
-      const prefixes = [...new Set((NX.state.allCourses || []).map(c => String(c.code).slice(0, 2)).filter(x => /^\d{2}$/.test(x)))];
-      let split = false;
-      if (prefixes.length > 3 && gPager.pages > 12) {
-        const probe = await grabKyl(prefixes[0]);
-        if (probe.pages > 0 && probe.pages < gPager.pages) {
-          split = true;
-          console.log(NX.TAG, 'kyl kch-split engaged:', prefixes.length, 'prefixes, probe', prefixes[0], 'has', probe.pages, 'pages vs global', gPager.pages);
-          addToMap(probe.items);
-          let kylIncomplete = 0;
-          await NX.runPool(prefixes.slice(1), 4, async pf => {
-            try { addToMap((await grabKyl(pf)).items); }
-            catch (e) { kylIncomplete++; console.warn(NX.TAG, 'kyl prefix', pf, e); }
-          });
-          if (kylIncomplete > 0 && !NX.state.fetchWarn) NX.state.fetchWarn = '⚠ 课余量有 ' + kylIncomplete + ' 个课号段可能不完整（详见 Console）';
-        }
-      }
-      if (!split) {
-        if (prefixes.length > 3) console.warn(NX.TAG, 'kylSearch p_kch split ineffective, whole-query');
-        const items = await NX.pagedFetch({
-          firstHtml, fetchPage: p => kylPost(p, ''), parse: parseKyl,
-          maxPages: 320, concurrency: 1, throttle: 50,
-          dedupe: q => q.code + '_' + q.seq,
-          expectPages: gPager.pages, label: 'kylSearch',
-        });
-        addToMap(items);
-      }
+      // 全量链式（kyl 表单无院系字段，前缀分批仅在链式也不完整时才有意义；
+      // 先链式全量——token 修好后理论上可直达末页）
+      const items = await NX.chainFetch({
+        fetchFirst: () => Promise.resolve(firstHtml),
+        parse: parseKyl,
+        fetchPage: (p, token) => kylPost(p, '', token),
+        maxPages: 320, throttle: 50,
+        dedupe: q => q.code + '_' + q.seq,
+        expectPages: gPager.pages,
+        label: 'kylSearch',
+      });
+      addToMap(items);
     }
     if (!Object.keys(map).length) return { map: {}, phase: false };
     // Fetch real-time queue counts（并发 4，原为逐批串行）

@@ -10,7 +10,7 @@ NX.browser = typeof browser !== 'undefined' ? browser : chrome;
 NX.TAG = '[NextTHUxk]';
 NX.SP = 'nextthuxk_';
 NX.DATA_VER = 5;
-NX.CUR_VER = '1.3.11';
+NX.CUR_VER = '1.3.12';
 NX.DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 NX.ZY_LIMITS = {
   bx: [[1,1],[2,2],[3,Infinity]], // 必修：1志愿1门, 2志愿2门, 3志愿无限
@@ -246,6 +246,53 @@ NX.pagedFetch = async function (opts) {
 
   const out = [];
   [...pages.keys()].sort((a, b) => a - b).forEach(p => out.push(...pages.get(p)));
+  return out;
+};
+
+// ─── 链式顺序抓取器（v1.3.12）──────────────────────────────
+// 教务翻页 token 一次性：UI 的 turn() 每次提交后页面刷新携带新 token，
+// 复用旧 token 的第 K 次提交会被服务器返回空壳页（与 GET/POST、并发/顺序、
+// 节流均无关——v1.3.5~1.3.11 实测根因）。本抓取器每页从上一响应提取新 token。
+NX.chainFetch = async function (opts) {
+  const {
+    fetchFirst,        // async () => html（首页：初始 token + 分页信息）
+    parse,             // html => { items: [], hasData: bool }
+    fetchPage,         // async (p, token) => html（p 从 1 起，1 基，与 UI turn(p) 一致）
+    maxPages = 320,
+    throttle = 50,
+    dedupe = null,
+    expectPages = 0,   // UI 分页为 1 基：共 N 页 = page 1..N（首页=第 1 页，dedupe 吸收重复）
+    label = '',
+  } = opts;
+  const out = [];
+  const seen = dedupe ? new Set() : null;
+  const absorb = items => {
+    for (const it of items) {
+      if (seen) { const k = dedupe(it); if (seen.has(k)) continue; seen.add(k); }
+      out.push(it);
+    }
+  };
+  let fh = '';
+  try { fh = await fetchFirst(); }
+  catch (e) { console.warn(NX.TAG, label, 'first page:', e); return out; }
+  const first = parse(fh);
+  absorb(first.items);
+  let token = (fh.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';
+  let noTokenWarned = false;
+  const cap = expectPages > 0 ? Math.min(expectPages, maxPages) : maxPages;
+  for (let p = 1; p <= cap; p++) {
+    let html = '';
+    try {
+      if (throttle > 0) await new Promise(r => setTimeout(r, throttle));
+      html = await fetchPage(p, token);
+    } catch (e) { console.warn(NX.TAG, label, 'page', p, 'ERR:', e.message); break; }
+    const r = parse(html);
+    if (!r.hasData) break;   // 新鲜 token 下的空页 = 真·末页（可信终止）
+    absorb(r.items);
+    const nt = (html.match(/name="token"\s+value="([^"]+)"/) || [])[1];
+    if (nt) token = nt;      // 换新 token，复刻 UI 每页刷新
+    else if (p === 1 && !noTokenWarned) { noTokenWarned = true; console.warn(NX.TAG, label, 'no fresh token in response — token-chain assumption may not hold'); }
+  }
   return out;
 };
 
