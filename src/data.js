@@ -194,39 +194,107 @@ NX.fetchTrainingPlan = async function () {
   return [];
 };
 
+// 从查询页 HTML 提取开课单位下拉选项（v1.3.10 院系分批抓取用）
+NX.parseDeptCodes = function (html) {
+  const sel = /<select[^>]*name="p_kkdwnm"[^>]*>([\s\S]*?)<\/select>/i.exec(html);
+  if (!sel) return [];
+  const out = [];
+  const re = /<option[^>]*value=(["'])(.*?)\1/gi;   // 兼容单/双引号属性
+  let m;
+  while ((m = re.exec(sel[1])) !== null) {
+    const v = m[2].trim();
+    if (v) out.push(v);
+  }
+  return out;
+};
+
 NX.fetchCourseCatalog = async function () {
   const { state, fetchPage, parseCatalog, pagedFetch, parsePagerInfo } = NX;
   if (!state.isZhjwxk) return [];
   const { SEM, BASE } = state;
-  const url = p => BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM + '&page=' + p + '&_t=' + Date.now();
   const firstUrl = BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM;
   let firstHtml = '';
   try { firstHtml = await fetchPage(firstUrl); }
   catch (e) { console.warn(NX.TAG, 'catalog first page:', e); return []; }
   const pager = parsePagerInfo(firstHtml);
   if (pager.pages > 0) console.log(NX.TAG, 'catalog pager: 共', pager.pages, '页 /', pager.total, '条');
-  const all = await pagedFetch({
+
+  const parseCat = html => {
+    const batch = parseCatalog(new DOMParser().parseFromString(html, 'text/html'));
+    return { items: batch, hasData: batch.length > 0 };
+  };
+  // 兜底：全量顺序抓取（院系过滤不可用/解析失败/过滤无效时）
+  const fetchWhole = async () => pagedFetch({
     firstHtml,
-    fetchPage: p => fetchPage(url(p)),
-    parse: html => {
-      const batch = parseCatalog(new DOMParser().parseFromString(html, 'text/html'));
-      return { items: batch, hasData: batch.length > 0 };
-    },
-    maxPages: 320,
-    // ⚠️ 必须顺序抓取（concurrency=1）：教务分页是 session 有状态的，
-    // 乱序并发请求会打乱服务器端游标 → 294 页后返回空壳页（实测 v1.3.5~1.3.8）
-    concurrency: 1,
-    throttle: 50,
-    dedupe: c => c.code + '_' + c.seq,   // 防御：分页边界或重复页导致同一课重复出现
-    expectPages: pager.pages,            // 已知总页数 → 抓完自动补缺页
-    label: 'catalog',
+    fetchPage: p => fetchPage(BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM + '&page=' + p + '&_t=' + Date.now()),
+    parse: parseCat,
+    maxPages: 320, concurrency: 1, throttle: 50,
+    dedupe: c => c.code + '_' + c.seq,
+    expectPages: pager.pages, label: 'catalog',
   });
-  if (pager.total > 0 && all.length < pager.total) {
-    console.warn(NX.TAG, 'catalog got', all.length, '/', pager.total, '— data may be incomplete');
-    NX.state.fetchWarn = '⚠ 课程数据可能不完整：' + all.length + '/' + pager.total + '（详见 Console，可稍后再点刷新）';
+
+  // v1.3.10 按开课单位分批：教务对单一查询的深分页在 ~294 页后返回空壳页
+  //（v1.3.5~1.3.9 实测：并发/顺序/节流均无效，两接口同深度卡死 → 单查询上限）。
+  // 86 个院系各为独立浅分页查询（院内顺序、院系间并发 4），彻底绕开深分页且更快。
+  const deptCodes = NX.parseDeptCodes(firstHtml);
+  if (!deptCodes.length) {
+    const all = await fetchWhole();
+    if (pager.total > 0 && all.length < pager.total) {
+      console.warn(NX.TAG, 'catalog got', all.length, '/', pager.total, '— data may be incomplete');
+      NX.state.fetchWarn = '⚠ 课程数据可能不完整：' + all.length + '/' + pager.total + '（详见 Console，可稍后再点刷新）';
+    }
+    console.log(NX.TAG, 'catalog total:', all.length, 'courses (whole-query)');
+    return all;
   }
-  console.log(NX.TAG, 'catalog total:', all.length, 'courses');
-  return all;
+  const grabDept = async code => {
+    const url = p => BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM + '&p_kkdwnm=' + code + '&page=' + p + '&_t=' + Date.now();
+    let fh = '';
+    try { fh = await fetchPage(url(0)); }
+    catch (e) { console.warn(NX.TAG, 'dept', code, 'first page:', e); return { items: [], total: 0, pages: 0 }; }
+    const dp = parsePagerInfo(fh);
+    const items = await pagedFetch({
+      firstHtml: fh,
+      fetchPage: p => fetchPage(url(p)),
+      parse: parseCat,
+      maxPages: 100, concurrency: 1, throttle: 30,
+      dedupe: c => c.code + '_' + c.seq,
+      expectPages: dp.pages, label: 'catalog/' + code,
+    });
+    return { items, total: dp.total, pages: dp.pages };
+  };
+  // 探针：若首个院系的页数与全局相当 → p_kkdwnm 过滤无效 → 回退全量
+  const probe = await grabDept(deptCodes[0]);
+  if (pager.pages > 0 && probe.pages >= pager.pages) {
+    console.warn(NX.TAG, 'p_kkdwnm filter ineffective, fallback to whole-query');
+    const all = await fetchWhole();
+    if (pager.total > 0 && all.length < pager.total) {
+      console.warn(NX.TAG, 'catalog got', all.length, '/', pager.total, '— data may be incomplete');
+      NX.state.fetchWarn = '⚠ 课程数据可能不完整：' + all.length + '/' + pager.total + '（详见 Console）';
+    }
+    console.log(NX.TAG, 'catalog total:', all.length, 'courses (fallback)');
+    return all;
+  }
+  console.log(NX.TAG, 'dept-split engaged:', deptCodes.length, 'depts, probe dept', deptCodes[0], 'has', probe.pages, 'pages vs global', pager.pages);
+  const all = [...probe.items];
+  let sumTotals = probe.total, incompleteDepts = probe.items.length < probe.total ? 1 : 0;
+  await NX.runPool(deptCodes.slice(1), 4, async code => {
+    try {
+      const r = await grabDept(code);
+      all.push(...r.items);
+      sumTotals += r.total;
+      if (r.items.length < r.total) incompleteDepts++;
+    } catch (e) { incompleteDepts++; console.warn(NX.TAG, 'dept', code, e); }
+  });
+  // 跨院系去重（合开课程会在多个院系重复列出）
+  const seen = new Set(); const uniq = [];
+  for (const c of all) { const k = c.code + '_' + c.seq; if (!seen.has(k)) { seen.add(k); uniq.push(c); } }
+  if (incompleteDepts > 0) {
+    console.warn(NX.TAG, incompleteDepts, 'depts incomplete');
+    NX.state.fetchWarn = '⚠ ' + incompleteDepts + ' 个院系的课程数据可能不完整（详见 Console）';
+  }
+  // 关键对照日志：院系条目合计 vs 全局分页计数 vs 去重后唯一课程数（回答 6078/5843 之谜）
+  console.log(NX.TAG, 'catalog total:', uniq.length, 'unique · 院系条目合计', sumTotals, '· 全局分页计数', pager.total);
+  return uniq;
 };
 
 NX.fetchVolunteer = async function () {
@@ -236,27 +304,58 @@ NX.fetchVolunteer = async function () {
   try {
     const mkUrl = m => p => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM + '&page=' + p + '&_t=' + Date.now();
     const mkFirst = m => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM;
+    const parseVol = parseFn => html => {
+      const batch = parseFn(html);
+      const arr = Object.values(batch);
+      return { items: arr, hasData: arr.length > 0 };
+    };
+    const grabWhole = async (m, parseFn, maxPages, fh, pager) => pagedFetch({
+      firstHtml: fh,
+      fetchPage: p => fetchPage(mkUrl(m)(p)),
+      parse: parseVol(parseFn),
+      maxPages, concurrency: 1, throttle: 50,
+      dedupe: v => v.code + '_' + v.seq,
+      expectPages: pager.pages, label: m,
+    });
     const grab = async (m, parseFn, maxPages) => {
       let fh = '';
       try { fh = await fetchPage(mkFirst(m)); }
       catch (e) { console.warn(NX.TAG, m, 'first page:', e); return []; }
       const pager = NX.parsePagerInfo(fh);
-      const items = await pagedFetch({
-        firstHtml: fh,
-        fetchPage: p => fetchPage(mkUrl(m)(p)),
-        parse: html => {
-          const batch = parseFn(html);
-          const arr = Object.values(batch);
-          return { items: arr, hasData: arr.length > 0 };
-        },
-        maxPages,
-        concurrency: 1,   // ⚠️ 顺序抓取：session 有状态分页，乱序会致空壳页（同 catalog）
-        throttle: 50,
-        dedupe: v => v.code + '_' + v.seq,
-        expectPages: pager.pages,
-        label: m,
-      });
-      return items;
+      // v1.3.10 院系分批（查询深 >12 页才值得）：绕开单查询深分页上限 + 提速；
+      // 探针校验过滤有效性，无效/异常自动回退全量顺序
+      const depts = NX.parseDeptCodes(fh);
+      if (depts.length && pager.pages > 12) {
+        const grabDeptVol = async code => {
+          const du = p => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM + '&p_kkdwnm=' + code + '&page=' + p + '&_t=' + Date.now();
+          let dfh = '';
+          try { dfh = await fetchPage(du(0)); }
+          catch (e) { return { items: [], pages: 0 }; }
+          const dp = NX.parsePagerInfo(dfh);
+          const items = await pagedFetch({
+            firstHtml: dfh, fetchPage: p => fetchPage(du(p)),
+            parse: parseVol(parseFn),
+            maxPages: 100, concurrency: 1, throttle: 30,
+            dedupe: v => v.code + '_' + v.seq,
+            expectPages: dp.pages, label: m + '/' + code,
+          });
+          return { items, pages: dp.pages };
+        };
+        const probe = await grabDeptVol(depts[0]);
+        if (probe.pages > 0 && probe.pages < pager.pages) {
+          const all = [...probe.items];
+          await NX.runPool(depts.slice(1), 4, async code => {
+            try { all.push(...(await grabDeptVol(code)).items); }
+            catch (e) { console.warn(NX.TAG, m, 'dept', code, e); }
+          });
+          const seen = new Set(); const uniq = [];
+          for (const v of all) { const k = v.code + '_' + v.seq; if (!seen.has(k)) { seen.add(k); uniq.push(v); } }
+          console.log(NX.TAG, m, 'dept-split:', uniq.length, 'courses');
+          return uniq;
+        }
+        console.warn(NX.TAG, m, 'p_kkdwnm filter ineffective, fallback to whole-query');
+      }
+      return grabWhole(m, parseFn, maxPages, fh, pager);
     };
     const volItems = await grab('tbzySearchBR', parseVolFromHtml, 200);
     const allMap = {};
@@ -545,39 +644,74 @@ NX.fetchQueueData = async function () {
     const formAction = BASE + '/xkBks.vxkBksJxjhBs.do';
     const pgRegex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
     if (token) {
-      const pager = NX.parsePagerInfo(firstHtml);
-      const items = await NX.pagedFetch({
-        firstHtml,
-        fetchPage: async p => {
-          const body = new URLSearchParams({
-            m: 'kylSearch', page: String(p), token,
-            'p_sort.p1': '', 'p_sort.p2': '', 'p_sort.asc1': '', 'p_sort.asc2': '',
-            p_xnxq: SEM, pathContent: '',
+      const gPager = NX.parsePagerInfo(firstHtml);
+      const parseKyl = html => {
+        if (!html.includes('gridData')) return { items: [], hasData: false };
+        const items = [];
+        let pm;
+        while ((pm = pgRegex.exec(html)) !== null) {
+          items.push({ code: pm[1], seq: pm[2], qCapacity: parseInt(pm[3]) || 0, qRemaining: parseInt(pm[4]) || 0, qQueue: 0 });
+        }
+        return { items, hasData: items.length > 0 };
+      };
+      const mkPost = code => async p => {
+        const body = new URLSearchParams({
+          m: 'kylSearch', page: String(p), token,
+          'p_sort.p1': '', 'p_sort.p2': '', 'p_sort.asc1': '', 'p_sort.asc2': '',
+          p_xnxq: SEM, pathContent: '',
+          ...(code ? { p_kkdwnm: code } : {}),
+        });
+        const resp = await fetch(formAction, { method: 'POST', credentials: 'include', body });
+        const buf = await resp.arrayBuffer();
+        return new TextDecoder('gbk').decode(buf);
+      };
+      const addToMap = list => list.forEach(q => { const key = q.code + '_' + q.seq; if (!map[key]) map[key] = q; });
+      const grabKyl = async code => {
+        let fh = '';
+        try { fh = await mkPost(code)(0); }
+        catch (e) { return { items: [], pages: 0 }; }
+        const dp = NX.parsePagerInfo(fh);
+        const items = await NX.pagedFetch({
+          firstHtml: fh,
+          fetchPage: p => mkPost(code)(p),
+          parse: parseKyl,
+          maxPages: 100, concurrency: 1, throttle: 30,
+          dedupe: q => q.code + '_' + q.seq,
+          expectPages: dp.pages, label: 'kyl/' + code,
+        });
+        return { items, pages: dp.pages };
+      };
+      // v1.3.10 院系分批（同 catalog：绕开单查询深分页上限）；探针无效则回退全量顺序
+      const deptCodes = NX.parseDeptCodes(firstHtml);
+      if (deptCodes.length && gPager.pages > 12) {
+        const probe = await grabKyl(deptCodes[0]);
+        if (probe.pages > 0 && probe.pages < gPager.pages) {
+          addToMap(probe.items);
+          let kylIncomplete = 0;
+          await NX.runPool(deptCodes.slice(1), 4, async code => {
+            try { addToMap((await grabKyl(code)).items); }
+            catch (e) { kylIncomplete++; console.warn(NX.TAG, 'kyl dept', code, e); }
           });
-          const resp = await fetch(formAction, { method: 'POST', credentials: 'include', body });
-          const buf = await resp.arrayBuffer();
-          return new TextDecoder('gbk').decode(buf);
-        },
-        parse: html => {
-          if (!html.includes('gridData')) return { items: [], hasData: false };
-          const items = [];
-          let pm;
-          while ((pm = pgRegex.exec(html)) !== null) {
-            items.push({ code: pm[1], seq: pm[2], qCapacity: parseInt(pm[3]) || 0, qRemaining: parseInt(pm[4]) || 0, qQueue: 0 });
-          }
-          return { items, hasData: items.length > 0 };
-        },
-        maxPages: 320,
-        concurrency: 1,   // ⚠️ 顺序抓取：session 游标制分页，乱序会致空壳页（同 catalog）
-        throttle: 50,
-        dedupe: q => q.code + '_' + q.seq,
-        expectPages: pager.pages,
-        label: 'kylSearch',
-      });
-      items.forEach(q => {
-        const key = q.code + '_' + q.seq;
-        if (!map[key]) map[key] = q;
-      });
+          if (kylIncomplete > 0 && !NX.state.fetchWarn) NX.state.fetchWarn = '⚠ 课余量有 ' + kylIncomplete + ' 个院系可能不完整（详见 Console）';
+        } else {
+          console.warn(NX.TAG, 'kylSearch p_kkdwnm filter ineffective, fallback');
+          const items = await NX.pagedFetch({
+            firstHtml, fetchPage: p => mkPost('')(p), parse: parseKyl,
+            maxPages: 320, concurrency: 1, throttle: 50,
+            dedupe: q => q.code + '_' + q.seq,
+            expectPages: gPager.pages, label: 'kylSearch',
+          });
+          addToMap(items);
+        }
+      } else {
+        const items = await NX.pagedFetch({
+          firstHtml, fetchPage: p => mkPost('')(p), parse: parseKyl,
+          maxPages: 320, concurrency: 1, throttle: 50,
+          dedupe: q => q.code + '_' + q.seq,
+          expectPages: gPager.pages, label: 'kylSearch',
+        });
+        addToMap(items);
+      }
     }
     if (!Object.keys(map).length) return { map: {}, phase: false };
     // Fetch real-time queue counts（并发 4，原为逐批串行）
@@ -603,11 +737,6 @@ NX.fetchQueueData = async function () {
       } catch (e) { console.warn(NX.TAG, 'queue count batch:', e); }
     });
     console.log(NX.TAG, 'queue data:', Object.keys(map).length, 'courses');
-    const qPager = NX.parsePagerInfo(firstHtml);
-    if (qPager.total > 0 && Object.keys(map).length < qPager.total) {
-      console.warn(NX.TAG, 'queue data got', Object.keys(map).length, '/', qPager.total, '— may be incomplete');
-      if (!NX.state.fetchWarn) NX.state.fetchWarn = '⚠ 课余量数据可能不完整：' + Object.keys(map).length + '/' + qPager.total + '（详见 Console）';
-    }
     return { map, phase: true };
   } catch (e) {
     console.warn(NX.TAG, 'queue data fetch:', e);
