@@ -110,7 +110,7 @@ NX.courseCardHtml = function (c, ctx) {
         '<select class="nx-type-select" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '">' + flagOpts + '</select>' +
         '<select class="nx-zy-select" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '"><option value="3">3志愿</option><option value="2">2志愿</option><option value="1">1志愿</option></select>' +
         probInline +
-        '<button class="nx-select-btn" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" style="background:linear-gradient(135deg,#ff9f1a,#f59e0b)">排队选课</button>' +
+        '<button class="nx-select-btn" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" style="background:var(--nx-glass);color:var(--nx-ink-soft);box-shadow:inset 0 1px 0 rgba(255,255,255,.9),inset 0 0 0 1px var(--nx-line)">排队选课</button>' +
         '<button class="nx-stage-btn nx-add-stage" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '"' + (inStage ? ' disabled' : '') + '>' + (inStage ? '已暂存' : '暂存') + '</button>';
     }
     return '<div class="nx-card' + (c.selected ? ' nx-selected' : '') + '" data-code="' + esc(c.code) + '" data-tid="' + esc(c.teacherId || '') + '">' +
@@ -476,7 +476,7 @@ NX.renderDrafts = function () {
         const zyOpts = [1, 2, 3].map(z => '<option value="' + z + '"' + (c.zy === z ? ' selected' : '') + '>' + z + '志愿</option>').join('');
         const prob = NX.draftCourseProbHtml(c);
         courseList += '<div style="display:flex;align-items:center;gap:4px;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(0,0,0,.03)">' +
-          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#1d1d1f">' + esc(c.name) + '</span>' +
+          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#1f2329">' + esc(c.name) + '</span>' +
           '<span style="font-size:10px;color:#9aa1ac">' + c.credits + '学分</span>' +
           '<select class="nx-draft-flag" data-di="' + di + '" data-ci="' + ci + '" style="padding:1px 3px;border-radius:5px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer">' + flOpts + '</select>' +
           '<select class="nx-draft-zy" data-di="' + di + '" data-ci="' + ci + '" style="padding:1px 3px;border-radius:5px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer">' + zyOpts + '</select>' +
@@ -641,14 +641,14 @@ NX.renderPlanView = function (searchQuery) {
   const totalCr = coverage.reduce((s, c) => s + c.credits, 0);
   const coveredCr = coverage.filter(c => c.covered).reduce((s, c) => s + c.credits, 0);
   const coveredN = coverage.filter(c => c.covered).length;
-  let html = '<div style="margin-bottom:14px;padding:12px 16px;border-radius:12px;background:linear-gradient(135deg,rgba(124,106,239,.12),rgba(99,102,241,.06));font-size:13px">' +
+  let html = '<div style="margin-bottom:14px;padding:12px 16px;border-radius:12px;background:var(--nx-glass);box-shadow:inset 0 1px 0 rgba(255,255,255,.9),inset 0 0 0 1px var(--nx-line);font-size:13px">' +
     '<strong>培养方案进度</strong>: ' + coveredN + '/' + coverage.length + '门 · ' + coveredCr + '/' + totalCr + '学分' +
     '<div style="margin-top:6px;height:6px;background:rgba(0,0,0,.06);border-radius:3px;overflow:hidden">' +
-    '<div style="height:100%;width:' + (totalCr ? Math.round(coveredCr / totalCr * 100) : 0) + '%;background:linear-gradient(90deg,#07c160,#30d158);border-radius:3px"></div></div></div>';
+    '<div style="height:100%;width:' + (totalCr ? Math.round(coveredCr / totalCr * 100) : 0) + '%;background:var(--nx-accent);border-radius:3px"></div></div></div>';
   for (const [groupName, courses] of Object.entries(groups)) {
     const gTotal = courses.reduce((s, c) => s + c.credits, 0);
     const gCovered = courses.filter(c => c.covered).reduce((s, c) => s + c.credits, 0);
-    html += '<div style="margin-bottom:14px"><div style="font-size:13px;font-weight:700;color:#1d1d1f;margin-bottom:6px;padding:5px 12px;background:rgba(124,106,239,.08);border-radius:8px;display:flex;justify-content:space-between"><span>' + esc(groupName) + '</span><span style="font-size:11px;font-weight:400;color:' + (gCovered >= gTotal ? '#07c160' : '#9aa1ac') + '">' + gCovered + '/' + gTotal + '学分</span></div>';
+    html += '<div style="margin-bottom:14px"><div style="font-size:13px;font-weight:700;color:#1f2329;margin-bottom:6px;padding:5px 12px;background:rgba(29,31,36,.05);border-radius:8px;display:flex;justify-content:space-between"><span>' + esc(groupName) + '</span><span style="font-size:11px;font-weight:400;color:' + (gCovered >= gTotal ? '#07c160' : '#9aa1ac') + '">' + gCovered + '/' + gTotal + '学分</span></div>';
     courses.forEach(p => {
       const icon = p.covered ? '✓' : '✗';
       const bg = p.covered ? 'rgba(7,193,96,.06)' : 'rgba(238,77,77,.04)';

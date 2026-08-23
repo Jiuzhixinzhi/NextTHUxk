@@ -368,7 +368,7 @@ NX.promoteDraft = async function (draft) {
   const { state, showXkResult, fetchSelectedCourses, dropCourse, submitCourse, refreshSelected, renderPreviewTT } = NX;
   const $ = state.$;
   const toast = $('nextthuxk-toast');
-  const prog = (msg) => { if (toast) { toast.className = 'nx-toast'; toast.style.cssText = 'display:block;opacity:1;background:rgba(124,106,239,.95);color:#fff'; toast.textContent = msg; } };
+  const prog = (msg) => { if (toast) { toast.className = 'nx-toast'; toast.style.cssText = 'display:block;opacity:1;background:rgba(29,31,36,.82);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);color:#fff'; toast.textContent = msg; } };
   try {
     prog('正在获取已选课程…');
     const current = await fetchSelectedCourses();

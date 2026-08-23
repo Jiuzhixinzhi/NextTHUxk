@@ -4,14 +4,62 @@
 <meta charset="utf-8">
 <style>
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { width: 260px; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif; padding: 20px; color: #1d1d1f; }
-.logo { font-size: 16px; font-weight: 700; background: linear-gradient(135deg, #7c6aef, #6366f1); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 4px; }
-.sub { font-size: 11px; color: #86868b; margin-bottom: 14px; }
-.status { font-size: 12px; color: #86868b; margin-bottom: 12px; padding: 8px; border-radius: 8px; background: rgba(0,0,0,.03); }
-.status.ok { color: #34c759; }
-.status.err { color: #ff3b30; }
-.btn { display: block; width: 100%; padding: 10px; border-radius: 10px; background: linear-gradient(135deg, #7c6aef, #6366f1); color: #fff; border: none; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
-.btn:hover { opacity: .9; }
+:root {
+  --ink: #1d1f24;
+  --ink-soft: #6b7280;
+  --line: rgba(29,31,36,.08);
+  --accent: #2f6bff;
+}
+body {
+  width: 280px;
+  font-family: -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Noto Sans SC", sans-serif;
+  padding: 18px 20px 20px;
+  color: var(--ink);
+  background: linear-gradient(160deg, #f4f6fa 0%, #eef1f7 55%, #e9edf5 100%);
+}
+.logo {
+  font-size: 16px;
+  font-weight: 700;
+  letter-spacing: .02em;
+  color: var(--ink);
+}
+.sub { font-size: 11px; color: var(--ink-soft); margin: 3px 0 14px; letter-spacing: .08em; }
+.status {
+  font-size: 12px;
+  color: var(--ink-soft);
+  margin-bottom: 14px;
+  padding: 9px 12px;
+  border-radius: 12px;
+  background: rgba(255,255,255,.5);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.9), inset 0 -1px 0 rgba(29,31,36,.05), 0 2px 12px rgba(29,31,36,.06);
+}
+.status.ok { color: #07c160; }
+.status.err { color: #ee4d4d; }
+.btn {
+  display: block;
+  width: 100%;
+  padding: 11px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.5);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  color: var(--ink);
+  border: none;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  letter-spacing: .04em;
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(29,31,36,.07), 0 6px 24px rgba(29,31,36,.12);
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.btn:hover {
+  transform: translateY(-1px);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(29,31,36,.07), 0 10px 30px rgba(29,31,36,.16);
+}
+.btn:active { transform: translateY(0); }
 </style>
 </head>
 <body>

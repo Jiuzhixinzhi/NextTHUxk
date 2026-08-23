@@ -36,7 +36,7 @@ try {
 // ─── HTML Template ────────────────────────────────────────────
 const HTML = `
 <div id="nextthuxk-inner">
-  <button id="nextthuxk-launch" title="启动 NextTHUxk 选课">选</button>
+  <button id="nextthuxk-launch" title="启动 NextTHUxk 下一代选课">NextTHUxk</button>
   <div id="nextthuxk-toast" class="nx-toast"></div>
   <div id="nextthuxk-dashboard">
   <div class="nx-modal-mask" id="nextthuxk-modal">
@@ -217,16 +217,65 @@ NX.launch = async function launch() {
         fetchCourseCatalog().catch(e => { console.warn(TAG, 'catalog:', e); return []; }),
       ]);
       volTs = Date.now();
-    } else if (needVol) {
-      console.log(TAG, 'volunteer data stale, refreshing...');
-      volTs = Date.now();
     } else if (sd?.courses?.length) {
-      // 缓存命中！直接用 merge 好的 courses，跳过所有爬虫
-      console.log(TAG, 'using cached', sd.courses.length, 'courses');
+      // 缓存命中！无论志愿新旧，先立即用缓存渲染（秒开）；
+      // 志愿过期则渲染后后台静默补抓（stale-while-revalidate，不打断界面）
+      console.log(TAG, 'using cached', sd.courses.length, 'courses', needVol ? '(vol stale → bg refresh)' : '');
       listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;已读取缓存数据，正在加载实时状态…</div>';
       state.planData = sd.plan || [];
       state.allCourses = sd.courses;
       plan = sd.plan; volTs = sd.volTs || 0;
+      if (!needVol) {
+        // 志愿也新鲜 → 跳过 merge，仅拉实时状态（已选/队列）
+        const [selectedCourses0, qResult0] = await Promise.all([
+          fetchSelectedCourses().catch(e => { console.warn(TAG, 'selected:', e); return []; }),
+          fetchQueueData(),
+        ]);
+        state.queueDataMap = qResult0.map;
+        state.isQueuePhase = qResult0.phase;
+        // 与主路径一致：队列阶段拉候补并标记 isCandidate；非队列阶段清空（防过期候补残留）
+        if (state.isQueuePhase) {
+          state.candidateCourses = await fetchCandidateCourses();
+          if (state.candidateCourses.length) {
+            const candCodes0 = new Set(state.candidateCourses.map(c => c.code));
+            state.allCourses.forEach(c => { if (candCodes0.has(c.code)) c.isCandidate = true; });
+          }
+        } else {
+          state.candidateCourses = [];
+        }
+        const selMap0 = {};
+        selectedCourses0.forEach(s => { selMap0[s.code + '_' + s.seq] = s; });
+        const zyCache0 = (await store.get('zyCache')) || {};
+        const cu0 = await resolveCourseZy(state.allCourses, selMap0, zyCache0);
+        if (cu0) await store.set('zyCache', zyCache0);
+        NX.rebuildCourseMap();
+        renderCourses(state.allCourses);
+        renderPlan(state.planData);
+        renderPreviewTT(
+          state.allCourses.filter(c => c.selected).concat(state.candidateCourses.filter(cc => !state.allCourses.some(ac => ac.selected && ac.code === cc.code))),
+          '当前已选'
+        );
+        await renderStageAndDrafts();
+        NX.finishLaunch(sd, selectedCourses0.length, volTs, false);
+        // 后台静默刷新志愿（不阻塞、失败不打扰）
+        fetchVolunteer().then(volData => {
+          if (state.SEM !== SEM0) return;   // 学期已切换：弃用，防旧学期数据污染缓存
+          state.allCourses = mergeStaticData(state.allCourses, volData, state.planData);
+          // isCandidate 是本会话实时标记，不得持久化进缓存（否则退队后仍出现在"已选"筛选）
+          const clean = state.allCourses.map(c => { const { isCandidate, ...rest } = c; return rest; });
+          return store.set('staticData', { ver: DATA_VER, plan: state.planData, courses: clean, volTs: Date.now(), ts: Date.now() })
+            .then(() => {
+              console.log(TAG, 'volunteer refreshed in background');
+              const ce = state.$('nextthuxk-cache-info');
+              if (ce) ce.innerHTML = state.isQueuePhase
+                ? '课余量实时数据 · ' + Object.keys(state.queueDataMap).length + '门'
+                : '课程数据已更新 · 志愿排队 ' + NX.fmtTime(Date.now());
+              filterCourses();
+            });
+        }).catch(e => console.warn(TAG, 'bg volunteer refresh failed:', e));
+        checkUpdate();
+        return;
+      }
     }
     // 需要 merge: needCatalog / needVol / 旧格式没有 courses 缓存
     const needMerge = needCatalog || needVol || !sd?.courses?.length;
@@ -237,7 +286,9 @@ NX.launch = async function launch() {
       // 只存 merged courses（不存 catalog 副本，体积约减半）；
       // 若期间用户切换了学期（SEM 变化），弃写缓存以免旧学期数据覆盖新学期空缓存
       if (state.SEM === SEM0) {
-        sd = { ver: DATA_VER, plan, courses: state.allCourses, volTs, ts: needCatalog ? Date.now() : (sd?.ts || Date.now()) };
+        // 同上：isCandidate 为会话实时标记，不进缓存
+        const cleanMain = state.allCourses.map(c => { const { isCandidate, ...rest } = c; return rest; });
+        sd = { ver: DATA_VER, plan, courses: cleanMain, volTs, ts: needCatalog ? Date.now() : (sd?.ts || Date.now()) };
         await store.set('staticData', sd);
       }
     }
@@ -272,48 +323,56 @@ NX.launch = async function launch() {
       state.allCourses.filter(c => c.selected).concat(state.candidateCourses.filter(cc => !state.allCourses.some(ac => ac.selected && ac.code === cc.code))),
       '当前已选'
     );
-
-    state.stageCart = (await store.get('stageCart')) || [];
-    state.savedDrafts = (await store.get('drafts')) || [];
-    let migrated = false;
-    state.stageCart.forEach(c => {
-      if (!c.baseFlag) { const ac = state.allCourses.find(x => x.code === c.code); c.baseFlag = ac ? baseFlag(ac) : 'rx'; migrated = true; }
-    });
-    state.savedDrafts.forEach(d => d.courses.forEach(c => {
-      if (!c.baseFlag) { const ac = state.allCourses.find(x => x.code === c.code); c.baseFlag = ac ? baseFlag(ac) : 'rx'; migrated = true; }
-    }));
-    if (migrated) { store.set('stageCart', state.stageCart); store.set('drafts', state.savedDrafts); }
-    renderStageCart();
-    renderDrafts();
-
-    const cacheEl = $('nextthuxk-cache-info');
-    if (cacheEl) {
-      const catAge = Math.round((Date.now() - (sd?.ts || Date.now())) / 60000);
-      cacheEl.innerHTML = state.isQueuePhase
-        ? '课余量实时数据 · ' + Object.keys(state.queueDataMap).length + '门'
-        : '课程数据 ' + catAge + '分钟前 · 志愿排队 ' + fmtTime(volTs);
-    }
-
-    const cfg = await store.get('config');
-    if (cfg) {
-      if (cfg.api) $('nextthuxk-api').value = cfg.api;
-      if (cfg.model) $('nextthuxk-model').value = cfg.model;
-      if (cfg.token) $('nextthuxk-token').value = cfg.token;
-      if (cfg.pref) $('nextthuxk-pref').value = cfg.pref;
-    }
-    console.log(TAG, 'loaded', state.allCourses.length, 'courses (', selectedCourses.length, 'selected)', needVol ? '(vol refreshed)' : '(vol cached)', state.isQueuePhase ? '(queue phase)' : '');
-    if (state.fetchWarn) { showXkResult({ ok: false, msg: state.fetchWarn }); state.fetchWarn = ''; }
-    const phaseTag = $('nextthuxk-phase-tag');
-    if (phaseTag) {
-      if (state.isQueuePhase) { phaseTag.style.display = 'inline'; phaseTag.textContent = '课余量模式'; }
-      else { phaseTag.style.display = 'none'; }
-    }
-    const qRefreshBtn = $('nextthuxk-refresh-queue');
-    if (qRefreshBtn) qRefreshBtn.style.display = (state.isQueuePhase || state.candidateCourses.length) ? 'inline-block' : 'none';
+    await renderStageAndDrafts();
+    NX.finishLaunch(sd, selectedCourses.length, volTs, needVol);
   } catch (e) {
     listEl.innerHTML = '<div class="nx-empty nx-st err">' + NX.esc(e.message) + '</div>';
   } finally { FIN(); }
   checkUpdate();
+};
+
+// ─── Launch 公共收尾（缓存路径与全量路径复用） ───────────────
+async function renderStageAndDrafts() {
+  state.stageCart = (await store.get('stageCart')) || [];
+  state.savedDrafts = (await store.get('drafts')) || [];
+  let migrated = false;
+  state.stageCart.forEach(c => {
+    if (!c.baseFlag) { const ac = state.allCourses.find(x => x.code === c.code); c.baseFlag = ac ? baseFlag(ac) : 'rx'; migrated = true; }
+  });
+  state.savedDrafts.forEach(d => d.courses.forEach(c => {
+    if (!c.baseFlag) { const ac = state.allCourses.find(x => x.code === c.code); c.baseFlag = ac ? baseFlag(ac) : 'rx'; migrated = true; }
+  }));
+  if (migrated) { store.set('stageCart', state.stageCart); store.set('drafts', state.savedDrafts); }
+  renderStageCart();
+  renderDrafts();
+}
+
+NX.finishLaunch = function (sd, selCount, volTs, volRefreshed) {
+  const { fmtTime } = NX;
+  const $ = state.$;
+  const cacheEl = $('nextthuxk-cache-info');
+  if (cacheEl) {
+    const catAge = Math.round((Date.now() - (sd?.ts || Date.now())) / 60000);
+    cacheEl.innerHTML = state.isQueuePhase
+      ? '课余量实时数据 · ' + Object.keys(state.queueDataMap).length + '门'
+      : '课程数据 ' + catAge + '分钟前 · 志愿排队 ' + fmtTime(volTs);
+  }
+  store.get('config').then(cfg => {
+    if (!cfg) return;
+    if (cfg.api) $('nextthuxk-api').value = cfg.api;
+    if (cfg.model) $('nextthuxk-model').value = cfg.model;
+    if (cfg.token) $('nextthuxk-token').value = cfg.token;
+    if (cfg.pref) $('nextthuxk-pref').value = cfg.pref;
+  });
+  console.log(TAG, 'loaded', state.allCourses.length, 'courses (', selCount, 'selected)', volRefreshed ? '(vol refreshed)' : '(vol cached)', state.isQueuePhase ? '(queue phase)' : '');
+  if (state.fetchWarn) { showXkResult({ ok: false, msg: state.fetchWarn }); state.fetchWarn = ''; }
+  const phaseTag = $('nextthuxk-phase-tag');
+  if (phaseTag) {
+    if (state.isQueuePhase) { phaseTag.style.display = 'inline'; phaseTag.textContent = '课余量模式'; }
+    else { phaseTag.style.display = 'none'; }
+  }
+  const qRefreshBtn = $('nextthuxk-refresh-queue');
+  if (qRefreshBtn) qRefreshBtn.style.display = (state.isQueuePhase || state.candidateCourses.length) ? 'inline-block' : 'none';
 };
 
 // ─── Event Bindings ───────────────────────────────────────────
