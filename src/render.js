@@ -66,10 +66,10 @@ NX.courseCardHtml = function (c, ctx) {
     }
     const pConflicts = findPreviewConflicts(c);
     const conflictHtml = pConflicts.length
-      ? '<div style="font-size:10px;color:#ee4d4d;margin-top:3px;display:flex;gap:4px;align-items:center;flex-wrap:wrap"><span>⚠ 冲突:</span>' + pConflicts.slice(0, 3).map(cf => '<span style="background:rgba(238,77,77,.1);padding:1px 6px;border-radius:4px">' + cf.day + cf.slot + ' ' + esc(cf.name) + '</span>').join('') + '</div>'
+      ? '<div style="font-size:10px;color:#ee4d4d;margin-top:3px;display:flex;gap:4px;align-items:center;flex-wrap:wrap"><span>冲突:</span>' + pConflicts.slice(0, 3).map(cf => '<span style="background:rgba(238,77,77,.1);padding:1px 6px;border-radius:4px">' + cf.day + cf.slot + ' ' + esc(cf.name) + '</span>').join('') + '</div>'
       : '';
     const detail = [c.capacity ? '容量' + c.capacity : '', c.remaining !== undefined ? '余' + c.remaining : ''].filter(Boolean).join(' · ');
-    const noteHtml = c.xkTextNote ? '<div style="font-size:11px;color:#ff9f1a;margin-top:4px;padding:3px 8px;background:rgba(255,159,26,.06);border-radius:4px;line-height:1.4">📝 ' + esc(c.xkTextNote) + '</div>' : '';
+    const noteHtml = c.xkTextNote ? '<div style="font-size:11px;color:#ff9f1a;margin-top:4px;padding:3px 8px;background:rgba(255,159,26,.06);border-radius:4px;line-height:1.4">' + esc(c.xkTextNote) + '</div>' : '';
     let selectBtn;
     if (c.selected) {
       const volLabel = c.zy ? '<span class="nx-vol-info">第' + c.zy + '志愿 · ' + esc(c.typeLabel || '') + '</span>' : '';
@@ -106,7 +106,7 @@ NX.courseCardHtml = function (c, ctx) {
       const probInline = isQueuePhase && (qd || cand)
         ? '<span class="nx-inline-prob" style="color:' + (cand ? '#ff9f1a' : qd.qRemaining > 0 ? '#07c160' : '#ee4d4d') + '">' + (cand ? '排队第' + cand.myPos + '名' : qd.qRemaining > 0 ? '余' + qd.qRemaining : '已满') + '</span>'
         : '<span class="nx-inline-prob nx-card-inline-prob" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" style="color:' + p.color + '">' + (p.percentLabel || p.label) + '</span>';
-      selectBtn = '<span style="font-size:10px;color:#ee4d4d;font-weight:600;margin-right:2px">⚠ 已满</span>' +
+      selectBtn = '<span style="font-size:10px;color:#ee4d4d;font-weight:600;margin-right:2px">已满</span>' +
         '<select class="nx-type-select" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '">' + flagOpts + '</select>' +
         '<select class="nx-zy-select" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '"><option value="3">3志愿</option><option value="2">2志愿</option><option value="1">1志愿</option></select>' +
         probInline +
@@ -120,7 +120,7 @@ NX.courseCardHtml = function (c, ctx) {
       (isQueuePhase && (qd || cand) ? queueInfoHtml : volHtml + compHtml + currentProbHtml + probHtml) + conflictHtml + noteHtml +
       '<div class="nx-card-detail"><div class="nx-card-detail-inner">' + detail + '</div></div>' +
       '<div class="nx-card-actions">' +
-      '<button class="nx-detail-btn" data-code="' + esc(c.code) + '" data-tid="' + esc(c.teacherId || '') + '">📄 简介</button>' +
+      '<button class="nx-detail-btn" data-code="' + esc(c.code) + '" data-tid="' + esc(c.teacherId || '') + '">简介</button>' +
       selectBtn + '</div></div>';
 };
 
@@ -427,7 +427,7 @@ NX.renderStageCart = function () {
     const conflicts = detectConflicts(stageCart);
     if (conflicts.length) {
       cf.innerHTML = conflicts.map(c =>
-        '<div style="font-size:11px;color:#ee4d4d">⚠ 时间冲突: ' + esc(c.day) + ' ' + esc(c.slot) + ' — ' + esc(c.a) + ' 与 ' + esc(c.b) + '</div>'
+        '<div style="font-size:11px;color:#ee4d4d">时间冲突：' + esc(c.day) + ' ' + esc(c.slot) + ' — ' + esc(c.a) + ' 与 ' + esc(c.b) + '</div>'
       ).join('');
     } else cf.innerHTML = '<div style="font-size:11px;color:#07c160">✓ 无时间冲突</div>';
   }
@@ -486,7 +486,7 @@ NX.renderDrafts = function () {
       courseList += '</div>';
     }
     const expIcon = exp ? '▼' : '▶';
-    return '<div class="nx-draft-card"><div class="nx-draft-head"><span class="nx-draft-name" style="cursor:pointer" data-toggle="' + di + '">' + expIcon + ' ' + esc(d.name) + '</span><span class="nx-draft-info">' + d.courses.length + '门 · ' + cr + '学分 · ' + (dt.getMonth() + 1) + '/' + dt.getDate() + '</span></div><div class="nx-draft-acts"><button class="nx-draft-view" data-idx="' + di + '">预览 & 修改</button><button class="nx-draft-go" data-idx="' + di + '">提交选课</button><button class="nx-draft-export" data-idx="' + di + '">📤</button><button class="nx-draft-del" data-idx="' + di + '">删除</button></div>' + courseList + '</div>';
+    return '<div class="nx-draft-card"><div class="nx-draft-head"><span class="nx-draft-name" style="cursor:pointer" data-toggle="' + di + '">' + expIcon + ' ' + esc(d.name) + '</span><span class="nx-draft-info">' + d.courses.length + '门 · ' + cr + '学分 · ' + (dt.getMonth() + 1) + '/' + dt.getDate() + '</span></div><div class="nx-draft-acts"><button class="nx-draft-view" data-idx="' + di + '">预览 & 修改</button><button class="nx-draft-go" data-idx="' + di + '">提交选课</button><button class="nx-draft-export" data-idx="' + di + '">导出</button><button class="nx-draft-del" data-idx="' + di + '">删除</button></div>' + courseList + '</div>';
   }).join('');
   el.querySelectorAll('[data-toggle]').forEach(span => {
     span.onclick = () => {
@@ -650,7 +650,7 @@ NX.renderPlanView = function (searchQuery) {
     const gCovered = courses.filter(c => c.covered).reduce((s, c) => s + c.credits, 0);
     html += '<div style="margin-bottom:14px"><div style="font-size:13px;font-weight:700;color:#1d1d1f;margin-bottom:6px;padding:5px 12px;background:rgba(124,106,239,.08);border-radius:8px;display:flex;justify-content:space-between"><span>' + esc(groupName) + '</span><span style="font-size:11px;font-weight:400;color:' + (gCovered >= gTotal ? '#07c160' : '#9aa1ac') + '">' + gCovered + '/' + gTotal + '学分</span></div>';
     courses.forEach(p => {
-      const icon = p.covered ? '✅' : '❌';
+      const icon = p.covered ? '✓' : '✗';
       const bg = p.covered ? 'rgba(7,193,96,.06)' : 'rgba(238,77,77,.04)';
       const statusHtml = p.covered
         ? '<span style="color:#07c160;font-size:11px;white-space:nowrap">' + esc(p.coveredBy || '已满足') + '</span>'

@@ -96,7 +96,7 @@ NX.showDangerBanner = function () {
   banner.id = 'nextthuxk-danger-banner';
   banner.innerHTML =
     '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 16px;background:linear-gradient(90deg,#ff3b30,#ff6b6b);color:#fff;font-size:13px;border-radius:8px;margin:8px 0;">' +
-    '<span>⚠️ 当前版本 v' + esc(CUR_VER) + ' 存在严重错误，请立即升级到 <a href="https://github.com/smartThise/NextTHUxk/releases/latest" target="_blank" style="color:#fff;font-weight:700;text-decoration:underline">最新版本</a></span>' +
+    '<span>当前版本 v' + esc(CUR_VER) + ' 存在严重错误，请立即升级到 <a href="https://github.com/smartThise/NextTHUxk/releases/latest" target="_blank" style="color:#fff;font-weight:700;text-decoration:underline">最新版本</a></span>' +
     '<button id="nextthuxk-danger-close" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;line-height:1;">✕</button>' +
     '</div>';
   db.prepend(banner);

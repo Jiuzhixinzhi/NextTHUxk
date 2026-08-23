@@ -15,8 +15,8 @@ NX.aiSearch = async function () {
   const results = $('nextthuxk-ai-search-results');
   const btn = $('nextthuxk-ai-search');
 
-  if (!api || !token) { st.className = 'nx-st err'; st.textContent = '❌ 请先填写 API URL 和 Token'; return; }
-  if (!prompt) { st.className = 'nx-st err'; st.textContent = '❌ 请输入搜索描述'; return; }
+  if (!api || !token) { st.className = 'nx-st err'; st.textContent = '请先填写 API URL 和 Token'; return; }
+  if (!prompt) { st.className = 'nx-st err'; st.textContent = '请输入搜索描述'; return; }
 
   st.className = 'nx-st'; st.innerHTML = '<span class="nx-spin"></span> AI 正在搜索…';
   btn.disabled = true;
@@ -100,7 +100,7 @@ NX.aiSearch = async function () {
           const course = allCourses.find(c => c.code === r.code && String(c.seq || '0') === String(r.seq || '0'));
           const isConflict = r.conflict || (course && findPreviewConflicts(course).length > 0);
           const borderColor = isConflict ? '#ff9500' : r.conflict ? '#ff3b30' : '#34c759';
-          const conflictHtml = isConflict ? '<div style="font-size:10px;color:#ff9500;margin-top:4px">⚠ 与' + esc(r.conflictWith || '预览课表') + '时间冲突</div>' : '';
+          const conflictHtml = isConflict ? '<div style="font-size:10px;color:#ff9500;margin-top:4px">与' + esc(r.conflictWith || '预览课表') + '时间冲突</div>' : '';
           const addBtn = course && !course.selected ? '<button class="nx-stage-btn" data-code="' + esc(r.code) + '" data-seq="' + esc(r.seq || '0') + '" style="margin-top:4px;font-size:10px">暂存</button>' : '';
           return '<div style="padding:10px;margin-top:6px;border-radius:10px;border-left:3px solid ' + borderColor + ';background:rgba(0,0,0,.02)">' +
             '<div style="font-weight:700;font-size:13px">' + esc(r.name) + ' <span style="color:#86868b;font-weight:400">' + esc(r.code) + '</span></div>' +
@@ -116,9 +116,9 @@ NX.aiSearch = async function () {
       });
     }
     st.className = 'nx-st ok';
-    st.textContent = '✅ 找到 ' + recs.length + ' 门推荐课程';
+    st.textContent = '找到 ' + recs.length + ' 门推荐课程';
   } catch (e) {
-    st.className = 'nx-st err'; st.textContent = '❌ ' + e.message;
+    st.className = 'nx-st err'; st.textContent = '' + e.message;
   } finally { btn.disabled = false; }
 };
 
@@ -131,7 +131,7 @@ NX.callAI = async function () {
   const pref = $('nextthuxk-pref').value.trim();
   const st = $('nextthuxk-ai-st');
   const btn = $('nextthuxk-ai');
-  if (!api || !token) { st.className = 'nx-st err'; st.textContent = '❌ 请填写 API URL 和 Token'; return; }
+  if (!api || !token) { st.className = 'nx-st err'; st.textContent = '请填写 API URL 和 Token'; return; }
   st.className = 'nx-st'; st.innerHTML = '<span class="nx-spin"></span> AI 正在分析课程数据…';
   btn.disabled = true;
   try {
@@ -195,8 +195,8 @@ NX.callAI = async function () {
     const conflicts = detectConflicts(state.stageCart.length ? state.stageCart : (state.savedDrafts[state.savedDrafts.length - 1]?.courses || []));
     st.className = conflicts.length ? 'nx-st err' : 'nx-st ok';
     let msg = conflicts.length
-      ? '⚠ AI方案有 ' + conflicts.length + ' 处时间冲突，请手动调整'
-      : '✅ AI方案已生成！' + (schedule.courses?.length || 0) + '门课 · ' + (schedule.total_credits || '?') + '学分';
+      ? 'AI方案有 ' + conflicts.length + ' 处时间冲突，请手动调整'
+      : 'AI方案已生成！' + (schedule.courses?.length || 0) + '门课 · ' + (schedule.total_credits || '?') + '学分';
     if (saved) msg += ' — 已保存为「' + aiName + '」';
     else msg += ' — 仅保留在暂存区';
     if (schedule.summary) msg += '\n' + schedule.summary;
@@ -205,6 +205,6 @@ NX.callAI = async function () {
 
     store.set('config', { api, model, token, pref });
   } catch (e) {
-    st.className = 'nx-st err'; st.textContent = '❌ ' + e.message;
+    st.className = 'nx-st err'; st.textContent = '' + e.message;
   } finally { btn.disabled = false; }
 };

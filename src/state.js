@@ -102,7 +102,7 @@ NX.showXkResult = function (res) {
   let toast = $('nextthuxk-toast');
   if (!toast) return;
   toast.className = res.ok ? 'nx-toast nx-toast-ok' : 'nx-toast nx-toast-err';
-  toast.textContent = (res.ok ? '✅ ' : '❌ ') + (res.msg || (res.ok ? '操作成功' : '操作失败'));
+  toast.textContent = (res.ok ? '✓ ' : '✗ ') + (res.msg || (res.ok ? '操作成功' : '操作失败'));
   toast.style.display = 'block';
   toast.style.opacity = '1';
   setTimeout(() => { toast.style.opacity = '0'; setTimeout(() => toast.style.display = 'none', 300); }, 2500);
@@ -370,16 +370,16 @@ NX.promoteDraft = async function (draft) {
   const toast = $('nextthuxk-toast');
   const prog = (msg) => { if (toast) { toast.className = 'nx-toast'; toast.style.cssText = 'display:block;opacity:1;background:rgba(124,106,239,.95);color:#fff'; toast.textContent = msg; } };
   try {
-    prog('⏳ 正在获取已选课程…');
+    prog('正在获取已选课程…');
     const current = await fetchSelectedCourses();
     for (let i = 0; i < current.length; i++) {
-      prog('⏳ 退选 ' + (i + 1) + '/' + current.length + ': ' + current[i].name);
+      prog('退选 ' + (i + 1) + '/' + current.length + ': ' + current[i].name);
       await dropCourse(current[i].code, current[i].seq);
       await new Promise(r => setTimeout(r, 1000));
     }
     for (let i = 0; i < draft.courses.length; i++) {
       const c = draft.courses[i];
-      prog('⏳ 选课 ' + (i + 1) + '/' + draft.courses.length + ': ' + c.name);
+      prog('选课 ' + (i + 1) + '/' + draft.courses.length + ': ' + c.name);
       await submitCourse(c.code, c.seq, c.zy || 3, c.flag || 'bx');
       // 排队选课内部已有 1.5s 延时，这里额外等 2s 避免触发验证码
       await new Promise(r => setTimeout(r, 2000));

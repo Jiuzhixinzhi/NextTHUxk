@@ -273,7 +273,7 @@ NX.fetchCourseCatalog = async function () {
   if (pager.total > 0) {
     if (all.length < Math.min(5800, pager.total)) {
       console.warn(NX.TAG, 'catalog got', all.length, '/', pager.total, '— below 5800, data may be incomplete');
-      NX.state.fetchWarn = '⚠ 课程数据仅 ' + all.length + ' 门（低于 5800），可能不完整（详见 Console）';
+      NX.state.fetchWarn = '课程数据仅 ' + all.length + ' 门（低于 5800），可能不完整（详见 Console）';
     } else if (all.length < pager.total) {
       console.log(NX.TAG, 'catalog got', all.length, '/', pager.total, '（服务器计数含不可分页行，已达标）');
     } else {
@@ -662,7 +662,7 @@ NX.fetchQueueData = async function () {
         if (!qFailWarned && qFailStreak >= 3) {
           qFailWarned = true;
           console.warn(NX.TAG, 'queue count batches keep failing — session may be invalidated; please re-login');
-          if (!NX.state.fetchWarn) NX.state.fetchWarn = '⚠ 课余量排队人数获取失败，可能需退出重新登录';
+          if (!NX.state.fetchWarn) NX.state.fetchWarn = '课余量排队人数获取失败，可能需退出重新登录';
         }
       }
     });

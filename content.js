@@ -51,7 +51,7 @@ const HTML = `
   <div class="nx-zy-modal-mask" id="nextthuxk-zy-modal">
     <div class="nx-zy-modal">
       <div class="nx-zy-modal-head">
-        <div class="nx-zy-modal-title">📋 志愿信息确认</div>
+        <div class="nx-zy-modal-title">志愿信息确认</div>
         <button class="nx-modal-close" id="nextthuxk-zy-modal-close">✕</button>
       </div>
       <div class="nx-zy-modal-body" id="nextthuxk-zy-modal-body"></div>
@@ -61,22 +61,22 @@ const HTML = `
     </div>
   </div>
     <div class="nx-header">
-      <div class="nx-logo">NextTHUxk <span style="font-weight:400;color:var(--nx-faint)">— 选课</span> <span id="nextthuxk-phase-tag" style="display:none;font-size:11px;background:rgba(61,90,112,.15);color:#3d5a70;padding:2px 8px;border-radius:6px;margin-left:6px"></span></div>
+      <div class="nx-logo">NextTHUxk<span class="nx-logo-sub">下一代选课</span> <span id="nextthuxk-phase-tag" style="display:none;font-size:11px;background:rgba(47,107,255,.1);color:var(--nx-accent);padding:2px 8px;border-radius:4px;margin-left:6px"></span></div>
       <div style="display:flex;gap:8px;align-items:center">
         <span id="nextthuxk-cache-info" style="font-size:11px;color:var(--nx-ink-soft)"></span>
-        <button id="nextthuxk-sem" style="padding:5px 12px;border-radius:8px;border:1px solid rgba(47,107,255,.3);background:rgba(47,107,255,.08);color:#2f6bff;font-size:11px;cursor:pointer;font-family:var(--nx-font);font-weight:600" title="点击修改学期"></button>
-        <button id="nextthuxk-grade" style="padding:5px 12px;border-radius:8px;border:1px solid rgba(7,193,96,.3);background:rgba(7,193,96,.08);color:#07c160;font-size:11px;cursor:pointer;font-family:var(--nx-font);font-weight:600" title="点击修改年级"></button>
-        <button id="nextthuxk-refresh" style="padding:5px 12px;border-radius:8px;border:1px solid rgba(0,0,0,.1);background:#fff;font-size:11px;cursor:pointer;font-family:var(--nx-font)">🔄 刷新数据</button>
-        <button id="nextthuxk-refresh-queue" style="display:none;padding:5px 12px;border-radius:8px;border:1px solid rgba(61,90,112,.3);background:rgba(61,90,112,.08);color:#3d5a70;font-size:11px;cursor:pointer;font-family:var(--nx-font);font-weight:600">📊 刷新队列</button>
-        <button id="nextthuxk-check-update" style="padding:5px 12px;border-radius:8px;border:1px solid rgba(0,0,0,.1);background:#fff;font-size:11px;cursor:pointer;font-family:var(--nx-font)">🔔 检查更新</button>
-        <button class="nx-exit" id="nextthuxk-exit">❌ 返回原选课系统</button>
+        <button id="nextthuxk-sem" class="nx-ghost-btn" title="点击修改学期"></button>
+        <button id="nextthuxk-grade" class="nx-ghost-btn" title="点击修改年级"></button>
+        <button id="nextthuxk-refresh" class="nx-ghost-btn">刷新数据</button>
+        <button id="nextthuxk-refresh-queue" class="nx-ghost-btn" style="display:none">刷新队列</button>
+        <button id="nextthuxk-check-update" class="nx-ghost-btn">检查更新</button>
+        <button class="nx-exit" id="nextthuxk-exit">返回原系统</button>
       </div>
     </div>
     <div class="nx-main">
       <div class="nx-left">
         <div class="nx-search-bar">
           <div class="nx-search-wrap">
-            <input type="text" class="nx-search" id="nextthuxk-search" placeholder="🔍 搜索课程名称、教师、课程号…">
+            <input type="text" class="nx-search" id="nextthuxk-search" placeholder="搜索课程名称、教师、课程号…">
             <button type="button" class="nx-search-clear" id="nextthuxk-search-clear" aria-label="清空搜索">×</button>
           </div>
           <div class="nx-filters" id="nextthuxk-filters">
@@ -107,19 +107,19 @@ const HTML = `
         <div class="nx-list" id="nextthuxk-list"><div class="nx-empty">点击右下角「选」按钮开始</div></div>
       </div>
       <div class="nx-right">
-        <div class="nx-sec"><div class="nx-sec-title">📋 我的培养方案</div><div id="nextthuxk-plan" class="nx-plans"><div class="nx-st">等待加载…</div></div><div id="nextthuxk-plan-detail" style="margin-top:8px;font-size:12px;color:var(--nx-ink-soft)"></div></div>
-        <div class="nx-sec"><div class="nx-sec-title">📅 课表预览 <span id="nextthuxk-preview-info" style="font-size:11px;color:var(--nx-ink-soft);font-weight:400"></span></div><div id="nextthuxk-preview-tt"><div class="nx-st">选课后自动生成预览</div></div><button class="nx-stage-btn" id="nextthuxk-preview-reset" style="display:none;margin-top:6px">📅 返回当前已选课表</button></div>
+        <div class="nx-sec"><div class="nx-sec-title">我的培养方案</div><div id="nextthuxk-plan" class="nx-plans"><div class="nx-st">等待加载…</div></div><div id="nextthuxk-plan-detail" style="margin-top:8px;font-size:12px;color:var(--nx-ink-soft)"></div></div>
+        <div class="nx-sec"><div class="nx-sec-title">课表预览 <span id="nextthuxk-preview-info" style="font-size:11px;color:var(--nx-ink-soft);font-weight:400"></span></div><div id="nextthuxk-preview-tt"><div class="nx-st">选课后自动生成预览</div></div><button class="nx-stage-btn" id="nextthuxk-preview-reset" style="display:none;margin-top:6px">返回当前已选课表</button></div>
         <div class="nx-sec">
-          <div class="nx-sec-title">💾 暂存课表</div>
+          <div class="nx-sec-title">暂存课表</div>
           <div id="nextthuxk-stage-list"><div class="nx-st">暂无暂存课程</div></div>
           <div id="nextthuxk-stage-conflict" style="margin-top:4px"></div>
           <div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">
             <input type="text" class="nx-inp" id="nextthuxk-draft-name" placeholder="草稿名称（如：方案A）" style="flex:1;padding:6px 10px;font-size:12px;min-width:120px">
-            <button class="nx-stage-btn" id="nextthuxk-save-draft">💾 保存草稿</button>
-            <button class="nx-stage-btn" id="nextthuxk-save-selected">📋 存当前选课</button>
-            <button class="nx-stage-btn" id="nextthuxk-preview-stage">📅 预览暂存</button>
-            <button class="nx-stage-btn" id="nextthuxk-export">📤 导出</button>
-            <button class="nx-stage-btn" id="nextthuxk-import">📥 导入</button>
+            <button class="nx-stage-btn" id="nextthuxk-save-draft">保存草稿</button>
+            <button class="nx-stage-btn" id="nextthuxk-save-selected">存当前选课</button>
+            <button class="nx-stage-btn" id="nextthuxk-preview-stage">预览暂存</button>
+            <button class="nx-stage-btn" id="nextthuxk-export">导出</button>
+            <button class="nx-stage-btn" id="nextthuxk-import">导入</button>
           </div>
           <div id="nextthuxk-import-area" style="display:none;margin-top:6px">
             <textarea class="nx-inp nx-ta" id="nextthuxk-import-data" placeholder="粘贴导出的课表数据…" style="font-size:11px"></textarea>
@@ -130,9 +130,9 @@ const HTML = `
           </div>
           <div id="nextthuxk-drafts" style="margin-top:8px"></div>
         </div>
-        <div class="nx-sec"><div class="nx-sec-title">🔑 AI 配置</div><div class="nx-ai"><input type="text" class="nx-inp" id="nextthuxk-api" placeholder="API Base URL（如 https://api.openai.com/v1）"><input type="text" class="nx-inp" id="nextthuxk-model" placeholder="模型名称（如 gpt-4o-mini、deepseek-chat）"><input type="password" class="nx-inp" id="nextthuxk-token" placeholder="API Token"><textarea class="nx-inp nx-ta" id="nextthuxk-pref" placeholder="我的选课偏好（如：周五下午空出来、优先给分好的老师、学分凑满30）"></textarea></div></div>
-        <div class="nx-sec"><div class="nx-sec-title">🔍 AI 课程搜索</div><div style="font-size:11px;color:var(--nx-ink-soft);margin-bottom:8px">基于当前筛选结果 + 当前预览课表，AI 在不冲突的课程中推荐</div><div class="nx-ai"><textarea class="nx-inp nx-ta" id="nextthuxk-ai-search-prompt" placeholder="描述你想要的课（如：想选一门好拿A的通识课、周四下午有空的任选、推荐一门有趣的体育课…）" style="min-height:56px"></textarea><button class="nx-ai-btn" id="nextthuxk-ai-search" style="background:var(--nx-accent)">🔍 AI 搜索推荐</button><div id="nextthuxk-ai-search-st" class="nx-st"></div><div id="nextthuxk-ai-search-results"></div></div></div>
-        <div class="nx-sec"><div class="nx-sec-title">🚀 AI 智能排课</div><div style="font-size:11px;color:var(--nx-ink-soft);margin-bottom:8px">AI 根据必修/体育课 + 偏好自动生成完整课表方案</div><div class="nx-ai"><button class="nx-ai-btn" id="nextthuxk-ai">🚀 AI 智能排课</button><div id="nextthuxk-ai-st" class="nx-st"></div></div></div>
+        <div class="nx-sec"><div class="nx-sec-title">AI 配置</div><div class="nx-ai"><input type="text" class="nx-inp" id="nextthuxk-api" placeholder="API Base URL（如 https://api.openai.com/v1）"><input type="text" class="nx-inp" id="nextthuxk-model" placeholder="模型名称（如 gpt-4o-mini、deepseek-chat）"><input type="password" class="nx-inp" id="nextthuxk-token" placeholder="API Token"><textarea class="nx-inp nx-ta" id="nextthuxk-pref" placeholder="我的选课偏好（如：周五下午空出来、优先给分好的老师、学分凑满30）"></textarea></div></div>
+        <div class="nx-sec"><div class="nx-sec-title">AI 课程搜索</div><div style="font-size:11px;color:var(--nx-ink-soft);margin-bottom:8px">基于当前筛选结果 + 当前预览课表，AI 在不冲突的课程中推荐</div><div class="nx-ai"><textarea class="nx-inp nx-ta" id="nextthuxk-ai-search-prompt" placeholder="描述你想要的课（如：想选一门好拿A的通识课、周四下午有空的任选、推荐一门有趣的体育课…）" style="min-height:56px"></textarea><button class="nx-ai-btn" id="nextthuxk-ai-search" style="background:var(--nx-accent)">AI 搜索推荐</button><div id="nextthuxk-ai-search-st" class="nx-st"></div><div id="nextthuxk-ai-search-results"></div></div></div>
+        <div class="nx-sec"><div class="nx-sec-title">AI 智能排课</div><div style="font-size:11px;color:var(--nx-ink-soft);margin-bottom:8px">AI 根据必修/体育课 + 偏好自动生成完整课表方案</div><div class="nx-ai"><button class="nx-ai-btn" id="nextthuxk-ai">AI 智能排课</button><div id="nextthuxk-ai-st" class="nx-st"></div></div></div>
       </div>
     </div>
   </div>
@@ -221,7 +221,7 @@ NX.launch = async function launch() {
       console.log(TAG, 'volunteer data stale, refreshing...');
       volTs = Date.now();
     } else if (sd?.courses?.length) {
-      // 🚀 缓存命中！直接用 merge 好的 courses，跳过所有爬虫
+      // 缓存命中！直接用 merge 好的 courses，跳过所有爬虫
       console.log(TAG, 'using cached', sd.courses.length, 'courses');
       listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;已读取缓存数据，正在加载实时状态…</div>';
       state.planData = sd.plan || [];
@@ -305,13 +305,13 @@ NX.launch = async function launch() {
     if (state.fetchWarn) { showXkResult({ ok: false, msg: state.fetchWarn }); state.fetchWarn = ''; }
     const phaseTag = $('nextthuxk-phase-tag');
     if (phaseTag) {
-      if (state.isQueuePhase) { phaseTag.style.display = 'inline'; phaseTag.textContent = '📊 课余量模式'; }
+      if (state.isQueuePhase) { phaseTag.style.display = 'inline'; phaseTag.textContent = '课余量模式'; }
       else { phaseTag.style.display = 'none'; }
     }
     const qRefreshBtn = $('nextthuxk-refresh-queue');
     if (qRefreshBtn) qRefreshBtn.style.display = (state.isQueuePhase || state.candidateCourses.length) ? 'inline-block' : 'none';
   } catch (e) {
-    listEl.innerHTML = '<div class="nx-empty nx-st err">❌ ' + NX.esc(e.message) + '</div>';
+    listEl.innerHTML = '<div class="nx-empty nx-st err">' + NX.esc(e.message) + '</div>';
   } finally { FIN(); }
   checkUpdate();
 };
@@ -325,7 +325,7 @@ $('nextthuxk-refresh').onclick = async () => {
 };
 $('nextthuxk-refresh-queue').onclick = async () => {
   const btn = $('nextthuxk-refresh-queue');
-  if (btn) { btn.textContent = '⏳ 刷新中...'; btn.disabled = true; }
+  if (btn) { btn.textContent = '刷新中…'; btn.disabled = true; }
   const qResult = await NX.fetchQueueData();
   state.queueDataMap = qResult.map;
   state.isQueuePhase = qResult.phase;
@@ -337,7 +337,7 @@ $('nextthuxk-refresh-queue').onclick = async () => {
     state.allCourses.filter(c => c.selected).concat(state.candidateCourses.filter(cc => !state.allCourses.some(ac => ac.selected && ac.code === cc.code))),
     '当前已选'
   );
-  if (btn) { btn.textContent = '📊 刷新队列'; btn.disabled = false; }
+  if (btn) { btn.textContent = '刷新队列'; btn.disabled = false; }
   showXkResult({ ok: true, msg: '队列数据已刷新 · ' + Object.keys(state.queueDataMap).length + '门课余量 · ' + state.candidateCourses.length + '门我的队列' });
 };
 $('nextthuxk-search').oninput = NX.debounce(NX.filterCourses, 120);
@@ -379,10 +379,10 @@ $('nextthuxk-grade').onclick = async () => {
 $('nextthuxk-check-update').onclick = async () => {
   await store.set('lastUpdateCheck', 0);
   const btn = $('nextthuxk-check-update');
-  btn.textContent = '⏳ 检查中...';
+  btn.textContent = '检查中…';
   btn.disabled = true;
   await checkUpdate();
-  btn.textContent = '🔔 检查更新';
+  btn.textContent = '检查更新';
   btn.disabled = false;
   if (!$('nextthuxk-update-banner') && !$('nextthuxk-danger-banner')) {
     const toast = document.createElement('div');
