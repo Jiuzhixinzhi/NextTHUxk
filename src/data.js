@@ -166,6 +166,16 @@ NX.zyTypeOf = function (course) {
 
 // ─── Data Fetching ────────────────────────────────────────────
 
+// 从列表页 HTML 解析分页控件："第 1 页 / 共 304 页（共 6,078 条记录）"
+NX.parsePagerInfo = function (html) {
+  const pages = /共\s*(\d+)\s*页/.exec(html);
+  const total = /共\s*([\d,，]+)\s*条/.exec(html);
+  return {
+    pages: pages ? parseInt(pages[1]) : 0,
+    total: total ? parseInt(total[1].replace(/[,，]/g, '')) : 0,
+  };
+};
+
 NX.fetchTrainingPlan = async function () {
   const { state, fetchPage, parsePlan, parseFullProgram } = NX;
   const { SEM, BASE, isZhjwxk, isZhjw } = state;
@@ -185,22 +195,32 @@ NX.fetchTrainingPlan = async function () {
 };
 
 NX.fetchCourseCatalog = async function () {
-  const { state, fetchPage, parseCatalog, pagedFetch } = NX;
+  const { state, fetchPage, parseCatalog, pagedFetch, parsePagerInfo } = NX;
   if (!state.isZhjwxk) return [];
   const { SEM, BASE } = state;
   const url = p => BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM + '&page=' + p;
   const firstUrl = BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM;
+  let firstHtml = '';
+  try { firstHtml = await fetchPage(firstUrl); }
+  catch (e) { console.warn(NX.TAG, 'catalog first page:', e); return []; }
+  const pager = parsePagerInfo(firstHtml);
+  if (pager.pages > 0) console.log(NX.TAG, 'catalog pager: 共', pager.pages, '页 /', pager.total, '条');
   const all = await pagedFetch({
-    fetchFirst: () => fetchPage(firstUrl),
+    firstHtml,
     fetchPage: p => fetchPage(url(p)),
     parse: html => {
       const batch = parseCatalog(new DOMParser().parseFromString(html, 'text/html'));
       return { items: batch, hasData: batch.length > 0 };
     },
-    maxPages: 300,
+    maxPages: 320,
     concurrency: 5,
     dedupe: c => c.code + '_' + c.seq,   // 防御：分页边界或重复页导致同一课重复出现
+    expectPages: pager.pages,            // 已知总页数 → 抓完自动补缺页（v1.3.6）
+    label: 'catalog',
   });
+  if (pager.total > 0 && all.length < pager.total) {
+    console.warn(NX.TAG, 'catalog got', all.length, '/', pager.total, '— data may be incomplete');
+  }
   console.log(NX.TAG, 'catalog total:', all.length, 'courses');
   return all;
 };
@@ -213,8 +233,12 @@ NX.fetchVolunteer = async function () {
     const mkUrl = m => p => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM + '&page=' + p;
     const mkFirst = m => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM;
     const grab = async (m, parseFn, maxPages) => {
+      let fh = '';
+      try { fh = await fetchPage(mkFirst(m)); }
+      catch (e) { console.warn(NX.TAG, m, 'first page:', e); return []; }
+      const pager = NX.parsePagerInfo(fh);
       const items = await pagedFetch({
-        fetchFirst: () => fetchPage(mkFirst(m)),
+        firstHtml: fh,
         fetchPage: p => fetchPage(mkUrl(m)(p)),
         parse: html => {
           const batch = parseFn(html);
@@ -224,6 +248,8 @@ NX.fetchVolunteer = async function () {
         maxPages,
         concurrency: 5,
         dedupe: v => v.code + '_' + v.seq,
+        expectPages: pager.pages,
+        label: m,
       });
       return items;
     };
@@ -514,6 +540,7 @@ NX.fetchQueueData = async function () {
     const formAction = BASE + '/xkBks.vxkBksJxjhBs.do';
     const pgRegex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
     if (token) {
+      const pager = NX.parsePagerInfo(firstHtml);
       const items = await NX.pagedFetch({
         firstHtml,
         fetchPage: async p => {
@@ -535,9 +562,11 @@ NX.fetchQueueData = async function () {
           }
           return { items, hasData: items.length > 0 };
         },
-        maxPages: 200,
+        maxPages: 320,
         concurrency: 5,
         dedupe: q => q.code + '_' + q.seq,
+        expectPages: pager.pages,
+        label: 'kylSearch',
       });
       items.forEach(q => {
         const key = q.code + '_' + q.seq;

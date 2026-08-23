@@ -10,7 +10,7 @@ NX.browser = typeof browser !== 'undefined' ? browser : chrome;
 NX.TAG = '[NextTHUxk]';
 NX.SP = 'nextthuxk_';
 NX.DATA_VER = 5;
-NX.CUR_VER = '1.3.5';
+NX.CUR_VER = '1.3.6';
 NX.DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 NX.ZY_LIMITS = {
   bx: [[1,1],[2,2],[3,Infinity]], // 必修：1志愿1门, 2志愿2门, 3志愿无限
@@ -89,9 +89,11 @@ NX.fetchPage = async function (url, opts = {}) {
 };
 
 // ─── 并发分页抓取器 ───────────────────────────────────────────
-// 通用：先抓首页，再以固定并发窗口抓 page=1..maxPages，任一页为空/失败即停止
-// 发起新页（分页数据单调，安全终止）。结果按页号排序，可选去重。
-// 相比逐页串行（原实现最多 302 页 × 每页一个 RTT），总耗时 ≈ 总页数/并发度。
+// 通用：先抓首页，再以固定并发窗口抓 page=0..maxPages。
+// v1.3.6 强化（修复并发下提前终止丢数据）：
+//   1) 单页请求失败或返回空 → 重试 retry 次再判定（老教务系统对突发并发敏感）
+//   2) expectPages（从首页"共 N 页"解析）已知时，抓完后对缺失页自动补抓一轮
+//   3) 仍缺失 → console.warn 列明细，不再静默截断
 NX.pagedFetch = async function (opts) {
   const {
     fetchFirst,          // async () => html（首页，无 page 参数）；与 firstHtml 二选一
@@ -101,10 +103,44 @@ NX.pagedFetch = async function (opts) {
     maxPages = 300,
     concurrency = 5,
     dedupe = null,       // item => key（可选，用于去重）
+    retry = 2,           // 单页失败/空页的重试次数
+    retryDelay = 300,    // 重试退避 ms
+    expectPages = 0,     // 已知总页数（含首页）；抓完后不足则补抓
+    label = '',          // 日志标签
   } = opts;
   const pages = new Map();          // pageNum -> items
   const seen = dedupe ? new Set() : null;
   let stop = false;
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+  const absorb = (p, items) => {
+    // 合并语义：p=0 与首页可能都有数据（0 基分页），不能覆盖（v1.3.6 修复：曾致首页数据丢失）
+    const kept = pages.get(p) || [];
+    for (const it of items) {
+      if (seen) { const k = dedupe(it); if (seen.has(k)) continue; seen.add(k); }
+      kept.push(it);
+    }
+    pages.set(p, kept);
+  };
+
+  // 带重试的单页抓取：网络错误与空页都重试；重试期间 pause 铺新页（避免越界请求）；
+  // 重试后仍空 → 返回 'EMPTY'（真末页）
+  let pause = false;
+  const fetchOne = async p => {
+    for (let attempt = 0; ; attempt++) {
+      let r;
+      try { r = parse(await fetchPage(p)); }
+      catch (e) {
+        pause = true;   // 失败即暂停铺新页（含首次），等本页终态
+        if (attempt < retry) { await sleep(retryDelay * (attempt + 1)); continue; }
+        pause = false; return 'ERR';
+      }
+      if (r.hasData) { pause = false; return r; }
+      pause = true;
+      if (attempt < retry) { await sleep(retryDelay * (attempt + 1)); continue; }
+      pause = false; return 'EMPTY';
+    }
+  };
 
   let fh = firstHtml;
   if (fh == null) {
@@ -112,42 +148,55 @@ NX.pagedFetch = async function (opts) {
     catch (e) { console.warn(NX.TAG, 'pagedFetch first page:', e); return []; }
   }
   const first = parse(fh);
-  const firstItems = [];
-  for (const it of first.items) {
-    if (seen) { const k = dedupe(it); if (seen.has(k)) continue; seen.add(k); }
-    firstItems.push(it);
-  }
-  pages.set(0, firstItems);
-  if (!first.hasData) return firstItems;
+  absorb(0, first.items);
+  if (!first.hasData) return [...pages.get(0)];
 
-  let next = 0, active = 0;   // 从 0 起：兼容服务端 0 基分页（page=0 与首页重复时由 dedupe 吸收）
+  const cap = expectPages > 0 ? Math.min(expectPages, maxPages) : maxPages;
+
+  let next = 0, active = 0;   // 从 0 起：兼容 0 基分页（page=0 与首页重复时由 dedupe 吸收）
   await new Promise(resolve => {
     const launch = () => {
-      while (!stop && active < concurrency && next <= maxPages) {
+      while (!stop && !pause && active < concurrency && next <= cap) {
         const p = next++;
         active++;
-        fetchPage(p)
-          .then(html => {
-            const r = parse(html);
-            if (!r.hasData) { stop = true; return; }
-            const items = [];
-            for (const it of r.items) {
-              if (seen) { const k = dedupe(it); if (seen.has(k)) continue; seen.add(k); }
-              items.push(it);
-            }
-            pages.set(p, items);
+        fetchOne(p)
+          .then(r => {
+            if (r === 'ERR') { stop = true; return; }
+            if (r === 'EMPTY') { stop = true; return; }
+            absorb(p, r.items);
           })
-          .catch(() => { stop = true; })
           .finally(() => {
             active--;
-            if (active === 0 && (stop || next > maxPages)) resolve();
+            if (active === 0 && (stop || next > cap)) resolve();
             else launch();
           });
       }
-      if (active === 0) resolve();
+      if (active === 0 && !pause) resolve();
     };
     launch();
   });
+
+  // ── 总数校验补抓：expectPages 已知且有缺页 → 低并发逐个补（连续失败熔断，防 session 失效慢砸） ──
+  if (expectPages > 0) {
+    const cap = Math.min(expectPages, maxPages);
+    const missing = [];
+    for (let p = 0; p <= cap; p++) {           // <=cap：兼容 1 基分页（多抓一页由 dedupe 吸收）
+      if (!pages.has(p)) missing.push(p);
+    }
+    if (missing.length) {
+      console.warn(NX.TAG, label, 'first pass missing', missing.length, 'pages, retrying:', missing.slice(0, 10).join(','), missing.length > 10 ? '…' : '');
+      let errStreak = 0;
+      await NX.runPool(missing, 2, async p => {
+        if (errStreak >= 5) return;            // 熔断：连续 5 页失败视为系统性故障（如 session 失效）
+        const r = await fetchOne(p);
+        if (r === 'ERR' || r === 'EMPTY') { errStreak++; return; }
+        errStreak = 0;
+        absorb(p, r.items);
+      });
+      const still = missing.filter(p => !pages.has(p));
+      if (still.length) console.warn(NX.TAG, label, 'STILL MISSING after recovery:', still.length, 'pages →', still.slice(0, 20).join(','));
+    }
+  }
 
   const out = [];
   [...pages.keys()].sort((a, b) => a - b).forEach(p => out.push(...pages.get(p)));
