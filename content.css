@@ -25,6 +25,37 @@
   --nx-glass-edge: inset 0 1px 0 rgba(255,255,255,.85), inset 0 0 0 1px rgba(28,39,64,.06);
   --nx-glass-shadow: 0 8px 32px rgba(28,39,64,.12);
   --nx-glass-shadow-hover: 0 12px 40px rgba(28,39,64,.16);
+  /* ── 真液态玻璃（Chrome 138+ backdrop-filter:url 折射；不支持自动降级磨砂） ── */
+  --nx-lg-filter: saturate(180%) blur(8px);
+  --nx-lg-edge:
+    inset 0 1.5px 1px -1px rgba(255,255,255,.95),   /* 顶镜面亮线 */
+    inset 0 -1.5px 1px -1px rgba(130,150,180,.45),  /* 底部冷暗线（折射暗缘） */
+    inset 1.5px 0 1px -1px rgba(255,255,255,.55),   /* 左亮 */
+    inset -1.5px 0 1px -1px rgba(255,210,170,.35),  /* 右侧暖色散 */
+    inset 0 0 0 1px rgba(255,255,255,.28);          /* 整体玻璃描边 */
+}
+@supports (backdrop-filter: url(#f)) {
+  #nextthuxk-inner {
+    --nx-lg-filter: url(#lg-refract) saturate(180%) blur(6px);
+  }
+}
+
+/* 液态玻璃横幅（更新提示等）：色调由 --bnt 内联注入 */
+.nx-lg-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  font-size: 13px;
+  border-radius: 14px;
+  margin: 8px 0;
+  color: rgb(var(--bnt, 29, 31, 36));
+  background:
+    linear-gradient(135deg, rgba(var(--bnt, 29,31,36), .1), rgba(var(--bnt, 29,31,36), .04)),
+    rgba(255,255,255,.4);
+  backdrop-filter: var(--nx-lg-filter);
+  -webkit-backdrop-filter: var(--nx-lg-filter);
+  box-shadow: var(--nx-lg-edge), 0 6px 24px rgba(29,31,36,.1);
 }
 #nextthuxk-host { font-family: var(--nx-font) !important; letter-spacing: .01em; }
 
@@ -40,9 +71,9 @@
   pointer-events: all;
   padding: 10px 20px;
   border-radius: 999px;
-  background: rgba(255,255,255,.45);
-  backdrop-filter: saturate(180%) blur(24px);
-  -webkit-backdrop-filter: saturate(180%) blur(24px);
+  background: rgba(255,255,255,.3);
+  backdrop-filter: var(--nx-lg-filter);
+  -webkit-backdrop-filter: var(--nx-lg-filter);
   color: var(--nx-ink);
   border: none;
   font-size: 13px;
@@ -50,7 +81,7 @@
   font-family: -apple-system,"PingFang SC","HarmonyOS Sans SC","MiSans","Noto Sans SC",sans-serif;
   letter-spacing: .06em;
   cursor: pointer;
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(29,31,36,.08), inset 0 0 0 1px rgba(29,31,36,.05), 0 8px 32px rgba(29,31,36,.18);
+  box-shadow: var(--nx-lg-edge), 0 8px 32px rgba(29,31,36,.18);
   transition: transform .2s cubic-bezier(.16,1,.3,1), box-shadow .2s;
   display: flex;
   align-items: center;
@@ -58,7 +89,7 @@
 }
 #nextthuxk-launch:hover {
   transform: scale(1.05);
-  box-shadow: inset 0 1px 0 rgba(255,255,255,.95), inset 0 -1px 0 rgba(29,31,36,.08), inset 0 0 0 1px rgba(29,31,36,.05), 0 12px 40px rgba(29,31,36,.22);
+  box-shadow: var(--nx-lg-edge), 0 12px 40px rgba(29,31,36,.22);
 }
 #nextthuxk-launch:active { transform: scale(.98); }
 #nextthuxk-dashboard {
@@ -85,12 +116,12 @@
 #nextthuxk-dashboard.active::before {
   width: 45vw; height: 45vw;
   left: -10vw; top: -12vw;
-  background: rgba(47,107,255,.14);
+  background: rgba(47,107,255,.2);
 }
 #nextthuxk-dashboard.active::after {
   width: 40vw; height: 40vw;
   right: -8vw; bottom: -10vw;
-  background: rgba(74,155,255,.12);
+  background: rgba(64,210,255,.16);
 }
 #nextthuxk-dashboard.active {
   transform: translateY(0);
@@ -102,10 +133,10 @@
   align-items: center;
   justify-content: space-between;
   padding: 14px 28px;
-  background: var(--nx-glass-strong);
-  backdrop-filter: var(--nx-glass-blur);
-  -webkit-backdrop-filter: var(--nx-glass-blur);
-  box-shadow: var(--nx-glass-edge);
+  background: rgba(255,255,255,.42);
+  backdrop-filter: var(--nx-lg-filter);
+  -webkit-backdrop-filter: var(--nx-lg-filter);
+  box-shadow: var(--nx-lg-edge);
   border-bottom: 1px solid var(--nx-line);
   flex-shrink: 0;
 }
@@ -240,7 +271,7 @@
 .nx-tag-ok { background: rgba(7,193,96,.12); color: var(--nx-green); }
 .nx-tag-no { background: rgba(238,77,77,.12); color: var(--nx-red); }
 .nx-tag-req { background: rgba(47,107,255,.12); color: var(--nx-accent); }
-.nx-tag-ele { background: rgba(74,155,255,.12); color: var(--nx-blue); }
+.nx-tag-ele { background: rgba(64,210,255,.16); color: var(--nx-blue); }
 .nx-tag-opt { background: rgba(255,159,26,.12); color: var(--nx-amber); }
 .nx-tag-sel { background: rgba(7,193,96,.18); color: var(--nx-green); }
 
@@ -338,9 +369,9 @@
 }
 .nx-modal-mask.show { opacity: 1; pointer-events: all; }
 .nx-modal {
-  background: var(--nx-glass-strong);
-  backdrop-filter: var(--nx-glass-blur-strong);
-  -webkit-backdrop-filter: var(--nx-glass-blur-strong);
+  background: rgba(255,255,255,.55);
+  backdrop-filter: var(--nx-lg-filter);
+  -webkit-backdrop-filter: var(--nx-lg-filter);
   border-radius: 20px;
   width: 680px;
   max-width: 90vw;
@@ -542,9 +573,9 @@
 }
 .nx-zy-modal-mask.show { opacity: 1; pointer-events: all; }
 .nx-zy-modal {
-  background: var(--nx-glass-strong);
-  backdrop-filter: var(--nx-glass-blur-strong);
-  -webkit-backdrop-filter: var(--nx-glass-blur-strong);
+  background: rgba(255,255,255,.55);
+  backdrop-filter: var(--nx-lg-filter);
+  -webkit-backdrop-filter: var(--nx-lg-filter);
   border-radius: 20px;
   width: 520px;
   max-width: 90vw;

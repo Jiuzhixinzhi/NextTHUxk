@@ -35,6 +35,13 @@ try {
 
 // ─── HTML Template ────────────────────────────────────────────
 const HTML = `
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <!-- 液态玻璃折射滤镜：径向 displacement map（中心不位移/边缘强弯折 = 透镜效应） -->
+  <filter id="lg-refract" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+    <feImage href="data:image/svg+xml;charset=utf-8,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><defs><radialGradient id="m" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="rgb(128,128,128)"/><stop offset="72%" stop-color="rgb(128,128,128)"/><stop offset="100%" stop-color="rgb(230,230,230)"/></radialGradient></defs><rect width="400" height="400" fill="url(#m)"/></svg>')}" result="map" x="0" y="0" width="100%" height="100%" preserveAspectRatio="none"/>
+    <feDisplacementMap in="SourceGraphic" in2="map" scale="46" xChannelSelector="R" yChannelSelector="G"/>
+  </filter>
+</svg>
 <div id="nextthuxk-inner">
   <button id="nextthuxk-launch" title="启动 NextTHUxk 下一代选课">NextTHUxk</button>
   <div id="nextthuxk-toast" class="nx-toast"></div>
@@ -446,7 +453,7 @@ $('nextthuxk-check-update').onclick = async () => {
   if (!$('nextthuxk-update-banner') && !$('nextthuxk-danger-banner')) {
     const toast = document.createElement('div');
     toast.id = 'nextthuxk-update-banner';
-    toast.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#07c160;color:#fff;font-size:13px;border-radius:8px;margin:8px 0;"><span>当前已是最新版本 v' + NX.CUR_VER + '</span><button onclick="this.closest(\'#nextthuxk-update-banner\').remove()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;">✕</button></div>';
+    toast.innerHTML = '<div class="nx-lg-banner" style="--bnt:7,193,96;color:#07c160;"><span>当前已是最新版本 v' + NX.CUR_VER + '</span><button onclick="this.closest(\'#nextthuxk-update-banner\').remove()" style="background:none;border:none;color:inherit;cursor:pointer;font-size:15px;">✕</button></div>';
     $('nextthuxk-dashboard')?.prepend(toast);
   }
 };
