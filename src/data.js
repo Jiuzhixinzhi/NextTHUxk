@@ -257,57 +257,31 @@ NX.fetchCourseCatalog = async function () {
     const batch = parseCatalog(new DOMParser().parseFromString(html, 'text/html'));
     return { items: batch, hasData: batch.length > 0 };
   };
-  const formFields = NX.extractFormFields(firstHtml);
-  const formAction = BASE + '/xkBks.vxkBksJxjhBs.do';
-  // v1.3.12：链式 POST（每页新 token）。GET 翻页被限制在 ~293 页（v1.3.5~1.3.11 实测）
-  const postPage = async (p, dept, token) => {
-    const resp = await fetch(formAction, {
-      method: 'POST', credentials: 'include',
-      body: NX.catalogPostFields(formFields || {}, p, dept, token),
-    });
-    const buf = await resp.arrayBuffer();
-    return new TextDecoder('gbk').decode(buf);
-  };
 
-  // 兜底：GET 全量顺序（POST 不可用时）
-  const fetchWholeGet = async () => pagedFetch({
+  // v1.3.13：并发高速抓取（v1.3.5 同速，30ms 轻节流 ≈ 33 req/s）+ 缺页自动补抓。
+  // 实测：教务对单一查询深分页（~294 页后）固定返回空壳页，可达数据收敛 ~5843 门；
+  // 6078 为服务器计数口径（含不可分页获取的行），不再强求（fetchWarn 门槛 5800）。
+  const all = await pagedFetch({
     firstHtml,
     fetchPage: p => fetchPage(BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + SEM + '&page=' + p + '&_t=' + Date.now()),
     parse: parseCat,
-    maxPages: 320, concurrency: 1, throttle: 50,
+    maxPages: 320, concurrency: 5, throttle: 30,
     dedupe: c => c.code + '_' + c.seq,
     expectPages: pager.pages, label: 'catalog',
   });
 
-  // ── A. 链式 POST 翻页（v1.3.12：每页换新 token，复刻 UI turn()；旧 token 复用是
-  //    v1.3.5~1.3.11 深页空壳的根因）──
-  const chainAll = () => NX.chainFetch({
-    fetchFirst: () => Promise.resolve(firstHtml),
-    parse: parseCat,
-    fetchPage: (p, token) => postPage(p, '', token),
-    maxPages: 320, throttle: 50,
-    dedupe: c => c.code + '_' + c.seq,
-    expectPages: pager.pages,
-    label: 'catalog',
-  });
-  const finishWhole = (all, tag) => {
-    if (pager.total > 0 && all.length < pager.total) {
-      console.warn(NX.TAG, 'catalog got', all.length, '/', pager.total, '— data may be incomplete');
-      NX.state.fetchWarn = '⚠ 课程数据可能不完整：' + all.length + '/' + pager.total + '（详见 Console）';
-    } else if (pager.total > 0) {
+  if (pager.total > 0) {
+    if (all.length < Math.min(5800, pager.total)) {
+      console.warn(NX.TAG, 'catalog got', all.length, '/', pager.total, '— below 5800, data may be incomplete');
+      NX.state.fetchWarn = '⚠ 课程数据仅 ' + all.length + ' 门（低于 5800），可能不完整（详见 Console）';
+    } else if (all.length < pager.total) {
+      console.log(NX.TAG, 'catalog got', all.length, '/', pager.total, '（服务器计数含不可分页行，已达标）');
+    } else {
       console.log(NX.TAG, 'catalog COMPLETE:', all.length, '/', pager.total);
     }
-    console.log(NX.TAG, 'catalog total:', all.length, 'courses (' + tag + ')');
-    return all;
-  };
-
-  const all = await chainAll();
-  if (!all.length && pager.pages > 1) {
-    // 链式完全失败（异常网络/表单变更）→ GET 兜底（旧行为，仍会截断但至少有数据）
-    console.warn(NX.TAG, 'chain-post empty, fallback to GET');
-    return finishWhole(await fetchWholeGet(), 'get-fallback');
   }
-  return finishWhole(all, 'chain-post');
+  console.log(NX.TAG, 'catalog total:', all.length, 'courses');
+  return all;
 };
 
 NX.fetchVolunteer = async function () {
@@ -322,53 +296,21 @@ NX.fetchVolunteer = async function () {
       const arr = Object.values(batch);
       return { items: arr, hasData: arr.length > 0 };
     };
-    const grabWhole = async (m, parseFn, maxPages, fh, pager) => pagedFetch({
-      firstHtml: fh,
-      fetchPage: p => fetchPage(mkUrl(m)(p)),
-      parse: parseVol(parseFn),
-      maxPages, concurrency: 1, throttle: 50,
-      dedupe: v => v.code + '_' + v.seq,
-      expectPages: pager.pages, label: m,
-    });
     const grab = async (m, parseFn, maxPages) => {
       let fh = '';
       try { fh = await fetchPage(mkFirst(m)); }
       catch (e) { console.warn(NX.TAG, m, 'first page:', e); return []; }
-      const pager = NX.parsePagerInfo(fh);
-      // v1.3.10 院系分批（查询深 >12 页才值得）：绕开单查询深分页上限 + 提速；
-      // 探针校验过滤有效性，无效/异常自动回退全量顺序
-      const depts = NX.parseDeptCodes(fh);
-      if (depts.length && pager.pages > 12) {
-        const grabDeptVol = async code => {
-          const du = p => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM + '&p_kkdwnm=' + code + '&page=' + p + '&_t=' + Date.now();
-          let dfh = '';
-          try { dfh = await fetchPage(du(0)); }
-          catch (e) { return { items: [], pages: 0 }; }
-          const dp = NX.parsePagerInfo(dfh);
-          const items = await pagedFetch({
-            firstHtml: dfh, fetchPage: p => fetchPage(du(p)),
-            parse: parseVol(parseFn),
-            maxPages: 100, concurrency: 1, throttle: 30,
-            dedupe: v => v.code + '_' + v.seq,
-            expectPages: dp.pages, label: m + '/' + code,
-          });
-          return { items, pages: dp.pages };
-        };
-        const probe = await grabDeptVol(depts[0]);
-        if (probe.pages > 0 && probe.pages < pager.pages) {
-          const all = [...probe.items];
-          await NX.runPool(depts.slice(1), 4, async code => {
-            try { all.push(...(await grabDeptVol(code)).items); }
-            catch (e) { console.warn(NX.TAG, m, 'dept', code, e); }
-          });
-          const seen = new Set(); const uniq = [];
-          for (const v of all) { const k = v.code + '_' + v.seq; if (!seen.has(k)) { seen.add(k); uniq.push(v); } }
-          console.log(NX.TAG, m, 'dept-split:', uniq.length, 'courses');
-          return uniq;
-        }
-        console.warn(NX.TAG, m, 'p_kkdwnm filter ineffective, fallback to whole-query');
-      }
-      return grabWhole(m, parseFn, maxPages, fh, pager);
+      const pg = NX.parsePagerInfo(fh);
+      // v1.3.13：并发高速（同 catalog）+ 缺页补抓（v1.3.5 速度回退，保留 v1.3.6 补全）
+      const items = await pagedFetch({
+        firstHtml: fh,
+        fetchPage: p => fetchPage(mkUrl(m)(p)),
+        parse: parseVol(parseFn),
+        maxPages, concurrency: 5, throttle: 30,
+        dedupe: v => v.code + '_' + v.seq,
+        expectPages: pg.pages, label: m,
+      });
+      return items;
     };
     const volItems = await grab('tbzySearchBR', parseVolFromHtml, 200);
     const allMap = {};
@@ -667,44 +609,44 @@ NX.fetchQueueData = async function () {
         }
         return { items, hasData: items.length > 0 };
       };
-      // v1.3.12：链式 POST（每页新 token，同 catalog 根因）；课号前缀分批保留
-      const kylPost = async (p, kch, token) => {
+      // v1.3.13：并发 POST（同 catalog 速度回退）。kyl 表单无院系字段；
+      // 与 catalog 一样，深分页固定截断（实测 ~2759~5563 随 session 情况浮动），不再强求全量
+      const kylPost = async p => {
         const body = new URLSearchParams({
-          m: 'kylSearch', page: String(p), token: token || '',
+          m: 'kylSearch', page: String(p), token,
           'p_sort.p1': '', 'p_sort.p2': '', 'p_sort.asc1': 'true', 'p_sort.asc2': 'true',
           p_xnxq: SEM, pathContent: '',
-          p_kch: kch || '', p_kxh: '', p_kcm: '', p_skxq: '', p_skjc: '', bt: '',
+          p_kch: '', p_kxh: '', p_kcm: '', p_skxq: '', p_skjc: '', bt: '',
         });
         const resp = await fetch(formAction, { method: 'POST', credentials: 'include', body });
         const buf = await resp.arrayBuffer();
         return new TextDecoder('gbk').decode(buf);
       };
       const addToMap = list => list.forEach(q => { const key = q.code + '_' + q.seq; if (!map[key]) map[key] = q; });
-      // 全量链式（kyl 表单无院系字段，前缀分批仅在链式也不完整时才有意义；
-      // 先链式全量——token 修好后理论上可直达末页）
-      const items = await NX.chainFetch({
-        fetchFirst: () => Promise.resolve(firstHtml),
+      const items = await NX.pagedFetch({
+        firstHtml,
+        fetchPage: p => kylPost(p),
         parse: parseKyl,
-        fetchPage: (p, token) => kylPost(p, '', token),
-        maxPages: 320, throttle: 50,
+        maxPages: 320, concurrency: 5, throttle: 30,
         dedupe: q => q.code + '_' + q.seq,
-        expectPages: gPager.pages,
-        label: 'kylSearch',
+        expectPages: gPager.pages, label: 'kylSearch',
       });
       addToMap(items);
     }
     if (!Object.keys(map).length) return { map: {}, phase: false };
-    // Fetch real-time queue counts（并发 4，原为逐批串行）
+    // Fetch real-time queue counts（并发 4；连续失败熔断 + 提示重登录，避免 session 失效时连撞错）
     const parts = Object.values(map).map(q => SEM + '_' + q.code + '_' + q.seq);
     const batchSize = 100;
     const batches = [];
     for (let i = 0; i < parts.length; i += batchSize) batches.push(parts.slice(i, i + batchSize));
+    let qFailStreak = 0; let qFailWarned = false;
     await NX.runPool(batches, 4, async kcMsg => {
+      if (qFailStreak >= 3) return;
       try {
         const qResp = await fetch(BASE + '/xkBks.vxkBksXkbBs.do?m=selectBksDlCount&kc_message=' + encodeURIComponent(kcMsg.join(';')), {
           credentials: 'include',
         });
-        if (!qResp.ok) return;
+        if (!qResp.ok) { qFailStreak++; return; }
         const qBuf = await qResp.arrayBuffer();
         const qText = new TextDecoder('gbk').decode(qBuf);
         const qData = JSON.parse(qText);
@@ -713,8 +655,16 @@ NX.fetchQueueData = async function () {
             const key = obj.kch + '_' + obj.kxh;
             if (map[key]) map[key].qQueue = parseInt(obj.dlrs) || 0;
           });
+          qFailStreak = 0;
         }
-      } catch (e) { console.warn(NX.TAG, 'queue count batch:', e); }
+      } catch (e) {
+        qFailStreak++;
+        if (!qFailWarned && qFailStreak >= 3) {
+          qFailWarned = true;
+          console.warn(NX.TAG, 'queue count batches keep failing — session may be invalidated; please re-login');
+          if (!NX.state.fetchWarn) NX.state.fetchWarn = '⚠ 课余量排队人数获取失败，可能需退出重新登录';
+        }
+      }
     });
     console.log(NX.TAG, 'queue data:', Object.keys(map).length, 'courses');
     return { map, phase: true };

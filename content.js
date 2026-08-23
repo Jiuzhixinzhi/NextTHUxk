@@ -385,7 +385,7 @@ $('nextthuxk-check-update').onclick = async () => {
   if (!$('nextthuxk-update-banner') && !$('nextthuxk-danger-banner')) {
     const toast = document.createElement('div');
     toast.id = 'nextthuxk-update-banner';
-    toast.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#34c759;color:#fff;font-size:13px;border-radius:8px;margin:8px 0;"><span>当前已是最新版本 v' + '1.3.1' + '</span><button onclick="this.closest(\'#nextthuxk-update-banner\').remove()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;">✕</button></div>';
+    toast.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 16px;background:#34c759;color:#fff;font-size:13px;border-radius:8px;margin:8px 0;"><span>当前已是最新版本 v' + NX.CUR_VER + '</span><button onclick="this.closest(\'#nextthuxk-update-banner\').remove()" style="background:none;border:none;color:#fff;cursor:pointer;font-size:16px;">✕</button></div>';
     $('nextthuxk-dashboard')?.prepend(toast);
   }
 };
