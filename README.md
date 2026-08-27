@@ -4,26 +4,31 @@
 
 ## 安装
 
-> **建议使用方式二（解压加载）**。Chrome / Edge 已收紧外部 .crx 安装策略，直接拖入 .crx 可能被拦截。解压加载在所有浏览器均可正常使用。
-
 > 🚀 校内访问 [git.tsinghua.edu.cn/gjl25/NextTHUxk](https://git.tsinghua.edu.cn/gjl25/NextTHUxk) 下载速度更快。
+> 各渠道附件对照：`*.xpi` = Firefox 签名版（永久安装）；`*.zip` = Chrome / Edge / Firefox 手动加载通用包。
 
-### 方式一：.crx 拖入安装（Chrome / Arc）
+### Firefox：下载 xpi 一键装（推荐，永久生效）
 
-1. 从 [Releases](https://github.com/smartThise/NextTHUxk/releases) 下载 `NextTHUxk.crx`
-2. 浏览器打开 `chrome://extensions`，右上角开启「开发者模式」
-3. 将 .crx 文件拖入浏览器窗口，确认安装
-4. 若提示无法安装，请改用方式二
+1. 从 [Releases](https://github.com/smartThise/NextTHUxk/releases) 最新版本下载 `nextthuxk-<版本号>.xpi`
+2. 打开 Firefox，地址栏输入 `about:addons`，将 xpi 文件**直接拖入页面**
+3. 完成安装——该包经 Mozilla 官方签名，无需开发者模式、重启浏览器不失效
 
-### 方式二：解压加载（推荐 / 所有浏览器通用）
+**Firefox 更新方式**：发布新版本时扩展会在页面上弹出更新横幅（也可手动到 Releases 页查看）。下载新版 xpi 后同样拖入 `about:addons`，会自动覆盖升级并保留全部本地数据（草稿 / 缓存 / 配置）。无需先卸载旧版。
 
-1. 从 [Releases](https://github.com/smartThise/NextTHUxk/releases) 下载 `NextTHUxk.zip` 并解压
+### Chrome / Edge：解压加载
+
+1. 从 [Releases](https://github.com/smartThise/NextTHUxk/releases) 下载 `nextthuxk-<版本号>.zip` 并解压
 2. 浏览器打开扩展管理页（Chrome: `chrome://extensions`，Edge: `edge://extensions`），开启「开发者模式」
 3. 点击「加载已解压的扩展程序」，选择解压后的文件夹
 
+> .crx 直拖方式已被 Chrome 收紧拦截，不再提供。更新时下载新 zip 解压**覆盖原文件夹**后回到扩展管理页点击「重新加载」即可；若出现新旧实例冲突等诡异问题，先移除旧版再重新加载。
+
 ## 使用
 
-进入清华选课网站（zhjwxk.cic.tsinghua.edu.cn 或 zhjw.cic.tsinghua.edu.cn），右下角出现 ✨ 按钮，点击即可打开全屏工作台。
+进入清华选课网站（zhjwxk.cic.tsinghua.edu.cn 或 zhjw.cic.tsinghua.edu.cn），右下角会出现 **NextTHUxk 胶囊按钮**：
+
+- 点击按钮 → 进入全屏工作台（首次使用会引导确认学期与年级）
+- 工作台内右上角「返回原系统」→ 收起工作台回到教务原页面
 
 ![Preview](Preview.png)
 
@@ -288,6 +293,7 @@
 │   ├── config.js        # 命名空间 NX、常量、工具函数、存储、网络
 │   ├── data.js          # 数据抓取与解析（课程目录、志愿、选退课 API）
 │   ├── probability.js   # 中签概率计算、志愿格式化
+│   ├── reviews.js       # THU选课社区评价层（匹配 / 点评弹窗 / 联想词）
 │   ├── state.js         # 暂存/草稿管理、课表解析、冲突检测、选课状态
 │   ├── render.js        # 所有渲染函数 + 筛选逻辑
 │   ├── ai.js            # AI 搜索 + 智能排课
