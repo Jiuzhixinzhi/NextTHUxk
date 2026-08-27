@@ -123,7 +123,7 @@ NX.courseCardHtml = function (c, ctx) {
         '<button class="nx-select-btn" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" style="background:var(--nx-glass);color:var(--nx-ink-soft);box-shadow:inset 0 1px 0 rgba(255,255,255,.9),inset 0 0 0 1px var(--nx-line)">排队选课</button>' +
         '<button class="nx-stage-btn nx-add-stage" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '"' + (inStage ? ' disabled' : '') + '>' + (inStage ? '已暂存' : '暂存') + '</button>';
     }
-    return '<div class="nx-card' + (c.selected ? ' nx-selected' : '') + '" data-code="' + esc(c.code) + '" data-tid="' + esc(c.teacherId || '') + '">' +
+    return '<div class="nx-card' + (c.selected ? ' nx-selected' : '') + '" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" data-tid="' + esc(c.teacherId || '') + '">' +
       '<div class="nx-card-head"><span class="nx-card-name">' + esc(c.name) + '</span>' + NX.tbBadgeHtml(c) + '<span class="nx-card-credit">' + c.credits + '学分</span></div>' +
       '<div style="font-size:11px;color:#9aa1ac;margin-bottom:3px">' + esc(c.code) + (c.seq ? ' · ' + esc(c.seq) + '课序' : '') + '</div>' +
       '<div class="nx-tags">' + tags.join('') + '</div>' +
@@ -357,7 +357,7 @@ NX.renderPreviewTT = function (courses, label) {
         const btns = items.map(it => '<span class="nx-tt-rm" data-code="' + esc(it.code) + '" data-seq="' + esc(it.seq) + '" title="移除 ' + esc(it.label) + '">✕</span>').join('');
         const linesHtml = items.map(it => {
           const probHtml = it.probLabel ? '<span class="nx-tt-prob" style="background:' + it.probBgColor + ';color:' + it.color + '">' + it.probLabel + '</span>' : '';
-          return '<div class="nx-tt-line"><span class="nx-tt-text">' + esc(it.label) + '</span>' + probHtml + '</div>';
+          return '<div class="nx-tt-line nx-tt-jump" data-code="' + esc(it.code) + '" data-seq="' + esc(it.seq) + '" title="在左侧课程列表中查看"><span class="nx-tt-text">' + esc(it.label) + '</span>' + probHtml + '</div>';
         }).join('');
         let cellClass = isC ? 'nx-c' : 'nx-s';
         let cellStyle = '';
@@ -385,8 +385,51 @@ NX.renderPreviewTT = function (courses, label) {
   el.querySelectorAll('.nx-tt-rm').forEach(btn => {
     btn.onclick = () => handlePreviewRemove(btn.dataset.code, btn.dataset.seq);
   });
+  el.querySelectorAll('.nx-tt-jump').forEach(line => {
+    line.onclick = () => NX.jumpToCourse(line.dataset.code, line.dataset.seq);
+  });
   el.querySelectorAll('.nx-tt-undet').forEach(chip => {
     chip.onclick = () => handlePreviewRemove(chip.dataset.code, chip.dataset.seq);
+  });
+};
+
+// 从课表预览定位到左侧课程列表。重置会隐藏目标课程的筛选条件，
+// 用课程号搜索后精确滚动到对应课序号。
+NX.jumpToCourse = function (code, seq) {
+  const { state } = NX;
+  const $ = state.$;
+  const course = NX.getCourse(code, seq);
+  const search = $('nextthuxk-search');
+  const list = $('nextthuxk-list');
+  if (!course || !search || !list) return;
+
+  state.activeGroup = null;
+  state.shadow.querySelectorAll('.nx-chip').forEach(chip => {
+    chip.classList.toggle('on', chip.dataset.f === 'all');
+  });
+  [
+    'nx-filter-credits', 'nx-filter-day', 'nx-filter-period',
+    'nx-filter-conflict', 'nx-filter-reviews', 'nx-sort-by',
+    'nx-filter-tongshi', 'nx-filter-feature', 'nx-filter-grade-filter',
+    'nx-filter-bksrem', 'nx-filter-yjsrem'
+  ].forEach(id => { const node = $(id); if (node) node.value = ''; });
+  const note = $('nx-filter-xknote');
+  if (note) note.value = '';
+
+  search.value = course.code;
+  NX.filterCourses();
+  list.scrollTop = 0;
+
+  requestAnimationFrame(() => {
+    const target = [...list.querySelectorAll('.nx-card')].find(card =>
+      card.dataset.code === String(code) &&
+      String(card.dataset.seq || '0') === String(seq || '0')
+    );
+    if (!target) return;
+    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    target.classList.add('nx-jump-target');
+    setTimeout(() => target.classList.remove('nx-jump-target'), 1800);
+    search.focus({ preventScroll: true });
   });
 };
 

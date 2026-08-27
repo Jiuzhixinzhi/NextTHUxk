@@ -479,6 +479,17 @@
 .nx-tt td.nx-s { background: rgba(255,255,255,.75); backdrop-filter: saturate(160%) blur(12px); -webkit-backdrop-filter: saturate(160%) blur(12px); color: var(--nx-ink); font-weight: 600; box-shadow: inset 0 1px 0 rgba(255,255,255,.95), inset 0 0 0 1px rgba(47,107,255,.25); }
 .nx-tt td.nx-c { background: rgba(255,255,255,.75); backdrop-filter: saturate(160%) blur(12px); -webkit-backdrop-filter: saturate(160%) blur(12px); color: var(--nx-red); box-shadow: inset 0 1px 0 rgba(255,255,255,.95), inset 0 0 0 1px rgba(238,77,77,.3); }
 .nx-tt-cell { position: relative; }
+.nx-tt-jump { cursor: pointer; border-radius: 8px; transition: background .15s, transform .15s; }
+.nx-tt-jump:hover { background: rgba(47,107,255,.08); transform: translateY(-1px); }
+
+.nx-card.nx-jump-target {
+  animation: nx-jump-pulse 1.8s ease-out;
+  box-shadow: inset 0 0 0 2px var(--nx-accent), var(--nx-glass-edge), 0 12px 36px rgba(47,107,255,.22);
+}
+@keyframes nx-jump-pulse {
+  0%, 35% { background: rgba(47,107,255,.14); }
+  100% { background: var(--nx-glass); }
+}
 .nx-tt-text { display: block; font-size: 10px; line-height: 1.3; word-break: break-all; }
 .nx-tt-line { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 3px; }
 .nx-tt-line:last-child { margin-bottom: 0; }
