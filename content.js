@@ -120,7 +120,7 @@ const HTML = `
       </div>
       <div class="nx-right">
         <div class="nx-sec"><div class="nx-sec-title">我的培养方案</div><div id="nextthuxk-plan" class="nx-plans"><div class="nx-st">等待加载…</div></div><div id="nextthuxk-plan-detail" style="margin-top:8px;font-size:12px;color:var(--nx-ink-soft)"></div></div>
-        <div class="nx-sec"><div class="nx-sec-title">课表预览 <span id="nextthuxk-preview-info" style="font-size:11px;color:var(--nx-ink-soft);font-weight:400"></span></div><div id="nextthuxk-preview-tt"><div class="nx-st">选课后自动生成预览</div></div><button class="nx-stage-btn" id="nextthuxk-preview-reset" style="display:none;margin-top:6px">返回当前已选课表</button></div>
+        <div class="nx-sec"><div class="nx-sec-title" style="display:flex;align-items:center;gap:8px">课表预览 <span id="nextthuxk-preview-info" style="font-size:11px;color:var(--nx-ink-soft);font-weight:400"></span><button class="nx-stage-btn" id="nextthuxk-add-manual" style="margin-left:auto">＋ 添加占用</button></div><div id="nextthuxk-preview-tt"><div class="nx-st">选课后自动生成预览</div></div><button class="nx-stage-btn" id="nextthuxk-preview-reset" style="display:none;margin-top:6px">返回当前已选课表</button></div>
         <div class="nx-sec">
           <div class="nx-sec-title">暂存课表</div>
           <div id="nextthuxk-stage-list"><div class="nx-st">暂无暂存课程</div></div>
@@ -201,6 +201,7 @@ NX.launch = async function launch() {
     if (g) state.GRADE = Math.max(1, Math.min(4, parseInt(g) || 0));
   }
   if (state.GRADE) await store.set('grade', state.GRADE);
+  state.manualEvents = (await store.get('manualEvents')) || [];
   const gradeBtn = $('nextthuxk-grade');
   if (gradeBtn) gradeBtn.textContent = state.GRADE ? ['', '大一', '大二', '大三', '大四'][state.GRADE] : '未设置';
   const listEl = $('nextthuxk-list');
@@ -506,6 +507,7 @@ $('nextthuxk-preview-stage').onclick = () => {
   state.previewMode = 'stage';
   renderPreviewTT(state.stageCart, '暂存区预览');
 };
+$('nextthuxk-add-manual').onclick = NX.showManualEventModal;
 $('nextthuxk-import').onclick = () => {
   const area = $('nextthuxk-import-area');
   if (area) area.style.display = area.style.display === 'none' ? 'block' : 'none';

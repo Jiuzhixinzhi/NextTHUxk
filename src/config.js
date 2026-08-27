@@ -31,6 +31,7 @@ NX.state = {
   activeGroup: null,
   stageCart: [],
   savedDrafts: [],
+  manualEvents: [],
   queueDataMap: {},
   isQueuePhase: false,
   candidateCourses: [],
