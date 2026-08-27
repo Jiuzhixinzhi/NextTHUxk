@@ -194,9 +194,11 @@ var NX = NX || {};
   };
 
   // 批量挂载：给每门课附 c._tbRef（含 AI 用 snippet），返回统计
+  // 每次调用重置 stats——匹配统计只反映本次运行，避免多轮挂载累加误读
   NX.tbAttach = function (list) {
     if (!S.ready || !Array.isArray(list)) return { matched: 0, total: list ? list.length : 0 };
     let matched = 0;
+    S.stats = {};
     for (const c of list) {
       try {
         const e = NX.tbMatch(c);

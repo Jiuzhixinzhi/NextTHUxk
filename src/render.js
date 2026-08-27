@@ -7,7 +7,7 @@ var NX = NX || {};
 NX.tbBadgeHtml = function (c) {
   const e = c._tbRef;
   if (!e || !e.count || !e.avg) return '';
-  return '<button type="button" class="nx-tb-badge" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" title="THU选课社区评分 · 点击查看全部点评">★' + Number(e.avg).toFixed(1) + '<i>' + e.count + '评</i></button>';
+  return '<button type="button" class="nx-tb-badge" data-code="' + NX.esc(c.code) + '" data-seq="' + NX.esc(c.seq || '0') + '" title="THU选课社区评分 · 点击查看全部点评">★' + Number(e.avg).toFixed(1) + '<i>' + e.count + '评</i></button>';
 };
 
 // ─── Course Card Rendering ────────────────────────────────────
