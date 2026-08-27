@@ -102,6 +102,10 @@ const HTML = `
             <select id="nx-filter-day" class="nx-zy-select" style="flex:1"><option value="">不限周次</option><option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option></select>
             <select id="nx-filter-period" class="nx-zy-select" style="flex:1"><option value="">不限大节</option><option value="1">第1大节</option><option value="2">第2大节</option><option value="3">第3大节</option><option value="4">第4大节</option><option value="5">第5大节</option><option value="6">第6大节</option></select>
           </div>
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <select id="nx-filter-reviews" class="nx-zy-select" style="flex:1"><option value="">社区评价: 不限</option><option value="has">有点评</option><option value="cnt5">点评≥5条</option><option value="r45">★≥4.5 好评</option><option value="r40">★≥4.0</option><option value="low">★≤3.0 避雷线</option></select>
+            <select id="nx-sort-by" class="nx-zy-select" style="flex:1"><option value="">排序: 默认目录序</option><option value="rate_desc">社区评分 高→低</option><option value="rate_asc">社区评分 低→高</option><option value="cnt_desc">点评数 多→少</option></select>
+          </div>
           <div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap">
             <select id="nx-filter-tongshi" class="nx-zy-select" style="flex:1;min-width:100px"><option value="">通识课组: 不限</option><option value="TS1">人文课组</option><option value="TS2">社科课组</option><option value="TS3">艺术课组</option><option value="TS4">科学课组</option></select>
             <select id="nx-filter-feature" class="nx-zy-select" style="flex:1;min-width:120px"><option value="">课程特色: 不限</option><option value="专题研讨课">专题研讨课</option><option value="全外文授课">全外文授课</option><option value="外文授课比例≥50%">双语课(外文≥50%)</option><option value="外文教材">双语课(外文教材)</option><option value="实践课">实践课</option><option value="实验课">实验课</option><option value="挑战性学习">挑战性学习课程</option><option value="文化素质核心课">文化素质核心课</option><option value="文化素质课">文化素质课</option><option value="新生研讨课">新生研讨课</option><option value="混合式教学">混合式教学</option><option value="精品课">精品课</option><option value="认证外文课">认证外文课</option><option value="通识荣誉课">通识荣誉课</option><option value="通识选修课">通识选修课</option><option value="语言类">语言类课程</option><option value="通识英语">通识英语</option><option value="公共英语">公共英语</option></select>
@@ -439,6 +443,8 @@ $('nx-filter-credits').onchange = filterCourses;
 $('nx-filter-day').onchange = filterCourses;
 $('nx-filter-period').onchange = filterCourses;
 $('nx-filter-conflict').onchange = filterCourses;
+$('nx-filter-reviews').onchange = filterCourses;
+$('nx-sort-by').onchange = filterCourses;
 $('nx-filter-tongshi').onchange = filterCourses;
 $('nx-filter-feature').onchange = filterCourses;
 $('nx-filter-grade-filter').onchange = filterCourses;

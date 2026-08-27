@@ -3,11 +3,14 @@
 // ═══════════════════════════════════════════════════════════════
 var NX = NX || {};
 
-// ─── THUbook 评分徽章（有数据才出现）────────────────────────
+// ─── THUbook 评分徽章（有数据才出现；按分数段分色便于扫读）──
+// ≥4.5 神课绿 · 4.0~4.4 优质靛蓝 · 3.0~3.9 一般琥珀 · <3.0 避课红
 NX.tbBadgeHtml = function (c) {
   const e = c._tbRef;
   if (!e || !e.count || !e.avg) return '';
-  return '<button type="button" class="nx-tb-badge" data-code="' + NX.esc(c.code) + '" data-seq="' + NX.esc(c.seq || '0') + '" title="THU选课社区评分 · 点击查看全部点评">★' + Number(e.avg).toFixed(1) + '<i>' + e.count + '评</i></button>';
+  const a = Number(e.avg) || 0;
+  const lv = a >= 4.5 ? 'lv-hi' : a >= 4 ? 'lv-good' : a >= 3 ? 'lv-mid' : 'lv-bad';
+  return '<button type="button" class="nx-tb-badge ' + lv + '" data-code="' + NX.esc(c.code) + '" data-seq="' + NX.esc(c.seq || '0') + '" title="THU选课社区评分 · 点击查看全部点评">★' + a.toFixed(1) + '<i>' + e.count + '评</i></button>';
 };
 
 // ─── Course Card Rendering ────────────────────────────────────
@@ -763,6 +766,35 @@ NX.filterCourses = function () {
   if (yjsVal === '>0') list = list.filter(c => (c.gradRemaining || 0) > 0);
   const xkNote = ($('nx-filter-xknote')?.value || '').trim().toLowerCase();
   if (xkNote) list = list.filter(c => lc(c.xkTextNote).includes(xkNote));
+  // ─── 社区评价筛选（thubook）───
+  const rv = $('nx-filter-reviews')?.value;
+  if (rv) {
+    const ok = c => {
+      const t = c._tbRef;
+      if (!t || !t.count) return false;
+      if (rv === 'has') return true;
+      if (rv === 'cnt5') return t.count >= 5;
+      if (rv === 'r45') return t.avg >= 4.5;
+      if (rv === 'r40') return t.avg >= 4;
+      if (rv === 'low') return t.avg <= 3;
+      return true;
+    };
+    list = list.filter(ok);
+  }
+  // ─── 排序（复制数组，绝不动 allCourses 本体顺序）───
+  const sortBy = $('nx-sort-by')?.value;
+  if (sortBy && list.length > 1) {
+    list = list.slice().sort((a, b) => {
+      const ta = a._tbRef && a._tbRef.count ? a._tbRef : null;
+      const tb = b._tbRef && b._tbRef.count ? b._tbRef : null;
+      const av = ta ? ta.avg : null, bv = tb ? tb.avg : null;   // 无点评恒排末尾
+      const ca = ta ? ta.count : -1, cb = tb ? tb.count : -1;
+      if (sortBy === 'rate_desc') return bv == null ? -1 : av == null ? 1 : (bv - av) || (cb - ca);
+      if (sortBy === 'rate_asc') return bv == null ? 1 : av == null ? -1 : (av - bv) || (ca - cb);
+      if (sortBy === 'cnt_desc') return cb - ca;
+      return 0;
+    });
+  }
   renderCourses(list);
 };
 

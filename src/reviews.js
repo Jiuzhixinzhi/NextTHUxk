@@ -396,9 +396,12 @@ var NX = NX || {};
     if (!sgItems.length) { hideSuggest(); return; }
     el.innerHTML = sgItems.map((c, i) => {
       const tb = c._tbRef;
-      const right = tb && tb.count
-        ? '<span class="nx-sg-star">★' + Number(tb.avg).toFixed(1) + '</span><span class="nx-sg-cnt">' + tb.count + '评</span>'
-        : '<span class="nx-sg-norev">无点评</span>';
+      let right = '<span class="nx-sg-norev">无点评</span>';
+      if (tb && tb.count) {
+        const a = Number(tb.avg) || 0;
+        const lv = a >= 4.5 ? 'lv-hi' : a >= 4 ? 'lv-good' : a >= 3 ? 'lv-mid' : 'lv-bad';
+        right = '<span class="nx-sg-star ' + lv + '">★' + a.toFixed(1) + '</span><span class="nx-sg-cnt">' + tb.count + '评</span>';
+      }
       return '<div class="nx-sg-item" data-i="' + i + '">' +
         '<span class="nx-sg-name">' + hl(c.name, q) + '</span>' +
         '<span class="nx-sg-meta">' + NX.esc(c.teacher || '') + (c.teacher && c.department ? ' · ' : '') + NX.esc(c.department || '') + '</span>' +
