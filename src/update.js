@@ -76,7 +76,8 @@ NX.showUpdateBanner = function (ver, url) {
   banner.id = 'nextthuxk-update-banner';
   banner.innerHTML =
     '<div class="nx-lg-banner">' +
-    '<span>发现新版本 <b style="color:#2f6bff">v' + esc(ver) + '</b>，建议更新获取最新功能与修复</span>' +
+    '<span>发现新版本 <b style="color:#2f6bff">v' + esc(ver) + '</b>，建议更新获取最新功能与修复' +
+    '<br><small style="opacity:.72;font-weight:400">更新前建议先在 <b>chrome://extensions 扩展管理界面移除旧版</b>，再加载新版，避免新旧实例冲突</small></span>' +
     '<div style="display:flex;gap:8px;align-items:center;">' +
     '<a href="' + url + '" target="_blank" style="color:inherit;background:rgba(29,31,36,.06);padding:4px 12px;border-radius:8px;text-decoration:none;font-size:12px;font-weight:600;">前往下载</a>' +
     '<button id="nextthuxk-update-close" style="background:none;border:none;color:inherit;cursor:pointer;font-size:15px;line-height:1;">✕</button>' +
@@ -96,7 +97,8 @@ NX.showDangerBanner = function () {
   banner.id = 'nextthuxk-danger-banner';
   banner.innerHTML =
     '<div class="nx-lg-banner" style="box-shadow:var(--nx-glass-edge), 0 8px 32px rgba(238,77,77,.25);">' +
-    '<span>当前版本 <b style="color:#ee4d4d">v' + esc(CUR_VER) + '</b> 存在严重错误，请立即升级到 <a href="https://github.com/smartThise/NextTHUxk/releases/latest" target="_blank" style="color:#ee4d4d;font-weight:700;text-decoration:underline">最新版本</a></span>' +
+    '<span>当前版本 <b style="color:#ee4d4d">v' + esc(CUR_VER) + '</b> 存在严重错误，请立即升级到 <a href="https://github.com/smartThise/NextTHUxk/releases/latest" target="_blank" style="color:#ee4d4d;font-weight:700;text-decoration:underline">最新版本</a>' +
+    '<br><small style="opacity:.72;font-weight:400">安装前请先在 <b>chrome://extensions 移除本版本</b>，避免新旧实例冲突</small></span>' +
     '<button id="nextthuxk-danger-close" style="background:none;border:none;color:inherit;cursor:pointer;font-size:15px;line-height:1;">✕</button>' +
     '</div>';
   db.prepend(banner);

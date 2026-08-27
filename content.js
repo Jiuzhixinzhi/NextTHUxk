@@ -179,7 +179,6 @@ NX.launch = async function launch() {
   }
   state.launching = true;
   const FIN = () => { state.launching = false; };
-  const SEM0 = state.SEM;   // 学期切换竞态防护：写缓存前校验
   state.fetchWarn = '';     // 清空上次加载的不完整提示（本次加载结束时会按实际结果重设）
   const { fmtTime } = NX;
   toggle(true);
@@ -191,6 +190,7 @@ NX.launch = async function launch() {
     }
   }
   await store.set('sem', state.SEM);
+  const SEM0 = state.SEM;   // 学期切换竞态基准：必须在解析后取！（v1.4.4 修复首启永不落缓存）
   const semBtn = $('nextthuxk-sem');
   if (semBtn) semBtn.textContent = state.SEM;
   // Resolve grade
@@ -301,6 +301,8 @@ NX.launch = async function launch() {
         const cleanMain = state.allCourses.map(c => { const { isCandidate, ...rest } = c; return rest; });
         sd = { ver: DATA_VER, plan, courses: cleanMain, volTs, ts: needCatalog ? Date.now() : (sd?.ts || Date.now()) };
         await store.set('staticData', sd);
+      } else {
+        console.warn(TAG, 'cache write skipped: semester switched during load', SEM0, '->', state.SEM);
       }
     }
 
