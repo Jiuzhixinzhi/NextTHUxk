@@ -23,6 +23,12 @@ state.SEM = (location.href.match(/p_xnxq=([^&]+)/) || ['', ''])[1];
 state.BASE = location.origin;
 state.isZhjwxk = location.hostname === 'zhjwxk.cic.tsinghua.edu.cn';
 state.isZhjw = location.hostname === 'zhjw.cic.tsinghua.edu.cn';
+// WebVPN (#21)：页面形如 /http|https/<encoded-host>/<原路径>。
+// BASE 必须保留编码站点前缀，否则所有请求都会打到 webvpn 根目录下 404。
+state.isWebvpn = location.hostname === 'webvpn.tsinghua.edu.cn';
+const WEBVPN_PREFIX_RE = /^\/(https?)\/([0-9a-f]{32,})(?=\/|$)/i;
+const _wvp = location.pathname.match(WEBVPN_PREFIX_RE);
+if (_wvp) state.BASE += '/' + _wvp[1] + '/' + _wvp[2];
 
 // ─── Load CSS ─────────────────────────────────────────────────
 let cssText = '';
@@ -164,6 +170,35 @@ state.$ = id => shadow.getElementById(id);
 shadow.innerHTML = '<style>' + cssText + '</style>' + HTML;
 const $ = state.$;
 
+// ─── WebVPN 站点识别（#21）────────────────────────────────────
+// 解密 /{protocol}/{encoded-host}/ 中的主机段（WebVPN: AES-128-CBC, key=iv="wrdvpnisthebest!"），
+// 精确判定 zhjwxk / zhjw；解密失败则退回路径嗅探（xkBks.）。单飞行 promise，launch 前必等。
+NX.ensureSiteIdentity = function () {
+  if (!state.isWebvpn) return Promise.resolve(true);
+  if (state._siteP) return state._siteP;
+  state._siteP = (async () => {
+    const m = location.pathname.match(WEBVPN_PREFIX_RE);
+    let host = '';
+    if (m && m[2].length % 2 === 0) {
+      try {
+        const raw = new Uint8Array(m[2].match(/../g).map(h => parseInt(h, 16)));
+        const keyBytes = new TextEncoder().encode('wrdvpnisthebest!');
+        const key = await crypto.subtle.importKey('raw', keyBytes, { name: 'AES-CBC' }, false, ['decrypt']);
+        const pt = new TextDecoder().decode(await crypto.subtle.decrypt({ name: 'AES-CBC', iv: keyBytes }, key, raw));
+        host = [...pt].filter(c => c >= ' ' && c <= '~').join('');
+      } catch (e) { console.warn(TAG, 'webvpn host decode fail:', e && e.message); }
+    }
+    if (!state.isZhjwxk && !state.isZhjw) {
+      const after = m ? location.pathname.slice(m[0].length) : location.pathname;
+      if (/zhjwxk/i.test(host) || /xkBks\./i.test(after)) state.isZhjwxk = true;
+      else if (/zhjw\.cic/i.test(host)) state.isZhjw = true;
+    }
+    console.log(TAG, 'site identity:', state.isZhjwxk ? 'zhjwxk' : state.isZhjw ? 'zhjw' : 'unknown', '| BASE=' + state.BASE, host ? '| host=' + host : '');
+    return state.isZhjwxk || state.isZhjw;
+  })();
+  return state._siteP;
+};
+
 // ─── Toggle ───────────────────────────────────────────────────
 function toggle(show) {
   const db = $('nextthuxk-dashboard');
@@ -183,6 +218,7 @@ NX.launch = async function launch() {
   state.fetchWarn = '';     // 清空上次加载的不完整提示（本次加载结束时会按实际结果重设）
   const { fmtTime } = NX;
   toggle(true);
+  try { await NX.ensureSiteIdentity(); } catch (e) {}   // WebVPN 下先识别站点（#21）
   // Resolve semester
   if (!state.SEM) {
     state.SEM = (await store.get('sem')) || '';
