@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "NextTHUxk",
   "short_name": "NextTHUxk",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "description": "下一代选课 - 基于 AI 决策与现代双栏 UI 的选课无感辅助系统。",
   "permissions": ["activeTab", "storage", "unlimitedStorage"],
   "host_permissions": [
@@ -41,7 +41,7 @@
   }],
   "browser_specific_settings": {
     "gecko": {
-      "id": "nextthuxk@smartthise.github.io",
+      "id": "nextthuxk@guojl06.github.io",
       "strict_min_version": "115.0",
       "data_collection_permissions": {
         "required": ["none"],
