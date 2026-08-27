@@ -668,6 +668,19 @@
   white-space: pre-wrap; word-break: break-word;
 }
 
+/* 时间未定课程胶囊（课表下方单列） */
+.nx-tt-undet {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-size: 11px; padding: 3px 10px;
+  border-radius: 999px; cursor: pointer;
+  background: var(--nx-glass);
+  box-shadow: var(--nx-glass-edge);
+  color: var(--nx-ink-soft);
+  transition: color .15s, box-shadow .15s;
+}
+.nx-tt-undet i { font-style: normal; color: var(--nx-faint); }
+.nx-tt-undet:hover { color: var(--nx-red); box-shadow: inset 0 1px 0 rgba(255,255,255,.85), inset 0 0 0 1px rgba(238,77,77,.35); }
+
 /* CC BY-NC 署名声明 */
 .nx-tb-license {
   font-size: 10px; color: var(--nx-faint);

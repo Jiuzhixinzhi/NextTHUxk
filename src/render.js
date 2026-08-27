@@ -299,6 +299,7 @@ NX.renderPreviewTT = function (courses, label) {
   if (label && label.startsWith('草稿「')) state.previewMode = 'draft';
   if (!courses.length) { el.innerHTML = '<div class="nx-st">暂无课程</div>'; return; }
   const tt = {};
+  const undet = [];   // 时间未定/无固定时段课程（#16）：不进网格，单列在表格下方
   courses.forEach((c, ci) => {
     const lbl = c.teacher ? c.name + '(' + c.teacher + ')' : c.name;
     let cellColor = '', probLabel = '', probBgColor = '';
@@ -323,7 +324,12 @@ NX.renderPreviewTT = function (courses, label) {
       const ac = NX.getCourse(c.code, c.seq);
       if (ac) { const p = calcProb(ac, c.flag, c.zy); if (p.prob >= 0) { cellColor = p.color; probLabel = p.percentLabel || p.label; probBgColor = probBg(p.color); } }
     }
-    parseTimeSlots(c.time).forEach(({ day, slot }) => {
+    const slots = parseTimeSlots(c.time);
+    if (!slots.length) {
+      // 时间未定/无固定时段（如二级选课阶段才定时间的实验课）→ 单列展示
+      undet.push({ lbl, ci, code: c.code, seq: c.seq || '0', credits: c.credits || 0, zy: c.zy || 0 });
+    }
+    slots.forEach(({ day, slot }) => {
       if (!tt[day]) tt[day] = {};
       const entry = { label: lbl, ci, code: c.code, seq: c.seq || '0', color: cellColor, probLabel, probBgColor };
       if (tt[day][slot]) {
@@ -365,11 +371,22 @@ NX.renderPreviewTT = function (courses, label) {
     h += '</tr>';
   });
   h += '</tbody></table>';
+  // 时间未定课程单列（#16）
+  if (undet.length) {
+    h += '<div style="margin-top:10px;font-size:11px;color:var(--nx-faint)">时间未定 / 无固定时段（' + undet.length + ' 门，不含在上方网格中）</div>' +
+      '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">' +
+      undet.map(u => '<span class="nx-tt-undet" data-code="' + esc(u.code) + '" data-seq="' + esc(u.seq) + '" title="点击移除">' +
+        esc(u.lbl) + ' · ' + u.credits + '学分' + (u.zy ? ' · 第' + u.zy + '志愿' : '') + ' <i>✕</i></span>').join('') +
+      '</div>';
+  }
   const cr = courses.reduce((s, c) => s + (c.credits || 0), 0);
   h += '<div class="nx-st ok" style="margin-top:6px">' + courses.length + '门课 · ' + cr + '学分</div>';
   el.innerHTML = h;
   el.querySelectorAll('.nx-tt-rm').forEach(btn => {
     btn.onclick = () => handlePreviewRemove(btn.dataset.code, btn.dataset.seq);
+  });
+  el.querySelectorAll('.nx-tt-undet').forEach(chip => {
+    chip.onclick = () => handlePreviewRemove(chip.dataset.code, chip.dataset.seq);
   });
 };
 
