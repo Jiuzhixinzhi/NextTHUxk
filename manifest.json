@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "NextTHUxk",
   "short_name": "NextTHUxk",
-  "version": "1.3.19",
+  "version": "1.4.0",
   "description": "下一代选课 - 基于 AI 决策与现代双栏 UI 的选课无感辅助系统。",
   "permissions": ["activeTab", "storage", "unlimitedStorage"],
   "host_permissions": [
@@ -11,7 +11,8 @@
     "https://zhjw.cic.tsinghua.edu.cn/*",
     "https://zhjwxk.cic.tsinghua.edu.cn/*",
     "http://zhjw.cic.tsinghua.edu.cn/*",
-    "http://zhjwxk.cic.tsinghua.edu.cn/*"
+    "http://zhjwxk.cic.tsinghua.edu.cn/*",
+    "https://thubook.help/*"
   ],
   "content_scripts": [{
     "matches": [
@@ -25,6 +26,7 @@
       "src/config.js",
       "src/data.js",
       "src/probability.js",
+      "src/reviews.js",
       "src/state.js",
       "src/render.js",
       "src/ai.js",

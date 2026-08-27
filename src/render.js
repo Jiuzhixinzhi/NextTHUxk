@@ -3,6 +3,13 @@
 // ═══════════════════════════════════════════════════════════════
 var NX = NX || {};
 
+// ─── THUbook 评分徽章（有数据才出现）────────────────────────
+NX.tbBadgeHtml = function (c) {
+  const e = c._tbRef;
+  if (!e || !e.count || !e.avg) return '';
+  return '<button type="button" class="nx-tb-badge" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" title="THU选课社区评分 · 点击查看全部点评">★' + Number(e.avg).toFixed(1) + '<i>' + e.count + '评</i></button>';
+};
+
 // ─── Course Card Rendering ────────────────────────────────────
 // 渐进渲染：只渲染视口内+预载距离的卡片（原实现一次 innerHTML 全量 6000+ 卡，
 // 数十万 DOM 节点 + 每按钮闭包，是内存占用巨大/卡顿的主因）
@@ -114,7 +121,7 @@ NX.courseCardHtml = function (c, ctx) {
         '<button class="nx-stage-btn nx-add-stage" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '"' + (inStage ? ' disabled' : '') + '>' + (inStage ? '已暂存' : '暂存') + '</button>';
     }
     return '<div class="nx-card' + (c.selected ? ' nx-selected' : '') + '" data-code="' + esc(c.code) + '" data-tid="' + esc(c.teacherId || '') + '">' +
-      '<div class="nx-card-head"><span class="nx-card-name">' + esc(c.name) + '</span><span class="nx-card-credit">' + c.credits + '学分</span></div>' +
+      '<div class="nx-card-head"><span class="nx-card-name">' + esc(c.name) + '</span>' + NX.tbBadgeHtml(c) + '<span class="nx-card-credit">' + c.credits + '学分</span></div>' +
       '<div style="font-size:11px;color:#9aa1ac;margin-bottom:3px">' + esc(c.code) + (c.seq ? ' · ' + esc(c.seq) + '课序' : '') + '</div>' +
       '<div class="nx-tags">' + tags.join('') + '</div>' +
       (isQueuePhase && (qd || cand) ? queueInfoHtml : volHtml + compHtml + currentProbHtml + probHtml) + conflictHtml + noteHtml +
@@ -185,6 +192,7 @@ NX.bindCardDelegation = function (el) {
   if (el.dataset.nxDelegated) return;
   el.dataset.nxDelegated = '1';
   const { showCourseModal, submitCourse, dropCourse, changeVolunteer, addToStage, refreshSelected, showXkResult, baseFlag } = NX;
+  const { showReviewsModal } = NX;
   const syncCardProb = node => {
     const card = node.closest('.nx-card');
     if (!card) return;
@@ -222,6 +230,9 @@ NX.bindCardDelegation = function (el) {
     const cls = btn.classList;
     if (cls.contains('nx-detail-btn')) {
       showCourseModal(btn.dataset.code, btn.dataset.tid);
+    } else if (cls.contains('nx-tb-badge')) {
+      if (showReviewsModal) showReviewsModal(btn.dataset.code, btn.dataset.seq);
+      return;
     } else if (cls.contains('nx-select-btn')) {
       const actions = btn.parentElement;
       const flag = actions.querySelector('.nx-type-select')?.value || 'bx';

@@ -65,6 +65,9 @@ NX.aiSearch = async function () {
         available: c.available, selected: c.selected,
         tongshiGroup: c.tongshiGroup, courseFeature: c.courseFeature, grade: c.grade,
         note: c.xkTextNote || '',
+        reviewAvg: (c._tbRef && c._tbRef.count) ? c._tbRef.avg : undefined,
+        reviewCount: (c._tbRef && c._tbRef.count) || undefined,
+        latestReview: c._tbSnip ? String(c._tbSnip).slice(0, 60) : undefined,
       };
     });
 
@@ -73,6 +76,8 @@ NX.aiSearch = async function () {
       '已占用时间：' + (occupiedSlots.length ? occupiedSlots.map(s => s.key + '(' + s.name + ')').join('、') : '无') + '\n\n' +
       '## 候选课程（共' + courseList.length + '门，已按用户条件筛选）\n' +
       JSON.stringify(courseList.slice(0, 200)) + '\n\n' +
+      '## 社区评价参考（THU选课社区）\n' +
+      'reviewAvg=社区均分(1-5)，reviewCount=点评数，latestReview=最新点评节选（含考核方式/给分）。点评多且分高的课通常授课体验与给分更好，同等匹配度下优先推荐；评分明显偏低的课需在 reason 中提示。\n\n' +
       '## 学生需求\n' + prompt + '\n\n' +
       '## 学生偏好\n' + (pref || '无特殊偏好') + '\n\n' +
       '请从候选课程中推荐最匹配学生需求的课程。优先推荐不与预览课表冲突的课。如需推荐冲突课程请明确说明。\n\n' +
@@ -137,14 +142,14 @@ NX.callAI = async function () {
   try {
     const { allCourses, savedDrafts, SEM, GRADE } = state;
     const bxTyCourses = allCourses.filter(c => c.attr === '必修' || c.attr === '体育' || (c.department || '').includes('体育')).map(c =>
-      ({ name: c.name, code: c.code, seq: c.seq || '', credits: c.credits, time: c.time || '', teacher: c.teacher || '', available: c.available, attr: c.attr, remaining: c.remaining, note: c.xkTextNote || '' }));
+      ({ name: c.name, code: c.code, seq: c.seq || '', credits: c.credits, time: c.time || '', teacher: c.teacher || '', available: c.available, attr: c.attr, remaining: c.remaining, note: c.xkTextNote || '', reviewAvg: (c._tbRef && c._tbRef.count) ? c._tbRef.avg : undefined }));
     const selectedInfo = allCourses.filter(c => c.selected).map(c => ({ name: c.name, code: c.code, seq: c.seq, credits: c.credits, time: c.time, zy: c.zy, typeLabel: c.typeLabel }));
     const selectedCredits = selectedInfo.reduce((s, c) => s + (c.credits || 0), 0);
     const draftsInfo = savedDrafts.map(d => ({ name: d.name, courses: d.courses.map(c => ({ name: c.name, code: c.code, seq: c.seq, time: c.time, flag: c.flag, zy: c.zy, credits: c.credits })) }));
 
     const prompt = '你是清华大学选课AI助手。请根据以下信息推荐最优选课方案，确保无时间冲突。\n\n' +
       '## 用户信息\n- 当前年级：' + ('大一大二大三大四'[GRADE - 1] || '未知') + '（第' + GRADE + '年本科）\n- 当前学期：' + SEM + '\n\n' +
-      '## 本学期可选的必修课和体育课（时间格式：星期-大节(周次)，如 3-2(全周) 表示周三第2大节）\n' +
+      '## 本学期可选的必修课和体育课（时间格式：星期-大节(周次)，如 3-2(全周) 表示周三第2大节；reviewAvg 为 THU选课社区均分，同分位优先高分教师）\n' +
       JSON.stringify(bxTyCourses, null, 1) + '\n\n' +
       '## 当前已选课表（' + selectedInfo.length + '门 · ' + selectedCredits + '学分）\n' +
       (selectedInfo.length ? JSON.stringify(selectedInfo, null, 1) : '无') + '\n\n' +

@@ -380,6 +380,15 @@ NX.finishLaunch = function (sd, selCount, volTs, volRefreshed) {
   }
   const qRefreshBtn = $('nextthuxk-refresh-queue');
   if (qRefreshBtn) qRefreshBtn.style.display = (state.isQueuePhase || state.candidateCourses.length) ? 'inline-block' : 'none';
+  // ─── THU选课社区评价：SWR 加载索引 → 匹配挂载徽章（fail-soft）───
+  if (NX.tbEnsureIndex) {
+    NX.tbEnsureIndex().then(ok => {
+      if (!ok) return;
+      const r = NX.tbAttach(state.allCourses);
+      console.log(TAG, '[TB] 社区评价匹配', r.matched + '/' + r.total, JSON.stringify(NX.tbState.stats || {}));
+      if (r.matched > 0) filterCourses();
+    }).catch(() => {});
+  }
 };
 
 // ─── Event Bindings ───────────────────────────────────────────
@@ -406,10 +415,24 @@ $('nextthuxk-refresh-queue').onclick = async () => {
   if (btn) { btn.textContent = '刷新队列'; btn.disabled = false; }
   showXkResult({ ok: true, msg: '队列数据已刷新 · ' + Object.keys(state.queueDataMap).length + '门课余量 · ' + state.candidateCourses.length + '门我的队列' });
 };
-$('nextthuxk-search').oninput = NX.debounce(NX.filterCourses, 120);
+$('nextthuxk-search').oninput = NX.debounce(function () {
+  try { if (NX.suggestUpdate) NX.suggestUpdate(); } catch (e) {}
+  filterCourses();
+}, 120);
+$('nextthuxk-search').addEventListener('keydown', function (e) {
+  try {
+    if (NX.suggestKey && NX.suggestKey(e)) e.stopPropagation();
+  } catch (err) {}
+});
+$('nextthuxk-search').addEventListener('blur', function () {
+  // 稍作延迟以便点击联想行时先触发 click（面板 pointerdown 已 preventDefault 保焦）
+  clearTimeout(NX._sgBlurT);
+  NX._sgBlurT = setTimeout(() => { try { NX.suggestHide && NX.suggestHide(); } catch (e) {} }, 150);
+});
 $('nextthuxk-search-clear').onclick = () => {
   $('nextthuxk-search').value = '';
   filterCourses();
+  try { NX.suggestHide && NX.suggestHide(); } catch (e) {}
   $('nextthuxk-search').focus();
 };
 $('nx-filter-credits').onchange = filterCourses;
