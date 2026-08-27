@@ -668,6 +668,14 @@
   white-space: pre-wrap; word-break: break-word;
 }
 
+/* CC BY-NC 署名声明 */
+.nx-tb-license {
+  font-size: 10px; color: var(--nx-faint);
+  padding: 6px 0 2px; line-height: 1.5;
+}
+.nx-tb-license a { color: var(--nx-faint); text-decoration: underline; text-underline-offset: 2px; }
+.nx-tb-license a:hover { color: var(--nx-accent); }
+
 /* 搜索联想词下拉 */
 .nx-suggest {
   display: none;

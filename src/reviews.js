@@ -1,5 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
 // NextTHUxk — Reviews: THU选课社区 (thubook.help/thucourse) 实时评价层
+// 数据/内容由 THU选课社区贡献者提供，授权协议 CC BY-NC 4.0：
+//   https://creativecommons.org/licenses/by-nc/4.0/deed.zh
+//   （署名-非商业性使用；弹窗内已随内容展示同款署名声明）
 // 设计原则：
 //   · 数据源是公开静态 JSON（CORS *），永远实时拉取，不在本地囤点评正文
 //   · 仅缓存一份精简索引（count/avg/sqid），SWR 过期后台静默刷新
@@ -296,6 +299,9 @@ var NX = NX || {};
     headBits.push('<div class="nx-tb-actions-row">' +
       '<a class="nx-tb-link" href="' + esc(NX.tbCourseUrl(e)) + '" target="_blank" rel="noopener noreferrer">查看课程页 ↗</a>' +
       '<a class="nx-tb-link nx-tb-link-primary" href="' + esc(NX.tbWriteUrl(e)) + '" target="_blank" rel="noopener noreferrer">✎ 去写点评</a></div>');
+    // CC BY-NC 授权署名（数据与点评内容均来自 THU选课社区贡献者）
+    headBits.push('<div class="nx-tb-license">点评数据来自 <a href="' + esc(NX.tbCourseUrl(e)) + '" target="_blank" rel="noopener noreferrer">THU选课社区</a> 贡献者，以 ' +
+      '<a href="https://creativecommons.org/licenses/by-nc/4.0/deed.zh" target="_blank" rel="noopener noreferrer">CC BY-NC 4.0</a> 提供 · 仅限非商业用途</div>');
 
     if (!e) {
       // 没匹配到条目（可能课太新）：给社区搜索兜底链接即可
