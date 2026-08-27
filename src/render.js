@@ -297,13 +297,16 @@ NX.renderPreviewTT = function (courses, label) {
   if (resetBtn) resetBtn.style.display = (label && label !== '当前已选') ? 'inline-block' : 'none';
   state.previewMode = (label === '当前已选') ? 'selected' : 'stage';
   if (label && label.startsWith('草稿「')) state.previewMode = 'draft';
-  if (!courses.length) { el.innerHTML = '<div class="nx-st">暂无课程</div>'; return; }
+  const manualEvents = state.manualEvents || [];
+  if (!courses.length && !manualEvents.length) { el.innerHTML = '<div class="nx-st">暂无课程</div>'; return; }
   const tt = {};
   const undet = [];   // 时间未定/无固定时段课程（#16）：不进网格，单列在表格下方
-  courses.forEach((c, ci) => {
+  courses.concat(manualEvents).forEach((c, ci) => {
     const lbl = c.teacher ? c.name + '(' + c.teacher + ')' : c.name;
     let cellColor = '', probLabel = '', probBgColor = '';
-    if (isQueuePhase) {
+    if (c.manual) {
+      cellColor = '#8b5cf6'; probLabel = '自定义'; probBgColor = 'rgba(139,92,246,.14)';
+    } else if (isQueuePhase) {
       const qKey = c.code + '_' + (c.seq || '0');
       const qd = queueDataMap[qKey];
       const cand = candidateCourses.find(cc => cc.code === c.code && String(cc.seq) === String(c.seq || '0'));
@@ -327,11 +330,11 @@ NX.renderPreviewTT = function (courses, label) {
     const slots = parseTimeSlots(c.time);
     if (!slots.length) {
       // 时间未定/无固定时段（如二级选课阶段才定时间的实验课）→ 单列展示
-      undet.push({ lbl, ci, code: c.code, seq: c.seq || '0', credits: c.credits || 0, zy: c.zy || 0 });
+      undet.push({ lbl, ci, code: c.code, seq: c.seq || '0', credits: c.credits || 0, zy: c.zy || 0, manual: !!c.manual, id: c.id });
     }
     slots.forEach(({ day, slot }) => {
       if (!tt[day]) tt[day] = {};
-      const entry = { label: lbl, ci, code: c.code, seq: c.seq || '0', color: cellColor, probLabel, probBgColor };
+      const entry = { label: lbl, ci, code: c.code, seq: c.seq || '0', color: cellColor, probLabel, probBgColor, manual: !!c.manual, id: c.id };
       if (tt[day][slot]) {
         const old = tt[day][slot];
         const existing = old.conflict ? old.items : [old];
@@ -354,10 +357,10 @@ NX.renderPreviewTT = function (courses, label) {
       if (val) {
         const isC = val.conflict;
         const items = isC ? val.items : [val];
-        const btns = items.map(it => '<span class="nx-tt-rm" data-code="' + esc(it.code) + '" data-seq="' + esc(it.seq) + '" title="移除 ' + esc(it.label) + '">✕</span>').join('');
+        const btns = items.map(it => '<span class="nx-tt-rm" data-code="' + esc(it.code) + '" data-seq="' + esc(it.seq) + '"' + (it.manual ? ' data-manual-id="' + esc(it.id) + '"' : '') + ' title="移除 ' + esc(it.label) + '">✕</span>').join('');
         const linesHtml = items.map(it => {
           const probHtml = it.probLabel ? '<span class="nx-tt-prob" style="background:' + it.probBgColor + ';color:' + it.color + '">' + it.probLabel + '</span>' : '';
-          return '<div class="nx-tt-line nx-tt-jump" data-code="' + esc(it.code) + '" data-seq="' + esc(it.seq) + '" title="在左侧课程列表中查看"><span class="nx-tt-text">' + esc(it.label) + '</span>' + probHtml + '</div>';
+            return '<div class="nx-tt-line' + (it.manual ? ' nx-tt-manual' : ' nx-tt-jump') + '"' + (it.manual ? '' : ' data-code="' + esc(it.code) + '" data-seq="' + esc(it.seq) + '" title="在左侧课程列表中查看"') + '><span class="nx-tt-text">' + esc(it.label) + '</span>' + probHtml + '</div>';
         }).join('');
         let cellClass = isC ? 'nx-c' : 'nx-s';
         let cellStyle = '';
@@ -379,17 +382,30 @@ NX.renderPreviewTT = function (courses, label) {
         esc(u.lbl) + ' · ' + u.credits + '学分' + (u.zy ? ' · 第' + u.zy + '志愿' : '') + ' <i>✕</i></span>').join('') +
       '</div>';
   }
+  if (manualEvents.length) {
+    h += '<div class="nx-manual-list"><span class="nx-manual-list-label">自定义占用</span>' +
+      manualEvents.map(e => {
+        const slots = parseTimeSlots(e.time || '');
+        const when = slots.map(s => s.day + ' ' + s.slot).join('、');
+        return '<button type="button" class="nx-manual-chip" data-id="' + esc(e.id) + '" title="删除此占用">' + esc(e.name) + (when ? ' · ' + esc(when) : '') + '　✕</button>';
+      }).join('') + '</div>';
+  }
   const cr = courses.reduce((s, c) => s + (c.credits || 0), 0);
-  h += '<div class="nx-st ok" style="margin-top:6px">' + courses.length + '门课 · ' + cr + '学分</div>';
+  h += '<div class="nx-st ok" style="margin-top:6px">' + courses.length + '门课 · ' + cr + '学分' + (manualEvents.length ? ' · 自定义占用' + manualEvents.length + '项' : '') + '</div>';
   el.innerHTML = h;
   el.querySelectorAll('.nx-tt-rm').forEach(btn => {
-    btn.onclick = () => handlePreviewRemove(btn.dataset.code, btn.dataset.seq);
+    btn.onclick = () => btn.dataset.manualId
+      ? NX.removeManualEvent(btn.dataset.manualId)
+      : handlePreviewRemove(btn.dataset.code, btn.dataset.seq);
   });
   el.querySelectorAll('.nx-tt-jump').forEach(line => {
     line.onclick = () => NX.jumpToCourse(line.dataset.code, line.dataset.seq);
   });
   el.querySelectorAll('.nx-tt-undet').forEach(chip => {
     chip.onclick = () => handlePreviewRemove(chip.dataset.code, chip.dataset.seq);
+  });
+  el.querySelectorAll('.nx-manual-chip').forEach(chip => {
+    chip.onclick = () => NX.removeManualEvent(chip.dataset.id);
   });
 };
 

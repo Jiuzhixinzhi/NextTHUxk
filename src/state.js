@@ -30,7 +30,7 @@ NX.parseTimeSlots = function (timeStr) {
 NX.detectConflicts = function (courses) {
   const slotMap = {};
   const conflicts = [];
-  courses.forEach(c => {
+  courses.concat(NX.state.manualEvents || []).forEach(c => {
     NX.parseTimeSlots(c.time).forEach(({ day, slot }) => {
       const k = day + '|' + slot;
       if (slotMap[k]) conflicts.push({ day, slot, a: slotMap[k], b: c.name });
@@ -59,9 +59,11 @@ NX._pvRef = null; NX._pvLen = -1; NX._pvIdx = null;
 NX.invalidatePreview = function () { NX._pvRef = null; NX._pvLen = -1; NX._pvIdx = null; };
 NX.previewSlotIndex = function () {
   const previewCourses = NX.getPreviewCourses();
-  if (NX._pvRef !== previewCourses || NX._pvLen !== previewCourses.length) {
+  const manualEvents = NX.state.manualEvents || [];
+  const version = previewCourses.length + '|' + manualEvents.map(e => e.id + ':' + e.time).join(',');
+  if (NX._pvRef !== previewCourses || NX._pvLen !== version) {
     const idx = new Map();
-    previewCourses.forEach(pc => {
+    previewCourses.concat(manualEvents).forEach(pc => {
       NX.parseTimeSlots(pc.time || '').forEach(({ day, slot }) => {
         const k = day + '|' + slot;
         if (!idx.has(k)) idx.set(k, []);
@@ -69,10 +71,56 @@ NX.previewSlotIndex = function () {
       });
     });
     NX._pvRef = previewCourses;
-    NX._pvLen = previewCourses.length;
+    NX._pvLen = version;
     NX._pvIdx = idx;
   }
   return NX._pvIdx;
+};
+
+NX.showManualEventModal = function () {
+  const { state } = NX;
+  const $ = state.$;
+  const mask = $('nextthuxk-modal');
+  const title = $('nextthuxk-modal-title');
+  const body = $('nextthuxk-modal-body');
+  if (!mask || !title || !body) return;
+  title.textContent = '添加自定义时间占用';
+  body.innerHTML = '<div class="nx-manual-form">' +
+    '<label>活动名称<input id="nx-manual-name" class="nx-inp" placeholder="例如：社团例会"></label>' +
+    '<label>星期<select id="nx-manual-day" class="nx-inp"><option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option></select></label>' +
+    '<label>时间段<select id="nx-manual-slot" class="nx-inp"><option value="1">1-2节</option><option value="2">3-4节</option><option value="3">5-6节</option><option value="4">7-8节</option><option value="5">9-10节</option><option value="6">11-12节</option></select></label>' +
+    '<div class="nx-manual-hint">自定义占用会保存在本地，并参与课程冲突检测。</div>' +
+    '<button id="nx-manual-save" class="nx-ai-btn">添加到课表</button></div>';
+  mask.classList.add('show');
+  const nameInput = $('nx-manual-name');
+  nameInput.focus();
+  $('nx-manual-save').onclick = async () => {
+    const name = nameInput.value.trim();
+    if (!name) { NX.showXkResult({ ok: false, msg: '请输入活动名称' }); return; }
+    const now = Date.now();
+    const day = $('nx-manual-day').value;
+    const slot = $('nx-manual-slot').value;
+    state.manualEvents.push({ id: now, name, code: 'manual-' + now, seq: '0', time: day + '-' + slot + '(自定义)', manual: true, credits: 0 });
+    await NX.store.set('manualEvents', state.manualEvents);
+    NX.invalidatePreview();
+    NX.renderPreviewTT(NX.getPreviewCourses(), $('nextthuxk-preview-info')?.textContent || '当前已选');
+    NX.filterCourses();
+    mask.classList.remove('show');
+    NX.showXkResult({ ok: true, msg: '已添加「' + name + '」' });
+  };
+};
+
+NX.removeManualEvent = async function (id) {
+  const { state } = NX;
+  const idx = state.manualEvents.findIndex(e => String(e.id) === String(id));
+  if (idx < 0) return;
+  const name = state.manualEvents[idx].name;
+  state.manualEvents.splice(idx, 1);
+  await NX.store.set('manualEvents', state.manualEvents);
+  NX.invalidatePreview();
+  NX.renderPreviewTT(NX.getPreviewCourses(), state.$('nextthuxk-preview-info')?.textContent || '当前已选');
+  NX.filterCourses();
+  NX.showXkResult({ ok: true, msg: '已删除「' + name + '」' });
 };
 
 NX.findPreviewConflicts = function (course) {
