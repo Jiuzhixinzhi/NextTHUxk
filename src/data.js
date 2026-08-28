@@ -515,8 +515,36 @@ NX.fetchSelectedCourses = async function () {
       });
     });
     console.log(NX.TAG, 'selected courses:', selected.length);
+    if (!selected.length) {
+      // 兜底（v1.4.9）：已选查询页拿不到行（选课阶段切换/页面变更/WebVPN）时，
+      // 改用一级课表重建已选清单（code+seq+类型全集，志愿号走 zyCache/手填）
+      console.warn(NX.TAG, 'yxSearchTab empty → falling back to level table');
+      return await NX.fallbackSelectedFromLevelTable();
+    }
     return selected;
-  } catch (e) { console.warn(NX.TAG, 'fetch selected:', e); return []; }
+  } catch (e) {
+    console.warn(NX.TAG, 'fetch selected:', e);
+    try { return await NX.fallbackSelectedFromLevelTable(); } catch (e2) { return []; }
+  }
+};
+
+// ─── 已选课程兜底：一级课表（v1.4.9）─────────────────────────
+NX.fallbackSelectedFromLevelTable = async function () {
+  const map = await NX.fetchLevelTable();
+  const out = [];
+  for (const key in map) {
+    const i = key.indexOf('_');
+    const code = key.slice(0, i);
+    const seq = key.slice(i + 1) || '0';
+    const info = map[key];
+    out.push({
+      code, seq, name: '', teacher: '', time: '', credits: 0,
+      typeLabel: info.typeLabel, typeCode: info.typeCode || '',
+      zy: 0, fromLevelTable: true,
+    });
+  }
+  console.log(NX.TAG, 'selected fallback (level table):', out.length);
+  return out;
 };
 
 NX.fetchLevelTable = async function () {
