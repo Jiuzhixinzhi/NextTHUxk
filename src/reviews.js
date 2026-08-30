@@ -254,9 +254,10 @@ var NX = NX || {};
       '&dept=' + encodeURIComponent(e.kkdw || '');
   };
   NX.tbWriteUrl = function (e) {
-    if (!e) return TB_PAGE + 'new-review.html';
-    return TB_PAGE + 'review.html?courseId=' + encodeURIComponent(e.sqid) +
-      '&courseName=' + encodeURIComponent(e.kcm + (e.jsm ? '(' + e.jsm + ')' : ''));
+    if (!e) return TB_PAGE + 'new-review';
+    // thubook 金标准格式（2026-08 实测）：thucourse/new-review?courseId=..&courseName=纯课名(URL编码)
+    return TB_PAGE + 'new-review?courseId=' + encodeURIComponent(e.sqid) +
+      '&courseName=' + encodeURIComponent(e.kcm || '');
   };
 
   // 星星渲染：★★★★☆
