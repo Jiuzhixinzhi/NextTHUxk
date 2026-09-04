@@ -64,6 +64,11 @@ NX.parseCatalog = function (doc) {
     const teacherId = teacherIdMatch ? teacherIdMatch[1] : '';
     const courseLink = tds[3]?.querySelector('a[href*="showToXs"]');
     const detailHref = courseLink?.getAttribute('href') || '';
+    // v1.5.0 同款：行内扫课程属性格（kkxxSearch 网格带「课程属性」列，v1.5.0
+    // 用 cells.find 扫。重写时被我硬编码 attr:'' 只靠一级课表回填——培养方案
+    // 外的课（英文班 90 课序等）attr 恒空 → baseFlag 落 rx → 概率网格只剩
+    // 「任选」单行，用户十二报实锤。一级课表仍随后回填/覆盖权威类型。）
+    const attrCell = [...tds].map(td => (td.textContent || '').trim()).find(c => c === '必修' || c === '限选' || c === '任选');
     out.push({
       code,
       seq: cell(2),
@@ -79,7 +84,7 @@ NX.parseCatalog = function (doc) {
       selected: false,
       queue: '',
       group: cell(0),
-      attr: '',
+      attr: attrCell || '',   // v1.5.0 行内扫描（data.js:24 同款）——培养方案外的课不再塌成「任选」
       detailUrl: detailHref,
       xkTextNote: cell(11),
       courseFeature: cell(12),
