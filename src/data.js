@@ -1442,6 +1442,7 @@ NX.mergeServerRows = function (rows) {
             const targets = state.allCourses.concat(state._searchRows || []);
             NX.applyVolunteer(targets, state.volMap);
             NX.filterCourses();
+            try { NX.renderStageCart(); } catch (e) {}   // 暂存条概率跟志愿数据一起到（一会有一会没的根因）
           } catch (e) {
             console.warn(NX.TAG, 'volunteer 按需补拉失败:', newDepts.join(','), e);
           }

@@ -554,8 +554,9 @@ NX.jumpToCourse = function (code, seq) {
 
 NX.stageProbHtml = function (c) {
   const { state, fullProbGrid, baseFlag, getCourse } = NX;
-  const { isQueuePhase, queueDataMap } = state;
-  const ac = getCourse(c.code, c.seq);
+  const { isQueuePhase, queueDataMap, allCourses } = state;
+  // 课序精确 → 课号兜底（暂存/课余量/kkxx 两套课序号对不上时概率不该消失）
+  const ac = getCourse(c.code, c.seq) || allCourses.find(x => x.code === c.code);
   if (!ac) return '';
   if (isQueuePhase) {
     const qKey = c.code + '_' + NX.normSeq(c.seq);
