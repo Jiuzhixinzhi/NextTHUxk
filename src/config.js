@@ -9,7 +9,7 @@ NX.browser = typeof browser !== 'undefined' ? browser : chrome;
 // ─── Constants ────────────────────────────────────────────────
 NX.TAG = '[NextTHUxk]';
 NX.SP = 'nextthuxk_';
-NX.DATA_VER = 5;
+NX.DATA_VER = 6;
 NX.CUR_VER = '1.5.1';
 NX.DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 NX.ZY_LIMITS = {

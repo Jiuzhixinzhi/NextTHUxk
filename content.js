@@ -12,51 +12,9 @@ const { browser: _browser, TAG, DATA_VER, store, state, baseFlag,
   launch: _origLaunch, fetchTrainingPlan, fetchCourseCatalog, fetchVolunteer,
   fetchSelectedCourses, fetchQueueData, fetchCandidateCourses,
   mergeStaticData, resolveCourseZy, renderCourses, renderPlan,
-  renderPreviewTT, renderStageCart, renderDrafts,
+  renderPreviewTT, renderStageCart, renderDrafts, filterCourses,
   renderPlanView, refreshSelected, showXkResult, volNeedsRefresh,
   checkUpdate } = NX;
-
-// ─── 服务端精确搜索兜底（xk-1.5.1，OneTHU dev 已验证逻辑移植）────────
-// 本地过滤（全量目录缓存）0 行 + 关键词 ≥2 字 → 风暴护栏版服务端搜索
-// （GBK 编码/课号单页/≤25 页封顶/教师名兜底），结果并入课程池后重本地过滤。
-const _origFilterCourses = NX.filterCourses;
-const _origRenderCourses = NX.renderCourses;
-let _lastFilterCount = 0;
-NX.renderCourses = function (list) {
-  _lastFilterCount = Array.isArray(list) ? list.length : 0;
-  return _origRenderCourses.apply(this, arguments);
-};
-let _ssGen = 0;
-const _serverSearchFallback = NX.debounce(async function () {
-  const inp = $('nextthuxk-search');
-  const q = ((inp && inp.value) || '').trim();
-  if (q.length < 2) return;
-  if (_lastFilterCount > 0) return; // 本地已命中 → 不打服务端
-  if (state._ssBusy) return;        // 单飞
-  const gen = ++_ssGen;
-  state._ssBusy = true;
-  try {
-    const res = await NX.serverSearchStorm({ kcm: q });
-    if (gen !== _ssGen) return;     // 输入已变，弃旧结果（代数打断）
-    const added = NX.mergeServerRows(res.rows);
-    if (added > 0) {
-      console.log(NX.TAG, 'server search merged', added, 'rows for', JSON.stringify(q));
-      NX.filterCourses();
-      try { showXkResult({ ok: true, msg: '服务端精确搜索补充 ' + added + ' 门课程' }); } catch (e) {}
-    } else if (res.pageKind === 'unknown' && res.htmlHead) {
-      console.warn(NX.TAG, 'server search dead page:', res.htmlHead.slice(0, 120));
-    }
-  } catch (e) {
-    console.warn(NX.TAG, 'server search fallback:', e);
-  } finally {
-    state._ssBusy = false;
-  }
-}, 600);
-const filterCourses = function () {
-  const r = _origFilterCourses.apply(this, arguments);
-  try { _serverSearchFallback(); } catch (e) {}
-  return r;
-};
 
 console.log(TAG, 'loading on', location.href);
 
@@ -293,131 +251,39 @@ NX.launch = async function launch() {
       await store.set('grade', 0);
       state.GRADE = 0;
     }
-    const needCatalog = !sd || !sd.courses || sd.courses.length < 100;
-    const needVol = !needCatalog && volNeedsRefresh(sd?.volTs);
-    // re-merge 数据源：新缓存无 catalog 副本（v1.3.5 起只存 merged courses，存储减半），
-    // courses 是 catalog 字段超集，可直接作 merge 输入；旧缓存仍可用 catalog
-    let catalog = sd?.catalog || sd?.courses || [];
-    let plan = sd?.plan || [];
-    let volTs = sd?.volTs || 0;
-    if (needCatalog) {
-      listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;正在抓取课程目录（全校约 300 页，约需 30-40 秒）…</div>';
-      console.log(TAG, 'fetching catalog + plan + volunteer...');
-      [plan, catalog] = await Promise.all([
-        fetchTrainingPlan().catch(e => { console.warn(TAG, 'plan:', e); return []; }),
-        fetchCourseCatalog().catch(e => { console.warn(TAG, 'catalog:', e); return []; }),
-      ]);
-      volTs = Date.now();
-    } else if (sd?.courses?.length) {
-      // 缓存命中！无论志愿新旧，先立即用缓存渲染（秒开）；
-      // 志愿过期则渲染后后台静默补抓（stale-while-revalidate，不打断界面）
-      console.log(TAG, 'using cached', sd.courses.length, 'courses', needVol ? '(vol stale → bg refresh)' : '');
-      listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;已读取缓存数据，正在加载实时状态…</div>';
-      state.planData = sd.plan || [];
-      state.allCourses = sd.courses;
-      plan = sd.plan; volTs = sd.volTs || 0;
-      if (!needVol) {
-        // 志愿也新鲜 → 跳过 merge，仅拉实时状态（已选/队列）
-        const [selectedCourses0, qResult0] = await Promise.all([
-          fetchSelectedCourses().catch(e => { console.warn(TAG, 'selected:', e); return []; }),
-          fetchQueueData(),
-        ]);
-        state.queueDataMap = qResult0.map;
-        state.isQueuePhase = qResult0.phase;
-        // 与主路径一致：队列阶段拉候补并标记 isCandidate；非队列阶段清空（防过期候补残留）
-        if (state.isQueuePhase) {
-          state.candidateCourses = await fetchCandidateCourses();
-          if (state.candidateCourses.length) {
-            const candCodes0 = new Set(state.candidateCourses.map(c => c.code));
-            state.allCourses.forEach(c => { if (candCodes0.has(c.code)) c.isCandidate = true; });
-          }
-        } else {
-          state.candidateCourses = [];
-        }
-        const selMap0 = {};
-        selectedCourses0.forEach(s => { selMap0[s.code + '_' + s.seq] = s; });
-        const zyCache0 = (await store.get('zyCache')) || {};
-        const cu0 = await resolveCourseZy(state.allCourses, selMap0, zyCache0);
-        if (cu0) await store.set('zyCache', zyCache0);
-        NX.rebuildCourseMap();
-        renderCourses(state.allCourses);
-        renderPlan(state.planData);
-        renderPreviewTT(
-          state.allCourses.filter(c => c.selected).concat(state.candidateCourses.filter(cc => !state.allCourses.some(ac => ac.selected && ac.code === cc.code))),
-          '当前已选'
-        );
-        await renderStageAndDrafts();
-        NX.finishLaunch(sd, selectedCourses0.length, volTs, false);
-        // 后台静默刷新志愿（不阻塞、失败不打扰）
-        fetchVolunteer().then(volData => {
-          if (state.SEM !== SEM0) return;   // 学期已切换：弃用，防旧学期数据污染缓存
-          state.allCourses = mergeStaticData(state.allCourses, volData, state.planData);
-          // isCandidate 是本会话实时标记，不得持久化进缓存（否则退队后仍出现在"已选"筛选）
-          const clean = state.allCourses.map(c => { const { isCandidate, ...rest } = c; return rest; });
-          return store.set('staticData', { ver: DATA_VER, plan: state.planData, courses: clean, volTs: Date.now(), ts: Date.now() })
-            .then(() => {
-              console.log(TAG, 'volunteer refreshed in background');
-              const ce = state.$('nextthuxk-cache-info');
-              if (ce) ce.innerHTML = state.isQueuePhase
-                ? '课余量实时数据 · ' + Object.keys(state.queueDataMap).length + '门'
-                : '课程数据已更新 · 志愿排队 ' + NX.fmtTime(Date.now());
-              filterCourses();
-            });
-        }).catch(e => console.warn(TAG, 'bg volunteer refresh failed:', e));
-        checkUpdate();
-        return;
-      }
-    }
-    // 需要 merge: needCatalog / needVol / 旧格式没有 courses 缓存
-    const needMerge = needCatalog || needVol || !sd?.courses?.length;
-    if (needMerge) {
-      const volData = await fetchVolunteer().catch(e => { console.warn(TAG, 'volunteer:', e); return {}; });
-      state.planData = plan;
-      state.allCourses = mergeStaticData(catalog, volData, plan);
-      // 只存 merged courses（不存 catalog 副本，体积约减半）；
-      // 若期间用户切换了学期（SEM 变化），弃写缓存以免旧学期数据覆盖新学期空缓存
-      if (state.SEM === SEM0) {
-        // 同上：isCandidate 为会话实时标记，不进缓存
-        const cleanMain = state.allCourses.map(c => { const { isCandidate, ...rest } = c; return rest; });
-        sd = { ver: DATA_VER, plan, courses: cleanMain, volTs, ts: needCatalog ? Date.now() : (sd?.ts || Date.now()) };
-        await store.set('staticData', sd);
-      } else {
-        console.warn(TAG, 'cache write skipped: semester switched during load', SEM0, '->', state.SEM);
-      }
-    }
-
-    const [selectedCourses, qResult] = await Promise.all([
+    // ── 随时查询模式（xk-1.5.1，OneTHU dev 同款架构）────────────────
+    // 启动只拉核心四路（已选/课余量/候补/培养方案缓存），课程列表一律
+    // 搜索时服务器随时查——绝不整库预爬（原版 320 页目录 + 220 页志愿
+    // ≈ 500+ 请求已删）。staticData 只存培养方案（DATA_VER=6 起旧缓存清空）。
+    state.planData = sd?.plan || [];
+    listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;正在读取已选/课余量…</div>';
+    console.log(TAG, 'on-demand mode: fetching selected + queue + plan only');
+    const [selectedCourses, qResult, planFresh] = await Promise.all([
       fetchSelectedCourses().catch(e => { console.warn(TAG, 'selected:', e); return []; }),
       fetchQueueData(),
+      state.planData.length ? Promise.resolve(null) : fetchTrainingPlan().catch(e => { console.warn(TAG, 'plan:', e); return []; }),
     ]);
+    if (!state.planData.length) state.planData = planFresh || [];
     state.queueDataMap = qResult.map;
     state.isQueuePhase = qResult.phase;
-
-    if (state.isQueuePhase) {
-      state.candidateCourses = await fetchCandidateCourses();
-    } else {
-      state.candidateCourses = [];
-    }
-    // isCandidate 必须在 mergeStaticData 之后设置，否则新数组会丢失标记
-    if (state.candidateCourses.length) {
-      const candCodes = new Set(state.candidateCourses.map(c => c.code));
-      state.allCourses.forEach(c => { if (candCodes.has(c.code)) c.isCandidate = true; });
-    }
-    const selMap = {};
-    selectedCourses.forEach(s => { selMap[s.code + '_' + s.seq] = s; });
-    const zyCacheInit = (await store.get('zyCache')) || {};
-    const cacheUpdatedInit = await resolveCourseZy(state.allCourses, selMap, zyCacheInit);
-    if (cacheUpdatedInit) await store.set('zyCache', zyCacheInit);
+    state.candidateCourses = state.isQueuePhase ? await fetchCandidateCourses() : [];
+    // 核心池 = 已选 + 候补（预览/暂存/冲突/AI 的基础；搜索结果运行时带标记渲染）
+    const pool = selectedCourses.map(c => ({ ...c, selected: true }));
+    state.candidateCourses.forEach(c => {
+      if (!pool.some(p => p.code === c.code && String(p.seq) === String(c.seq))) pool.push({ ...c, isCandidate: true });
+    });
+    state.allCourses = pool;
     NX.rebuildCourseMap();   // code+seq → course 索引，渲染/查询统一 O(1)
-
-    renderCourses(state.allCourses);
+    if (state.SEM === SEM0) {
+      await store.set('staticData', { ver: DATA_VER, plan: state.planData, ts: Date.now() });
+    } else {
+      console.warn(TAG, 'cache write skipped: semester switched during load', SEM0, '->', state.SEM);
+    }
     renderPlan(state.planData);
-    renderPreviewTT(
-      state.allCourses.filter(c => c.selected).concat(state.candidateCourses.filter(cc => !state.allCourses.some(ac => ac.selected && ac.code === cc.code))),
-      '当前已选'
-    );
+    renderPreviewTT(pool.filter(c => c.selected).concat(state.candidateCourses), '当前已选');
     await renderStageAndDrafts();
-    NX.finishLaunch(sd, selectedCourses.length, volTs, needVol);
+    NX.finishLaunch({ ts: Date.now() }, selectedCourses.length, 0, false);
+    NX.filterCourses();      // 初始落点：浏览模式第 1 页（1 个请求），随时查询
   } catch (e) {
     listEl.innerHTML = '<div class="nx-empty nx-st err">' + NX.esc(e.message) + '</div>';
   } finally { FIN(); }
@@ -445,10 +311,9 @@ NX.finishLaunch = function (sd, selCount, volTs, volRefreshed) {
   const $ = state.$;
   const cacheEl = $('nextthuxk-cache-info');
   if (cacheEl) {
-    const catAge = Math.round((Date.now() - (sd?.ts || Date.now())) / 60000);
     cacheEl.innerHTML = state.isQueuePhase
-      ? '课余量实时数据 · ' + Object.keys(state.queueDataMap).length + '门'
-      : '课程数据 ' + catAge + '分钟前 · 志愿排队 ' + fmtTime(volTs);
+      ? '课余量实时数据 · ' + Object.keys(state.queueDataMap).length + '门 · 随时查询模式'
+      : '随时查询模式 · 已选 ' + selCount + ' 门（不再整库预爬）';
   }
   store.get('config').then(cfg => {
     if (!cfg) return;
@@ -457,7 +322,7 @@ NX.finishLaunch = function (sd, selCount, volTs, volRefreshed) {
     if (cfg.token) $('nextthuxk-token').value = cfg.token;
     if (cfg.pref) $('nextthuxk-pref').value = cfg.pref;
   });
-  console.log(TAG, 'loaded', state.allCourses.length, 'courses (', selCount, 'selected)', volRefreshed ? '(vol refreshed)' : '(vol cached)', state.isQueuePhase ? '(queue phase)' : '');
+  console.log(TAG, 'on-demand launch done:', selCount, 'selected,', state.candidateCourses.length, 'candidates,', state.isQueuePhase ? 'queue phase' : 'browse mode');
   if (state.fetchWarn) { showXkResult({ ok: false, msg: state.fetchWarn }); state.fetchWarn = ''; }
   const phaseTag = $('nextthuxk-phase-tag');
   if (phaseTag) {

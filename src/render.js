@@ -772,34 +772,67 @@ NX.renderPlan = function (plan) {
 
 // ─── Filters ──────────────────────────────────────────────────
 
+// ─── 列表过滤 v2（xk-1.5.1 随时查询，OneTHU dev 同款架构）──────────
+// 启动绝不整库预爬（原版 320 页目录 + 220 页志愿 ≈ 500+ 请求已删）：
+// 搜索一律服务器 kkxxSearch 随时查（GBK+风暴护栏）；已选/我的队列走本地
+// 核心池；浏览模式（空关键词）一页一请求翻页，绝不连发。
 NX.filterCourses = function () {
   const { state, renderCourses, renderPlanView, lc } = NX;
   const $ = state.$;
   const { allCourses, candidateCourses, activeGroup } = state;
-  const q = $('nextthuxk-search').value.toLowerCase();   // 用户输入不入缓存（中间态多），课程字段才走 lc
+  const rawQ = $('nextthuxk-search').value;
+  const q = rawQ.toLowerCase();   // 用户输入不入缓存（中间态多），课程字段才走 lc
   NX.updateSearchClear();
   const f = state.shadow.querySelector('.nx-chip.on')?.dataset.f || 'all';
   if (f === 'plan') { renderPlanView(q); return; }
-  let list = allCourses;
+
+  // —— 服务端条件指纹：这些变化 = 换一次服务器查询（OneTHU newSearch 语义）。
+  //    conflict/credits/reviews/sort/xknote 只本地细化，不触发查询。
+  const serverSig = JSON.stringify([
+    rawQ.trim(), f, state.SEM, state._browsePage || 1,
+    $('nx-filter-tongshi')?.value || '', $('nx-filter-feature')?.value || '',
+    $('nx-filter-grade-filter')?.value || '', $('nx-filter-bksrem')?.value || '',
+    $('nx-filter-yjsrem')?.value || '', $('nx-filter-day')?.value || '',
+    $('nx-filter-period')?.value || '',
+  ]);
+  const sigChanged = serverSig !== state._serverSig;
+  state._serverSig = serverSig;
+  const localChip = f === 'selected' || f === 'queue';
+
+  let list;
+  if (localChip) {
+    list = allCourses;
+    if (f === 'selected') {
+      const seen = new Set();
+      const candKeys = new Set(candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
+      list = list.filter(c => {
+        if (!c.selected && !c.isCandidate && !candKeys.has(c.code + '_' + (c.seq || '0'))) return false;
+        const k = c.code + '_' + (c.seq || '0');
+        if (seen.has(k)) return false;
+        seen.add(k); return true;
+      });
+    } else {
+      const qKeys = new Set(candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
+      list = list.filter(c => qKeys.has(c.code + '_' + (c.seq || '0')));
+    }
+  } else {
+    // —— 服务器随时查询路径：条件变了 → 调度查询 + 查询中提示（旧条件结果作废）
+    if (sigChanged) {
+      state._searchRows = null;
+      NX.serverSearchScheduled();
+      const listEl = $('nextthuxk-list');
+      if (listEl) {
+        listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;正在查询教务（服务器精确匹配 · 随时查询模式）…</div>';
+        return;
+      }
+    }
+    list = state._searchRows || [];
+  }
   if (q) list = list.filter(c => lc(c.name).includes(q) || c.code.includes(q) || lc(c.teacher).includes(q));
   if (f === 'available') list = list.filter(c => c.available);
-  else if (f === 'selected') {
-    const seen = new Set();
-    const candKeys = new Set(candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
-    list = list.filter(c => {
-      if (!c.selected && !c.isCandidate && !candKeys.has(c.code + '_' + (c.seq || '0'))) return false;
-      const k = c.code + '_' + (c.seq || '0');
-      if (seen.has(k)) return false;
-      seen.add(k); return true;
-    });
-  }
   else if (f === 'required') list = list.filter(c => c.attr === '必修');
   else if (f === 'elective') list = list.filter(c => c.attr === '限选');
   else if (f === 'sports') list = list.filter(c => c.attr === '体育' || (c.department || '').includes('体育') || (c.department || '').includes('体武'));
-  else if (f === 'queue') {
-    const qKeys = new Set(candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
-    list = list.filter(c => qKeys.has(c.code + '_' + (c.seq || '0')));
-  }
   if (activeGroup) list = list.filter(c => (c.group || c.attr) === activeGroup);
   const cf = $('nx-filter-credits')?.value;
   if (cf) {
@@ -872,7 +905,94 @@ NX.filterCourses = function () {
     });
   }
   renderCourses(list);
+  // —— 浏览模式翻页器（随时查询：一页一请求，绝不连发）——
+  if (!localChip) {
+    const listEl = $('nextthuxk-list');
+    if (listEl && state._browseHasMore) {
+      const pager = document.createElement('div');
+      pager.style.cssText = 'display:flex;gap:8px;justify-content:center;padding:10px 0 4px';
+      const mk = (label, page, dis) => {
+        const b = document.createElement('button');
+        b.className = 'nx-stage-btn'; b.textContent = label; b.disabled = !!dis;
+        b.onclick = () => NX.browseGoto(page);
+        return b;
+      };
+      pager.appendChild(mk('‹ 上一页', (state._browsePage || 1) - 1, (state._browsePage || 1) <= 1));
+      const cur = document.createElement('span');
+      cur.style.cssText = 'align-self:center;font-size:11px;color:var(--nx-faint)';
+      cur.textContent = '第 ' + (state._browsePage || 1) + ' 页 · 随时查询';
+      pager.appendChild(cur);
+      pager.appendChild(mk('下一页 ›', (state._browsePage || 1) + 1, false));
+      listEl.appendChild(pager);
+    }
+  }
 };
+
+// 浏览模式跳页：置页码 → 作废指纹 → 重新走查询管线（一次一页）
+NX.browseGoto = function (page) {
+  const state = NX.state;
+  state._browsePage = Math.max(1, page);
+  state._serverSig = null;
+  NX.filterCourses();
+};
+
+// ─── 服务器随时查询调度（500ms 防抖，OneTHU 实测值）──────────────
+// 查询模式（关键词/服务端筛选非空）→ 风暴护栏版多页探测（≤25 页封顶）；
+// 浏览模式（全空）→ 只取当前页 1 个请求。跑动中条件再变 → 收敛后自动补跑。
+NX.serverSearchScheduled = NX.debounce(async function () {
+  const state = NX.state;
+  const $ = state.$;
+  if (state._ssBusy) return;   // 收敛循环会在本轮结束时补跑最新条件
+  state._ssBusy = true;
+  try {
+    for (let guard = 0; guard < 4; guard++) {
+      const ranSig = state._serverSig;
+      const rawQ = ($('nextthuxk-search').value || '').trim();
+      const f = state.shadow.querySelector('.nx-chip.on')?.dataset.f || 'all';
+      const digitCode = /^\d{5,10}$/.test(rawQ);
+      const serverFilters = ($('nx-filter-tongshi')?.value || $('nx-filter-feature')?.value
+        || $('nx-filter-grade-filter')?.value || $('nx-filter-bksrem')?.value
+        || $('nx-filter-yjsrem')?.value || $('nx-filter-day')?.value || $('nx-filter-period')?.value);
+      const opts = {
+        kch: digitCode ? rawQ : '',
+        kcm: digitCode ? '' : rawQ,
+        weekday: $('nx-filter-day')?.value || '',
+        section: $('nx-filter-period')?.value || '',
+        grade: $('nx-filter-grade-filter')?.value || '',
+        rxklxm: $('nx-filter-tongshi')?.value || '',
+        kctsm: $('nx-filter-feature')?.value || '',
+        onlyAvailable: $('nx-filter-bksrem')?.value === '>0' || f === 'available',
+        gradAvail: $('nx-filter-yjsrem')?.value === '>0',
+      };
+      const queryMode = !!(rawQ || serverFilters || opts.onlyAvailable || opts.gradAvail);
+      if (!queryMode) opts.page = state._browsePage || 1;   // 浏览模式：单页
+      try {
+        const res = queryMode ? await NX.serverSearchStorm(opts) : await NX.serverSearch(opts);
+        // 搜索结果带核心池标记渲染（选中/候补徽章与按钮状态一致）
+        const selKeys = new Set(state.allCourses.filter(c => c.selected).map(c => c.code + '_' + (c.seq || '0')));
+        const candKeys = new Set(state.candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
+        (res.rows || []).forEach(r => {
+          const k = r.code + '_' + (r.seq || '0');
+          r.selected = selKeys.has(k);
+          r.isCandidate = candKeys.has(k);
+        });
+        state._searchRows = res.rows || [];
+        state._browseHasMore = res.pageKind === 'ok' && (res.rows || []).length > 0;
+        if (res.pageKind === 'unknown' && res.htmlHead && !state.fetchWarn) {
+          state.fetchWarn = '服务端查询返回异常页，可能需退出重新登录';
+        }
+      } catch (e) {
+        console.warn(NX.TAG, 'server search scheduled:', e);
+        state._searchRows = state._searchRows || [];
+        state._browseHasMore = false;
+      }
+      if (state._serverSig === ranSig) break;   // 条件未再变 → 收敛
+    }
+  } finally {
+    state._ssBusy = false;
+  }
+  NX.filterCourses();   // sig 未变 → 直接渲染新结果（不再触发查询）
+}, 500);
 
 NX.updateSearchClear = function () {
   const $ = NX.state.$;
