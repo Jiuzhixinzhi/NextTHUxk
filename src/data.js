@@ -1048,8 +1048,22 @@ NX.fetchCategoryAttrs = async function () {
   await NX.runPool(tabs, 2, async tab => {
     try {
       const firstUrl = BASE + '/xkBks.vxkBksXkbBs.do?m=' + tab.m + '&p_xnxq=' + SEM + '&tokenPriFlag=' + tab.flag;
-      const fh = await fetchPage(firstUrl);
+      let fh = await fetchPage(firstUrl);
       const token = (fh.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';
+      // GET 首页无网格（会话上下文丢失/重定向）→ 按存档 turn() 原样 POST 重试
+      if (!/gridData\w*\s*=/.test(fh)) {
+        const resp = await fetch(BASE + '/xkBks.vxkBksXkbBs.do', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ m: tab.m, page: '1', token, p_xnxq: SEM, tokenPriFlag: tab.flag }),
+        });
+        if (resp.ok) fh = new TextDecoder('gbk').decode(await resp.arrayBuffer());
+      }
+      if (!/gridData\w*\s*=/.test(fh)) {
+        console.warn(NX.TAG, 'category ' + tab.m + ' 无网格，响应首段:', fh.replace(/<[^>]+>/g, ' ').trim().slice(0, 120));
+        return;
+      }
       const totalPages = Math.min(parseInt((fh.match(/共\s*(\d+)\s*页/) || [])[1], 10) || 1, 10);
       const htmls = [fh];
       for (let p = 2; p <= totalPages; p++) {

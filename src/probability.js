@@ -21,11 +21,17 @@ NX.fmtVol = function (v) {
 NX.occupancyOf = function (c) {
   const cap = Number(c.capacity) || 0;
   const rem = c.remaining;
+  // 预选：报名人数/容量才是竞争信号（课余量在预选没人正式选上 → 恒
+  // 0/N「宽松」假象，用户实锤「必 51 却显示 0/100 竞争宽松」）；
+  // 补选/排队阶段（isQueuePhase）：课余量=实时已选，与「已满/余0」
+  // 标签一致，优先（大学物理 80/80 修法维持）。
+  if (!NX.state || !NX.state.isQueuePhase) {
+    if (Number(c.volCapacity) > 0 && c.volApplied != null) {
+      return { applied: Number(c.volApplied) || 0, cap: Number(c.volCapacity) };
+    }
+  }
   if (cap > 0 && rem !== undefined && rem !== null && rem !== '' && Number(rem) >= 0) {
     return { applied: Math.max(0, cap - Number(rem)), cap };
-  }
-  if (Number(c.volCapacity) > 0 && c.volApplied != null) {
-    return { applied: Number(c.volApplied) || 0, cap: Number(c.volCapacity) };
   }
   return { applied: Number(c.volApplied) || 0, cap: Number(c.volCapacity) || cap || 0 };
 };

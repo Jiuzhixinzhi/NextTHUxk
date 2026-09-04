@@ -102,6 +102,7 @@ const HTML = `
             <button class="nx-chip" data-f="queue">我的队列</button>
             <button class="nx-chip" data-f="plan">培养方案</button>
           </div>
+          <div id="nx-type-src" class="nx-zy-select" style="margin-top:6px;font-size:12px;color:#86868b;cursor:pointer" title="必修/限选分类 tab + 一级课表（点击重新拉取）">类型源: 读取中…</div>
           <div style="display:flex;gap:6px;margin-top:6px">
             <select id="nx-filter-conflict" class="nx-zy-select" style="flex:1"><option value="">不限制冲突</option><option value="noconflict">仅无冲突</option><option value="conflict">仅冲突</option></select>
             <select id="nx-filter-credits" class="nx-zy-select" style="flex:1"><option value="">全部学分</option><option value="1">1学分</option><option value="2">2学分</option><option value="3">3学分</option><option value="4">4学分</option><option value="5+">5+学分</option></select>
@@ -252,6 +253,24 @@ NX.launch = async function launch() {
       await store.set('grade', 0);
       state.GRADE = 0;
     }
+    // 类型源徽标点击重试（分类 tab 空/失败时用户自愈入口）
+    {
+      const badge = document.getElementById('nx-type-src');
+      if (badge) badge.addEventListener('click', async () => {
+        badge.textContent = '类型源: 重新拉取中…';
+        try {
+          const cat = await NX.fetchCategoryAttrs();
+          NX.state.levelMap = Object.assign({}, NX.state.levelMap, cat);
+          NX.applyLevelMap(NX.state.allCourses);
+          if (NX.state._searchRows && NX.state._searchRows.length) NX.applyLevelMap(NX.state._searchRows);
+          NX.filterCourses();
+          badge.textContent = '类型源: 分类 tab ' + Object.keys(cat).length + ' 门（已刷新）';
+        } catch (e) {
+          badge.textContent = '类型源: 拉取失败（' + (e && e.message || e) + '）';
+        }
+      });
+    }
+
     // ── 随时查询模式（xk-1.5.1，OneTHU dev 同款架构）────────────────
     // 启动只拉核心四路（已选/课余量/候补/培养方案缓存），课程列表一律
     // 搜索时服务器随时查——绝不整库预爬（原版 320 页目录 + 220 页志愿
@@ -273,6 +292,19 @@ NX.launch = async function launch() {
       NX.fetchCategoryAttrs().catch(e => { console.warn(TAG, 'category attrs:', e); return {}; }),
     ]);
     state.levelMap = Object.assign({}, levelMap, catAttrs);   // 分类页属性优先
+    // 类型源徽标：用户十四报两轮「看不到变化」——数据到没到必须肉眼可见
+    {
+      const badge = document.getElementById('nx-type-src');
+      const nCat = Object.keys(catAttrs || {}).length;
+      const nLv = Object.keys(levelMap || {}).length;
+      if (badge) badge.textContent = '类型源: 分类 tab ' + nCat + ' 门 · 一级课表 ' + nLv + ' 门' + (nCat + nLv ? '' : '（空！点击重试）');
+    }
+    // 竞态修复：启动窗口内已渲染的搜索行也补上属性/志愿（此前只补池行）
+    if (state._searchRows && state._searchRows.length) {
+      NX.applyLevelMap(state._searchRows);
+      if (state.volMap) NX.applyVolunteer(state._searchRows, state.volMap);
+      NX.filterCourses();
+    }
     if (!state.planData.length) state.planData = planFresh || [];
     state.candidateCourses = candCourses;
     // 候补元数据回填（OneTHU 同款：按课号逐门单查一页，非全目录爬）——
