@@ -293,27 +293,7 @@ NX.launch = async function launch() {
     });
     await NX.knoteLoad().catch(e => console.warn(TAG, 'knote:', e));   // 课表时间持久缓存先于首渲
     state.allCourses = pool;
-    // 暂存行不在池（重载后池只含已选/候补）→ 概率/时间全断：按需补拉
-    // （kch → kcm 名兜底，合并进池；knote 顺带入缓存）
-    const stageMiss = (state.stageCart || []).filter(s => !state.allCourses.some(ac => ac.code === s.code && String(ac.seq || '0') === String(s.seq || '0')));
-    if (stageMiss.length) {
-      (async () => {
-        for (let i = 0; i < stageMiss.length; i += 5) {
-          await Promise.all(stageMiss.slice(i, i + 5).map(async s => {
-            try {
-              let rows = (await NX.serverSearch({ kch: s.code }).catch(() => ({}))).rows || [];
-              if (!rows.length && s.name) rows = (await NX.serverSearch({ kcm: s.name }).catch(() => ({}))).rows || [];
-              const hit = rows.find(r => r.code === s.code);
-              if (hit) NX.mergeServerRows([hit]);
-            } catch (e) { console.warn(TAG, 'stage 行补拉:', s.code, e); }
-          }));
-        }
-        state.selVersion = (state.selVersion || 0) + 1;
-        NX.rebuildCourseMap();
-        try { NX.renderStageCart(); } catch (e) {}
-        console.log(TAG, 'stage 行补拉完成:', stageMiss.length, '门');
-      })();
-    }
+
     NX.rebuildCourseMap();   // code+seq → course 索引，渲染/查询统一 O(1)
     NX.applyLevelMap(pool);  // 池行类型补齐（必修/限选 chip + 提交选课 flag 用）
     // 课余量/排队：池内按需 API 同步（xkqkSearch 1 + kylSearch 逐门 + 批量排队 1，
@@ -358,6 +338,7 @@ NX.launch = async function launch() {
     renderPreviewTT(pool.filter(c => c.selected).concat(state.candidateCourses), '当前已选');
     NX.renderQueueSection();
     await renderStageAndDrafts();
+    NX.backfillStageRows();   // 暂存行不在池（重载后池只含已选/候补）→ 概率/时间全断：此时 stageCart 才真正加载完
     NX.finishLaunch({ ts: Date.now() }, selectedCourses.length, 0, false);
     NX.filterCourses();      // 初始落点：浏览模式第 1 页（1 个请求），随时查询
   } catch (e) {
@@ -367,6 +348,30 @@ NX.launch = async function launch() {
 };
 
 // ─── Launch 公共收尾（缓存路径与全量路径复用） ───────────────
+// 暂存行按需补拉：暂存课不在池（重载后池只含已选/候补）→ 概率/时间全断。
+// 必须在 renderStageAndDrafts 之后调用（stageCart 那时才从 storage 加载完）。
+NX.backfillStageRows = function () {
+  const stageMiss = (state.stageCart || []).filter(s => !state.allCourses.some(ac => ac.code === s.code && String(ac.seq || '0') === String(s.seq || '0')));
+  if (!stageMiss.length) return;
+  (async () => {
+    for (let i = 0; i < stageMiss.length; i += 5) {
+      await Promise.all(stageMiss.slice(i, i + 5).map(async s => {
+        try {
+          let rows = (await NX.serverSearch({ kch: s.code }).catch(() => ({}))).rows || [];
+          if (!rows.length && s.name) rows = (await NX.serverSearch({ kcm: s.name }).catch(() => ({}))).rows || [];
+          const hit = rows.find(r => r.code === s.code);
+          if (hit) NX.mergeServerRows([hit]);
+        } catch (e) { console.warn(TAG, 'stage 行补拉:', s.code, e); }
+      }));
+    }
+    state.selVersion = (state.selVersion || 0) + 1;
+    NX.rebuildCourseMap();
+    try { NX.renderStageCart(); } catch (e) {}
+    try { NX.filterCourses(); } catch (e) {}
+    console.log(TAG, 'stage 行补拉完成:', stageMiss.length, '门');
+  })();
+};
+
 async function renderStageAndDrafts() {
   state.stageCart = (await store.get('stageCart')) || [];
   state.savedDrafts = (await store.get('drafts')) || [];
