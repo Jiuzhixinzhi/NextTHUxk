@@ -2,9 +2,13 @@
   "manifest_version": 3,
   "name": "NextTHUxk",
   "short_name": "NextTHUxk",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "下一代选课 - 基于 AI 决策与现代双栏 UI 的选课无感辅助系统。",
-  "permissions": ["activeTab", "storage", "unlimitedStorage"],
+  "permissions": [
+    "activeTab",
+    "storage",
+    "unlimitedStorage"
+  ],
   "host_permissions": [
     "https://api.github.com/*",
     "https://webvpn.tsinghua.edu.cn/*",
@@ -14,37 +18,47 @@
     "http://zhjwxk.cic.tsinghua.edu.cn/*",
     "https://thubook.help/*"
   ],
-  "content_scripts": [{
-    "matches": [
-      "https://webvpn.tsinghua.edu.cn/*",
-      "https://zhjw.cic.tsinghua.edu.cn/*",
-      "https://zhjwxk.cic.tsinghua.edu.cn/*",
-      "http://zhjw.cic.tsinghua.edu.cn/*",
-      "http://zhjwxk.cic.tsinghua.edu.cn/*"
-    ],
-    "js": [
-      "src/config.js",
-      "src/data.js",
-      "src/probability.js",
-      "src/reviews.js",
-      "src/state.js",
-      "src/render.js",
-      "src/ai.js",
-      "src/update.js",
-      "content.js"
-    ],
-    "run_at": "document_idle"
-  }],
-  "web_accessible_resources": [{
-    "resources": ["content.css"],
-    "matches": ["<all_urls>"]
-  }],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://webvpn.tsinghua.edu.cn/*",
+        "https://zhjw.cic.tsinghua.edu.cn/*",
+        "https://zhjwxk.cic.tsinghua.edu.cn/*",
+        "http://zhjw.cic.tsinghua.edu.cn/*",
+        "http://zhjwxk.cic.tsinghua.edu.cn/*"
+      ],
+      "js": [
+        "src/config.js",
+        "src/data.js",
+        "src/probability.js",
+        "src/reviews.js",
+        "src/state.js",
+        "src/render.js",
+        "src/ai.js",
+        "src/update.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content.css"
+      ],
+      "matches": [
+        "<all_urls>"
+      ]
+    }
+  ],
   "browser_specific_settings": {
     "gecko": {
       "id": "nextthuxk@guojl06.github.io",
       "strict_min_version": "115.0",
       "data_collection_permissions": {
-        "required": ["none"],
+        "required": [
+          "none"
+        ],
         "optional": []
       }
     },

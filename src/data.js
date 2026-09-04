@@ -355,9 +355,20 @@ NX.fetchFormSubmit = async function (searchUrl, postFields) {
     // 3) 读响应 HTML，检测是否需要排队
     const buf = await resp.arrayBuffer();
     const respText = new TextDecoder('gbk').decode(buf);
-    if (respText.includes('accessDenied')) return { ok: false, msg: '操作被拒绝' };
+    if (respText.includes('accessDenied')) return { ok: false, msg: '操作被拒绝（会话失效）' };
     if (respText.includes('加入队列成功')) return { ok: true, submitted: true, msg: '已加入候补队列' };
     if (respText.includes('选课成功')) return { ok: true, submitted: true, msg: '选课成功' };
+
+    // 4.5) 业务拒绝字典（OneTHU 实证扩充，xk-1.5.1）：命中即明确失败并带出可读
+    // 文案——此前未知响应一律 ok:true 假成功（时间冲突/学分上限/先修不符等拒绝
+    // 页全中招，用户还以为选上了）。成功串已先行短路，此处只看剩余页。
+    const alertMsg = (respText.match(/alert\(["']([^"']{2,160})["']/) || [])[1];
+    const REJECT_RE = /时间冲突|上课时间冲突|先修|不符合|不允许|无法选课|选课失败|提交失败|余量不足|课余量不足|人数已满|已选满|请先|验证码|超出|达不到|不满足|存在冲突|已选过|重复选课|操作被拒绝|被拒绝|失败|上限|已选课程学分/;
+    if (REJECT_RE.test(respText)) {
+      const plain = respText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ');
+      const snippet = (plain.match(/[^ ]{0,20}(?:冲突|先修|不符合|不允许|无法|失败|不足|已满|超出|请先|验证码|拒绝)[^ ]{0,30}/) || [])[0];
+      return { ok: false, msg: ((alertMsg || snippet || '选课被教务拒绝').trim()).slice(0, 120) };
+    }
 
     // 4) 检测是否弹出"是否排队"的 confirm
     // 服务器返回 confirm("课程xxx 已满...是否排队？") → 需要再次 POST m=saveBksKcDl
@@ -367,8 +378,12 @@ NX.fetchFormSubmit = async function (searchUrl, postFields) {
       await new Promise(r => setTimeout(r, 1500));
       // 从第一次 POST 响应中提取新 token（原 token 已被消耗）
       const newTokenMatch = respText.match(/name="token"\s+value="([^"]+)"/);
+      if (!newTokenMatch) {
+        // 旧 token 一次性已消耗，复用必失败——显式报错而非静默复用（OneTHU 实证修正）
+        return { ok: false, msg: '排队页未返回新 token，请稍后重试' };
+      }
       const queueFields = { ...postFields, m: 'saveBksKcDl' };
-      if (newTokenMatch) queueFields.token = newTokenMatch[1];
+      queueFields.token = newTokenMatch[1];
       const queueResp = await fetch(BASE + '/xkBks.vxkBksXkbBs.do', {
         method: 'POST',
         credentials: 'include',
@@ -380,10 +395,15 @@ NX.fetchFormSubmit = async function (searchUrl, postFields) {
       const qText = new TextDecoder('gbk').decode(qBuf);
       if (qText.includes('加入队列成功')) return { ok: true, submitted: true, msg: '已加入候补队列' };
       if (qText.includes('选课成功')) return { ok: true, submitted: true, msg: '选课成功' };
-      return { ok: true, submitted: true };
+      const qAlert = (qText.match(/alert\(["']([^"']{2,160})["']/) || [])[1];
+      return { ok: false, unknown: true, msg: qAlert || '排队提交后响应无法识别' };
     }
 
-    return { ok: true, submitted: true };
+    // 未知响应：不再假成功——标记 unknown 交调用方轮询确认（OneTHU xk-1.5.1）
+    return {
+      ok: false, submitted: false, unknown: true,
+      msg: alertMsg || ('响应无法识别：' + respText.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 80)),
+    };
   } catch (e) {
     console.error('[NextTHUxk] fetchFormSubmit ERROR:', e);
     return { ok: false, msg: e.message };
@@ -416,7 +436,17 @@ NX.submitCourse = async function (code, seq, zy, flag) {
   if (flag === 'rx') { fields.is_zyrxk = '1'; fields.p_rxklxm = ''; }
   if (flag === 'ty') { fields.rxTyType = ''; }
   const res = await fetchFormSubmit(searchUrl, fields);
-  if (!res.submitted) return res;
+  if (!res.submitted) {
+    // 未知响应兜底（xk-1.5.1）：响应页可能是非标准成功文案——仍轮询已选/候补
+    // 确认后再下结论；确认未命中才把（含拒绝字典文案的）失败交还给用户。
+    if (!res.unknown) return res;
+    const hitSelUnknown = () => fetchSelectedCourses().then(sel =>
+      sel.some(s => s.code === code && String(s.seq) === String(seq)));
+    if (await NX.pollUntil(hitSelUnknown, 700, 3)) return { ok: true, msg: '选课成功' };
+    const candUnknown = await NX.fetchCandidateCourses();
+    if (candUnknown.some(s => s.code === code && String(s.seq) === String(seq))) return { ok: true, msg: '已加入候补队列' };
+    return { ok: false, msg: res.msg };
+  }
   // 轮询验证：已选列表或候补队列中出现即视为成功（总等待 ≥ 原 2s 固定延时）
   const hitSel = () => fetchSelectedCourses().then(sel =>
     sel.some(s => s.code === code && String(s.seq) === String(seq)));
@@ -779,4 +809,121 @@ NX.mergeStaticData = function (catalog, volData, plan) {
     courses.forEach(c => { if (!c.attr && pm[c.code]) c.attr = pm[c.code]; });
   }
   return courses;
+};
+
+// ═══════════════════════════════════════════════════════════════
+// 服务端精确搜索 + API 加固（2026-09 OneTHU dev 已验证逻辑移植，xk-1.5.1）
+// ═══════════════════════════════════════════════════════════════
+
+/** 会话死页判据（OneTHU client.ts:204 isXkDeadHtml 移植）：命中 = 请求没到教务，
+ *  解析必得空集。含 accessDenied / 登录超时 / id 电子身份中转页 / WebVPN 壳页。 */
+NX.isXkDeadHtml = function (html) {
+  return html.includes('accessDenied')
+    || html.includes('用户登陆超时或访问内容不存在。请重试')
+    || html.includes('电子身份服务系统')
+    || html.includes('do/off/ui/auth/login')
+    || html.includes('__vpn_app_hostname_data')
+    || html.includes('__vpn_hostname_data');
+};
+
+/** 服务端课程搜索（kkxxSearch，OneTHU searchXkCourses 语义移植）。
+ *  中文筛选参数（课名/教师）必须 gbkPercentEncode——GBK 页面 UTF-8 直发解出
+ *  乱码 LIKE 匹配不到 → 0 行。pageKind：ok=有行；empty=结果页但 0 行（真无匹配）；
+ *  unknown=异常页（会话/网络，带 htmlHead 诊断）。 */
+NX.serverSearch = async function (opts) {
+  const { state, fetchPage, parseCatalog } = NX;
+  const { SEM, BASE } = state;
+  if (!state.isZhjwxk && !state.isWebvpn) return { rows: [], pageKind: 'unknown', msg: '非教务站点' };
+  const o = opts || {};
+  const page = Math.max(1, o.page || 1);
+  const enc = NX.gbkPercentEncode;
+  const parts = ['m=kkxxSearch', 'p_xnxq=' + encodeURIComponent(SEM)];
+  if (page > 1) parts.push('page=' + page);
+  if (o.kch && o.kch.trim()) parts.push('p_kch=' + encodeURIComponent(o.kch.trim()));
+  const kw = o.kcm && o.kcm.trim();
+  if (kw) parts.push('p_kcm=' + enc(kw));
+  const teacher = o.teacher && o.teacher.trim();
+  if (teacher) parts.push('p_zjjsxm=' + enc(teacher));
+  if (o.department) parts.push('p_kkdwnm=' + encodeURIComponent(o.department));
+  if (o.weekday) parts.push('p_skxq=' + encodeURIComponent(o.weekday));
+  if (o.section) parts.push('p_skjc=' + encodeURIComponent(o.section));
+  if (o.grade) parts.push('p_ssnj=' + encodeURIComponent(o.grade));
+  if (o.rxklxm) parts.push('p_rxklxm=' + encodeURIComponent(o.rxklxm));
+  if (o.kctsm) parts.push('p_kctsm=' + encodeURIComponent(o.kctsm));
+  if (o.onlyAvailable) parts.push('p_bkskyl_ig=0');
+  if (o.gradAvail) parts.push('p_yjskyl_ig=0');
+  const url = BASE + '/xkBks.vxkBksJxjhBs.do?' + parts.join('&') + '&_t=' + Date.now();
+  let html;
+  try { html = await fetchPage(url); } catch (e) {
+    return { rows: [], pageKind: 'unknown', htmlHead: String(e.message || e) };
+  }
+  if (NX.isXkDeadHtml(html)) {
+    return { rows: [], pageKind: 'unknown', htmlHead: '会话死页（' + html.replace(/<[^>]+>/g, ' ').trim().slice(0, 80) + '）' };
+  }
+  const rows = parseCatalog(new DOMParser().parseFromString(html, 'text/html'));
+  const tp = /共\s*(\d+)\s*页/.exec(html);
+  const totalPages = tp ? parseInt(tp[1], 10) : undefined;
+  const tr = /共\s*[\d,]+\s*页（共\s*([\d,]+)\s*条记录/.exec(html);
+  const totalRows = tr ? parseInt(tr[1].replace(/,/g, ''), 10) : undefined;
+  if (rows.length > 0) return { rows, page, hasMore: true, totalPages, totalRows, pageKind: 'ok' };
+  const isResultPage = html.includes('选课文字说明') || html.includes('trr2');
+  return isResultPage
+    ? { rows, page, hasMore: false, totalPages, pageKind: 'empty' }
+    : { rows, page, hasMore: false, totalPages, totalRows, pageKind: 'unknown', htmlHead: html.slice(0, 600).replace(/\s+/g, ' ') };
+};
+
+/** 风暴护栏版服务端搜索（OneTHU data.ts newSearch 语义移植）：
+ *  精确课号 → 只探 1 页；总页数已知且 ≤25 → 全量；>25 或未知 → 只探 5 页
+ *  （绝不做未知 25 连发——历史实录 25 连发把代理 token 打满）。页间 30ms 错峰。
+ *  0 行且课名非纯数字 → 教师名兜底重试一次（课名即教师名的输入习惯）。 */
+NX.serverSearchStorm = async function (opts) {
+  const { runPool, serverSearch } = NX;
+  const o = opts || {};
+  const exactCode = /^\d{5,10}$/.test((o.kch || '').trim());
+  const first = await serverSearch({ ...o, page: 1 });
+  let rows = first.rows || [];
+  const tp = first.totalPages || 0;
+  // 风暴护栏（OneTHU 实证）：总页数 ≤25 → 全量；>25 → 只探 5 页（深分页大多是
+  // 宽泛词，前 5 页已够补全）；未知 → 5 页。绝不做未知 25 连发。
+  const probeTo = exactCode ? 1 : (tp > 0 ? (tp <= 25 ? tp : 5) : 5);
+  if (probeTo > 1) {
+    const merged = {};
+    rows.forEach(r => { merged[r.code + '_' + (r.seq || '0')] = r; });
+    const pages = [];
+    for (let p = 2; p <= probeTo; p++) pages.push(p);
+    await runPool(pages, 5, async (p, idx) => {
+      await new Promise(r => setTimeout(r, 30 * (idx % 5)));
+      try {
+        const r = await serverSearch({ ...o, page: p });
+        (r.rows || []).forEach(row => {
+          const k = row.code + '_' + (row.seq || '0');
+          if (!merged[k]) { merged[k] = row; rows.push(row); }
+        });
+      } catch (e) { console.warn(NX.TAG, 'server search page', p, e); }
+    });
+  }
+  // 教师名兜底：课名 0 行且非纯数字 → 换教师通道重试一次（单页 + 已知页数）
+  if (!rows.length && o.kcm && o.kcm.trim() && !/^\d+$/.test(o.kcm.trim()) && !o.teacher) {
+    const retry = await NX.serverSearchStorm({ ...o, kcm: '', teacher: o.kcm.trim() });
+    if (retry.rows && retry.rows.length) return retry;
+  }
+  return {
+    rows, totalPages: first.totalPages, totalRows: first.totalRows,
+    pageKind: rows.length ? 'ok' : (first.pageKind || 'empty'),
+    htmlHead: first.htmlHead,
+  };
+};
+
+/** 服务端搜索结果合并进工作台课程池（会话级，不写 staticData 缓存）：
+ *  code_seq 去重后并入 allCourses，卡片渲染/选课按钮即刻可用。返回新增数。 */
+NX.mergeServerRows = function (rows) {
+  const { state } = NX;
+  if (!rows || !rows.length) return 0;
+  const seen = new Set(state.allCourses.map(c => c.code + '_' + (c.seq || '0')));
+  let added = 0;
+  for (const r of rows) {
+    const k = r.code + '_' + (r.seq || '0');
+    if (!seen.has(k)) { state.allCourses.push(r); seen.add(k); added++; }
+  }
+  return added;
 };

@@ -12,9 +12,51 @@ const { browser: _browser, TAG, DATA_VER, store, state, baseFlag,
   launch: _origLaunch, fetchTrainingPlan, fetchCourseCatalog, fetchVolunteer,
   fetchSelectedCourses, fetchQueueData, fetchCandidateCourses,
   mergeStaticData, resolveCourseZy, renderCourses, renderPlan,
-  renderPreviewTT, renderStageCart, renderDrafts, filterCourses,
+  renderPreviewTT, renderStageCart, renderDrafts,
   renderPlanView, refreshSelected, showXkResult, volNeedsRefresh,
   checkUpdate } = NX;
+
+// ─── 服务端精确搜索兜底（xk-1.5.1，OneTHU dev 已验证逻辑移植）────────
+// 本地过滤（全量目录缓存）0 行 + 关键词 ≥2 字 → 风暴护栏版服务端搜索
+// （GBK 编码/课号单页/≤25 页封顶/教师名兜底），结果并入课程池后重本地过滤。
+const _origFilterCourses = NX.filterCourses;
+const _origRenderCourses = NX.renderCourses;
+let _lastFilterCount = 0;
+NX.renderCourses = function (list) {
+  _lastFilterCount = Array.isArray(list) ? list.length : 0;
+  return _origRenderCourses.apply(this, arguments);
+};
+let _ssGen = 0;
+const _serverSearchFallback = NX.debounce(async function () {
+  const inp = $('nextthuxk-search');
+  const q = ((inp && inp.value) || '').trim();
+  if (q.length < 2) return;
+  if (_lastFilterCount > 0) return; // 本地已命中 → 不打服务端
+  if (state._ssBusy) return;        // 单飞
+  const gen = ++_ssGen;
+  state._ssBusy = true;
+  try {
+    const res = await NX.serverSearchStorm({ kcm: q });
+    if (gen !== _ssGen) return;     // 输入已变，弃旧结果（代数打断）
+    const added = NX.mergeServerRows(res.rows);
+    if (added > 0) {
+      console.log(NX.TAG, 'server search merged', added, 'rows for', JSON.stringify(q));
+      NX.filterCourses();
+      try { showXkResult({ ok: true, msg: '服务端精确搜索补充 ' + added + ' 门课程' }); } catch (e) {}
+    } else if (res.pageKind === 'unknown' && res.htmlHead) {
+      console.warn(NX.TAG, 'server search dead page:', res.htmlHead.slice(0, 120));
+    }
+  } catch (e) {
+    console.warn(NX.TAG, 'server search fallback:', e);
+  } finally {
+    state._ssBusy = false;
+  }
+}, 600);
+const filterCourses = function () {
+  const r = _origFilterCourses.apply(this, arguments);
+  try { _serverSearchFallback(); } catch (e) {}
+  return r;
+};
 
 console.log(TAG, 'loading on', location.href);
 

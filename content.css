@@ -101,26 +101,8 @@
   opacity: 0;
   transition: transform .5s cubic-bezier(.16,1,.3,1), opacity .4s ease;
 }
-/* 玻璃下的环境光晕：让磨砂层透出色彩层次 */
-#nextthuxk-dashboard.active::before,
-#nextthuxk-dashboard.active::after {
-  content: '';
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(120px);
-  pointer-events: none;
-  z-index: 0;
-}
-#nextthuxk-dashboard.active::before {
-  width: 45vw; height: 45vw;
-  left: -10vw; top: -12vw;
-  background: rgba(47,107,255,.2);
-}
-#nextthuxk-dashboard.active::after {
-  width: 40vw; height: 40vw;
-  right: -8vw; bottom: -10vw;
-  background: rgba(64,210,255,.16);
-}
+/* （xk-1.5.1）移除 dashboard 的靛蓝/青 blur 光晕伪元素——用户指令：玻璃风保留，
+   背景蓝色渐变删除。磨砂层保持纯玻璃质感，不再垫彩色光斑。 */
 #nextthuxk-dashboard.active {
   transform: translateY(0);
   opacity: 1;
