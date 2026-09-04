@@ -1,3 +1,27 @@
+/* OneTHU 字标（照 OneTHU global.css .brand-logo 三字体混排：等线括号+衬线 One+粗黑 THU） */
+.othu-logo {
+  display: inline-flex;
+  align-items: baseline;
+  line-height: 1;
+  white-space: nowrap;
+}
+.othu-logo .lp {
+  font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  font-weight: 400;
+  transform: scaleY(1.06);
+}
+.othu-logo .ow {
+  font-family: Georgia, "Playfair Display", "Times New Roman", serif;
+  font-weight: 500;
+  font-size: 1.14em;
+  letter-spacing: -.035em;
+  margin-right: .16em;
+}
+.othu-logo .tu {
+  font-family: Inter, "SF Pro Display", "Helvetica Neue", system-ui, -apple-system, sans-serif;
+  font-weight: 800;
+  letter-spacing: -.01em;
+}
 /* ═══════════════════════════════════════════════════════════════
    NextTHUxk — 全部样式（v1.3.16 液态玻璃 · Liquid Glass）
    设计语言：亮白底 + 靛蓝强调 + 衬线 Serif + 磨砂玻璃层 + 细分割线
@@ -67,6 +91,9 @@
   bottom: 28px;
   right: 28px;
   pointer-events: all;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   padding: 10px 20px;
   border-radius: 999px;
   background: rgba(255,255,255,.3);
@@ -120,11 +147,10 @@
   flex-shrink: 0;
 }
 .nx-logo {
-  font-family: var(--nx-font-serif);
-  font-size: 17px;
-  font-weight: 700;
+  font-family: -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Noto Sans SC", sans-serif;
+  font-size: 16px;
+  font-weight: 400;
   color: var(--nx-ink);
-  letter-spacing: .05em;
   display: flex;
   align-items: baseline;
   gap: 8px;
