@@ -262,14 +262,17 @@ NX.launch = async function launch() {
     // 候选不再 phase 门控（OneTHU getQueueStatus 语义：独立拉取，dlSearch 拿不到
     // 走一级课表 kbSearch 兜底——「看不到队列候选」实锤：xkqkSearch 阶段探测失败
     // 时旧代码直接跳过候选拉取）
-    const [selectedCourses, candCourses, planFresh, levelMap] = await Promise.all([
+    const [selectedCourses, candCourses, planFresh, levelMap, catAttrs] = await Promise.all([
       fetchSelectedCourses().catch(e => { console.warn(TAG, 'selected:', e); return []; }),
       fetchCandidateCourses().catch(e => { console.warn(TAG, 'candidates:', e); return []; }),
       state.planData.length ? Promise.resolve(null) : fetchTrainingPlan().catch(e => { console.warn(TAG, 'plan:', e); return []; }),
       // 课程类型源（必修/限选/任选/体育）：kkxxSearch 行没有类型列，只在一级课表
       NX.fetchLevelTable().catch(e => { console.warn(TAG, 'level table:', e); return {}; }),
+      // 分类 tab 属性（必修/限选，方案级小列表）——存档实证的预选权威源，
+      // 优先于一级课表/培养方案回填（用户十三报：微积分全家桶全按任选算）
+      NX.fetchCategoryAttrs().catch(e => { console.warn(TAG, 'category attrs:', e); return {}; }),
     ]);
-    state.levelMap = levelMap || {};
+    state.levelMap = Object.assign({}, levelMap, catAttrs);   // 分类页属性优先
     if (!state.planData.length) state.planData = planFresh || [];
     state.candidateCourses = candCourses;
     // 候补元数据回填（OneTHU 同款：按课号逐门单查一页，非全目录爬）——

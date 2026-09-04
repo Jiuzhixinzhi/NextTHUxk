@@ -1017,6 +1017,62 @@ NX.applyLevelMap = function (rows) {
   return rows;
 };
 
+// ─── 预选分类页属性（用户十三报「这像话吗」终修）──────────────────
+// 存档实证（体育_files/xkBks.vxkBksXkbBs.html 等）：预选页分类 tab =
+//   bxSearch(必修)/xxSearch(限选)/rxSearch(任选)/tySearch(体育)，
+//   首页 GET（…?m=bxSearch&p_xnxq=SEM&tokenPriFlag=bx），翻页 = POST 表单
+//   （turn(p): frm.page=p; frm.m=xxSearch; submit，带 token）。
+//   行格式 [选择, 课程号, 课序号, 课程名, 选课志愿, 课余量, 时间, 教师, …]。
+// 课在哪页就是什么属性——必修/限选 tab 是本生方案级列表（小，全量抓）；
+// 任选 tab 全校选修（几十页）不抓：attr 缺省即任选；体育 tab 19 页 361 门
+// 不抓：isSportsCourse 名称/院系启发覆盖。两条 tab 合计个位数请求。
+NX.fetchCategoryAttrs = async function () {
+  const { state, fetchPage } = NX;
+  const BASE = state.BASE, SEM = state.SEM;
+  const out = {};
+  const tabs = [
+    { m: 'bxSearch', flag: 'bx', attr: '必修', code: '006' },
+    { m: 'xxSearch', flag: 'xx', attr: '限选', code: '008' },
+  ];
+  const parseRows = html => {
+    const rows = [];
+    for (const seg of html.match(/gridData\w*\s*=\s*\[[\s\S]*?\];/g) || []) {
+      const re = /\[\s*"[^"]*"\s*,\s*"([A-Za-z0-9]+)"\s*,\s*"([^"]*)"\s*,\s*"[^"]*"/g;
+      let m;
+      while ((m = re.exec(seg)) !== null) {
+        if (/\d/.test(m[1])) rows.push({ code: m[1], seq: m[2] });   // 课号须含数字（滤表头/外文行）
+      }
+    }
+    return rows;
+  };
+  await NX.runPool(tabs, 2, async tab => {
+    try {
+      const firstUrl = BASE + '/xkBks.vxkBksXkbBs.do?m=' + tab.m + '&p_xnxq=' + SEM + '&tokenPriFlag=' + tab.flag;
+      const fh = await fetchPage(firstUrl);
+      const token = (fh.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';
+      const totalPages = Math.min(parseInt((fh.match(/共\s*(\d+)\s*页/) || [])[1], 10) || 1, 10);
+      const htmls = [fh];
+      for (let p = 2; p <= totalPages; p++) {
+        const resp = await fetch(BASE + '/xkBks.vxkBksXkbBs.do', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ m: tab.m, page: String(p), token, p_xnxq: SEM, tokenPriFlag: tab.flag }),
+        });
+        if (!resp.ok) break;
+        htmls.push(new TextDecoder('gbk').decode(await resp.arrayBuffer()));
+      }
+      let n = 0;
+      for (const h of htmls) for (const r of parseRows(h)) {
+        out[r.code + '_' + NX.normSeq(r.seq)] = { attr: tab.attr, typeCode: tab.code, typeLabel: tab.attr };
+        n++;
+      }
+      console.log(NX.TAG, 'category ' + tab.attr + ': ' + n + ' 门（' + totalPages + ' 页）');
+    } catch (e) { console.warn(NX.TAG, 'category ' + tab.m + ':', e); }
+  });
+  return out;
+};
+
 NX.backfillCandidateMeta = async function (candidates) {
   const todo = (candidates || []).filter(c => c && c.code && !c.credits);
   if (!todo.length) return;
