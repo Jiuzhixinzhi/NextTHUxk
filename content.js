@@ -268,6 +268,12 @@ NX.launch = async function launch() {
     ]);
     if (!state.planData.length) state.planData = planFresh || [];
     state.candidateCourses = candCourses;
+    // 候补元数据回填（OneTHU 同款：按课号逐门单查一页，非全目录爬）——
+    // dlSearch/kbSearch 行缺学分/容量，补齐后概率网格/余量徽章即刻可用
+    if (candCourses.length) {
+      listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;正在补齐候补课程信息…</div>';
+      await NX.backfillCandidateMeta(candCourses).catch(e => console.warn(TAG, 'cand meta:', e));
+    }
     // 核心池 = 已选 + 候补（预览/暂存/冲突/AI 的基础；搜索结果运行时带标记渲染）
     const pool = selectedCourses.map(c => ({ ...c, selected: true }));
     state.candidateCourses.forEach(c => {

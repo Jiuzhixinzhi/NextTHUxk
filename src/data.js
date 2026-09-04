@@ -743,35 +743,38 @@ NX.fetchCandidateCourses = async function () {
   try {
     const html = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=dlSearch&p_xnxq=' + SEM);
     if (html.includes('accessDenied')) return [];
-    // 无 trr2（「队列功能未开放」提示页等）不早退：继续解析出 0 行后走
-    // kbSearch 兜底（OneTHU getQueueStatus 语义：rows==0 && 提示信息 → 课表爬候选）
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const rows = doc.querySelectorAll('tr.trr2');
+    // OneTHU parseQueueCandidates 逐行移植（regex 版，不依赖 DOMParser）：
+    // ①行类放宽 trr2→trr[12]——新学期版式换行类时只认 trr2 会静默空列表
+    //   （「我的队列被吃了」实测事故，OneTHU 注释原话）；trr1 是表头无 td，
+    //   天然被列数门槛过滤；②列数门槛 ≥7（旧版 <9 会把新列序整表吃掉）。
     const candidates = [];
-    rows.forEach(row => {
-      const tds = row.querySelectorAll('td');
-      if (tds.length < 9) return;
-      const cell = i => (tds[i]?.textContent || '').trim().replace(/\s+/g, ' ');
-      const typeLabel = cell(0);
-      const zyStr = cell(1);
-      const code = cell(2);
-      const name = cell(3);
-      const seq = cell(4);
-      const queueTotal = parseInt(cell(5)) || 0;
-      const myPos = parseInt(cell(6)) || 0;
-      const time = cell(7);
-      const teacher = cell(8);
-      const zyNum = zyStr.match(/第([一二三])志愿/);
+    const rowRe = /<tr[^>]*class="trr[12]"[^>]*>([\s\S]*?)<\/tr>/g;
+    let m;
+    while ((m = rowRe.exec(html)) !== null) {
+      const tds = [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(t => t[1].replace(/<[^>]*>/g, '').trim());
+      if (tds.length < 7) continue;
+      const td = i => tds[i] || '';
+      const typeLabel = td(0);
+      const zyStr = td(1);
+      const code = td(2);
+      const name = td(3);
+      const seq = td(4);
+      const queueTotal = parseInt(td(5)) || 0;
+      const myPos = parseInt(td(6)) || 0;
+      const time = td(7) || '';
+      const teacher = td(8) || '';
+      if (!code || !name) continue;
+      const zyNum = zyStr.match(/第([一二三1-3])志愿/);   // 一二三/1-3 两种写法都收
       const typeCode = typeLabel === '必修' ? '006' : typeLabel === '限选' ? '008' : '007';
       candidates.push({
         code, seq: seq || '0', name, teacher, time,
         credits: 0, typeLabel, typeCode,
-        zy: zyNum ? ({ '一': 1, '二': 2, '三': 3 }[zyNum[1]] || 3) : 3,
+        zy: zyNum ? ({ '一': 1, '二': 2, '三': 3 }[zyNum[1]] || parseInt(zyNum[1]) || 3) : 3,
         queueTotal, myPos,
         isCandidate: true,
         selected: false,
       });
-    });
+    }
     console.log(NX.TAG, 'candidate courses:', candidates.length);
     // 「队列功能未开放」等拦截兜底（OneTHU getQueueStatus 同款）：dlSearch 零行
     // 且页面带提示信息 → 从一级课表（kbSearch）脚本块里挖候选课（p_id=课号 +
@@ -789,6 +792,32 @@ NX.fetchCandidateCourses = async function () {
     console.warn(NX.TAG, 'candidate fetch:', e);
     return [];
   }
+};
+
+// 候补课元数据回填（OneTHU 同款：每门按课号单查一页，非全目录爬）：
+// dlSearch/kbSearch 行天生缺学分/容量——逐门 kch 精确查一页补齐，
+// 概率网格/学分统计/余量徽章即刻可用。
+NX.backfillCandidateMeta = async function (candidates) {
+  const todo = (candidates || []).filter(c => c && c.code && !c.credits);
+  if (!todo.length) return;
+  await NX.runPool(todo, 4, async c => {
+    await new Promise(r => setTimeout(r, 30));   // 微错峰
+    try {
+      const r = await NX.serverSearch({ kch: c.code });
+      const rows = r.rows || [];
+      const hit = rows.find(x => String(x.seq || '0') === String(c.seq || '0')) || rows[0];
+      if (hit) {
+        c.credits = hit.credits || 0;
+        c.capacity = hit.capacity || 0;
+        c.remaining = hit.remaining || 0;
+        c.available = !!hit.available;
+        if (!c.teacher && hit.teacher) c.teacher = hit.teacher;
+        if (!c.time && hit.time) c.time = hit.time;
+        c.xkTextNote = hit.xkTextNote || '';
+      }
+    } catch (e) { console.warn(NX.TAG, 'cand meta', c.code, e); }
+  });
+  console.log(NX.TAG, 'candidate metadata backfilled:', todo.length);
 };
 
 // 一级课表 → 候选课兜底（OneTHU parseTimetableCandidates 逐行移植）：
