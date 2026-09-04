@@ -103,7 +103,11 @@ NX.parseVolFromHtml = function (html) {
   const regex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"(.*?)"\s*,\s*"(.*?)"\s*,\s*"(.*?)"\s*\]/g;
   let m;
   while ((m = regex.exec(html)) !== null) {
-    const key = m[1] + '_' + m[2];
+    // 墓碑行过滤（用户十七报贴教务原始行实锤：10780102 全零 = 已满课
+    // 不在志愿池）——不过滤的话下游会拿 kkxx 容量造「0/100 宽松 + 满屏
+    // 假 100%」。报名>0 的 0 容量行保留（超载=真信号）。键同步归一。
+    if (!(parseInt(m[3]) || 0) && !(parseInt(m[4]) || 0)) continue;
+    const key = m[1] + '_' + NX.normSeq(m[2]);
     map[key] = {
       code: m[1], seq: m[2],
       capacity: parseInt(m[3]) || 0,
@@ -121,7 +125,8 @@ NX.parseVolSportsFromHtml = function (html) {
   const regex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"(.*?)"\s*\]/g;
   let m;
   while ((m = regex.exec(html)) !== null) {
-    const key = m[1] + '_' + m[2];
+    if (!(parseInt(m[3]) || 0) && !(parseInt(m[4]) || 0)) continue;   // 墓碑行同滤 + 键归一
+    const key = m[1] + '_' + NX.normSeq(m[2]);
     map[key] = {
       code: m[1], seq: m[2],
       capacity: parseInt(m[3]) || 0,
@@ -497,7 +502,7 @@ NX.applyVolunteer = function (courses, volData) {
     if (v) {
       c.volRequired = v.volRequired; c.volElective = v.volElective; c.volOptional = v.volOptional;
       c.volSports = v.volSports || '';
-      c.volCapacity = v.capacity || c.capacity; c.volApplied = v.applied || 0;
+      c.volCapacity = v.capacity; c.volApplied = v.applied || 0;   // 不回退 c.capacity：缺志愿行=无数据，不是 0/N 宽松
     } else {
       c.volRequired = ''; c.volElective = ''; c.volOptional = ''; c.volSports = '';
     }
@@ -1149,45 +1154,6 @@ NX.parseTimetableCandidates = function (html) {
 
 // ─── Merge ────────────────────────────────────────────────────
 
-NX.mergeStaticData = function (catalog, volData, plan) {
-  const { baseFlag } = NX;
-  const courses = catalog.length ? catalog : plan.map(c => ({ ...c, available: true, teacher: '', time: '', capacity: '', selected: false, queue: '' }));
-  if (Object.keys(volData).length) {
-    // 预建 code 索引：原实现每门课 Object.values().find() 线性扫，6000 课 × 数千志愿 = O(n²) 卡死主线程
-    const byCode = {};
-    for (const v of Object.values(volData)) {
-      if (!byCode[v.code]) byCode[v.code] = v;
-    }
-    courses.forEach(c => {
-      const v = (c.seq && volData[c.code + '_' + c.seq]) || byCode[c.code];
-      if (v) {
-        c.volRequired = v.volRequired; c.volElective = v.volElective; c.volOptional = v.volOptional;
-        c.volSports = v.volSports || '';
-        c.volCapacity = v.capacity || c.capacity; c.volApplied = v.applied || 0;
-        if ((c.attr === '体育' || c.department?.includes('体育') || c.name?.includes('体育')) && v.volSports) {
-          c.volApplied = v.applied || 0;
-          c.volCapacity = v.capacity || c.volCapacity;
-        }
-      } else if ('volRequired' in c || 'volApplied' in c) {
-        // re-merge 场景（输入为缓存 courses）：志愿已撤下的课清掉旧值，避免展示过期数据
-        c.volRequired = ''; c.volElective = ''; c.volOptional = ''; c.volSports = '';
-        c.volApplied = 0; c.volCapacity = 0;
-      }
-    });
-  }
-  if (plan.length) {
-    const pm = {}; plan.forEach(p => { pm[p.code] = p.attr; });
-    courses.forEach(c => { if (!c.attr && pm[c.code]) c.attr = pm[c.code]; });
-  }
-  return courses;
-};
-
-// ═══════════════════════════════════════════════════════════════
-// 服务端精确搜索 + API 加固（2026-09 OneTHU dev 已验证逻辑移植，xk-1.5.1）
-// ═══════════════════════════════════════════════════════════════
-
-/** 会话死页判据（OneTHU client.ts:204 isXkDeadHtml 移植）：命中 = 请求没到教务，
- *  解析必得空集。含 accessDenied / 登录超时 / id 电子身份中转页 / WebVPN 壳页。 */
 NX.isXkDeadHtml = function (html) {
   return html.includes('accessDenied')
     || html.includes('用户登陆超时或访问内容不存在。请重试')
