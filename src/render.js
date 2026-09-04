@@ -1119,6 +1119,8 @@ NX.loadAllSearch = async function () {
       r.isCandidate = candKeys.has(k);
     });
     state._searchRows = res.rows || [];
+    // 同上：补齐页合并进会话池（暂存/详情/选课按钮一致可用）
+    if ((res.rows || []).length && NX.mergeServerRows(res.rows)) NX.rebuildCourseMap();
     state._searchIncomplete = false;
     if (res.totalPages) state._searchTotalPages = res.totalPages;
     if (res.totalRows) state._searchTotalRows = res.totalRows;
@@ -1189,6 +1191,10 @@ NX.runServerSearch = async function () {
         });
         state._searchRows = res.rows || [];
         state._browseHasMore = res.pageKind === 'ok' && (res.rows || []).length > 0;
+        // 搜索结果合并进会话池（暂存/简介/选课按钮即刻可用——否则 addToStage
+        // 的 allCourses.find 落空，搜索卡片点暂存静默无效；code_seq 去重，
+        // 池内已有行跳过，已选/队列 chip 按 selected/isCandidate 过滤不受污染）
+        if ((res.rows || []).length && NX.mergeServerRows(res.rows)) NX.rebuildCourseMap();
         state._searchTotalPages = res.totalPages || 0;
         state._searchTotalRows = res.totalRows || 0;
         // 捕捉不完整（OneTHU 同款）：已加载 < 服务端总数 → 尾部页未探测，
