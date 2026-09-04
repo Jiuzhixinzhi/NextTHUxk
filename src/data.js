@@ -86,6 +86,7 @@ NX.parseCatalog = function (doc) {
       group: cell(0),
       attr: attrCell || '',   // v1.5.0 行内扫描（data.js:24 同款）——培养方案外的课不再塌成「任选」
       detailUrl: detailHref,
+      note: cell(11),   // 说明列 = 外校真实时间载体（OneTHU parseXkCatalogPage td(11) 同款；clockRangesOf 读此字段）
       xkTextNote: cell(11),
       courseFeature: cell(12),
       grade: cell(13),
@@ -1307,11 +1308,20 @@ NX.serverSearchStorm = async function (opts) {
 NX.mergeServerRows = function (rows) {
   const { state } = NX;
   if (!rows || !rows.length) return 0;
-  const seen = new Set(state.allCourses.map(c => c.code + '_' + (c.seq || '0')));
+  const byKey = new Map(state.allCourses.map(c => [c.code + '_' + (c.seq || '0'), c]));
   let added = 0;
   for (const r of rows) {
     const k = r.code + '_' + (r.seq || '0');
-    if (!seen.has(k)) { state.allCourses.push(r); seen.add(k); added++; }
+    const ex = byKey.get(k);
+    if (!ex) { state.allCourses.push(r); byKey.set(k, r); added++; continue; }
+    // 池内已有行：回填缺失字段（OneTHU join 池语义——搜索/回填行带来的
+    // note（外校时间）能落到已选课上；已有真值不动，绝不覆盖）
+    if (!ex.note && r.note) ex.note = r.note;
+    if (!ex.time && r.time) ex.time = r.time;
+    if (!ex.teacher && r.teacher) ex.teacher = r.teacher;
+    if (!ex.credits && r.credits) ex.credits = r.credits;
+    if (!ex.department && r.department) ex.department = r.department;
+    if (!ex.xkTextNote && r.xkTextNote) ex.xkTextNote = r.xkTextNote;
   }
   NX.applyLevelMap(rows);
   // 搜索行属性探针（用户十六报）：每次搜索自动打——几行有属性、逐行命中否，

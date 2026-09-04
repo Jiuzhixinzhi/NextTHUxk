@@ -411,6 +411,8 @@ NX.finishLaunch = function (sd, selCount, volTs, volRefreshed) {
     if (cfg.pref) $('nextthuxk-pref').value = cfg.pref;
   });
   console.log(TAG, 'on-demand launch done:', selCount, 'selected,', state.candidateCourses.length, 'candidates,', state.isQueuePhase ? 'queue phase' : 'browse mode');
+  // 已选课时间回填（外校课时间在说明列——OneTHU backfillSelTimes 同款，后台静默）
+  if (NX.backfillSelTimes) NX.backfillSelTimes().catch(() => {});
   if (state.fetchWarn) { showXkResult({ ok: false, msg: state.fetchWarn }); state.fetchWarn = ''; }
   const phaseTag = $('nextthuxk-phase-tag');
   if (phaseTag) {

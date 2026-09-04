@@ -384,7 +384,7 @@ NX.renderPreviewTT = function (courses, label) {
       n += 1;
     }
     if (!n) {
-      NX.clockRangesOf(c.note, c.time).forEach(cr => {
+      NX.clockRangesOf(c.note || c.xkTextNote || '', c.time).forEach(cr => {
         raw.push(Object.assign(mk(cr.day, cr.begin, cr.end, 'c' + cr.begin), { tag: cr.tag }));
         n += 1;
       });

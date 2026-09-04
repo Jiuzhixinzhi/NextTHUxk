@@ -165,6 +165,41 @@ NX.renderQueueSection = function () {
 };
 
 // 当前预览课表（selected/stage/draft 三态），多处复用
+// 已选课时间回填（OneTHU data.ts backfillSelTimes 同款）：时间列解析
+// 失败且说明列也解不出钟点的已选课（外校课典型——时间在说明列），
+// 逐门 p_kch 精查 kkxxSearch（1 课 1 请求，5 个一批 60ms 间隔），
+// 结果经 mergeServerRows 回填 note/time 到池行，课表预览即恢复。
+NX.backfillSelTimes = async function () {
+  const { state } = NX;
+  if (!state.isZhjwxk && !state.isWebvpn) return;
+  const tried = state._selTried || (state._selTried = new Set());
+  const sel = state.allCourses.filter(c => c.selected && !c.isCandidate);
+  const need = sel.filter(r => {
+    const k = r.code + '_' + (r.seq || '0');
+    if (tried.has(k)) return false;
+    const slots = (NX.parseTimeSlots(r.time || '') || []).length;
+    const clock = (NX.clockRangesOf(r.note || r.xkTextNote || '', r.time || '') || []).length;
+    return slots === 0 && clock === 0;
+  });
+  if (!need.length) return;
+  need.forEach(r => tried.add(r.code + '_' + (r.seq || '0')));
+  console.log(NX.TAG, '已选时间回填:', need.map(r => r.code + '_' + (r.seq || '0')).join(','));
+  for (let i = 0; i < need.length; i += 5) {
+    await Promise.all(need.slice(i, i + 5).map(async r => {
+      try {
+        const res = await NX.serverSearch({ kch: r.code });
+        const hit = (res.rows || []).find(c => c.code === r.code && String(c.seq || '0') === String(r.seq || '0'));
+        if (hit) NX.mergeServerRows([hit]);
+      } catch (e) { /* 回填失败容忍：保持现状 */ }
+    }));
+    if (i + 5 < need.length) await new Promise(res => setTimeout(res, 60));
+  }
+  NX.invalidatePreview();
+  try {
+    if (NX.state.previewMode === 'selected') NX.renderPreviewTT(NX.getPreviewCourses(), (NX.state.$('nextthuxk-preview-info') || {}).textContent || '当前已选');
+  } catch (e) {}
+};
+
 NX.getPreviewCourses = function () {
   const { allCourses, stageCart, savedDrafts, previewMode, previewDraftIdx } = NX.state;
   if (previewMode === 'selected') {
@@ -438,6 +473,7 @@ NX.addToStage = function (code, seq, flag, zy) {
     code: c.code, seq: c.seq || '0', name: c.name, teacher: c.teacher || '',
     time: c.time || '', credits: c.credits || 0, flag, zy: parseInt(zy) || 3,
     baseFlag: baseFlag(c),
+    note: (c.note || c.xkTextNote || ''),   // 外校真实时间载体（课表预览 clockRangesOf 用）
   });
   renderStageCart();
   store.set('stageCart', stageCart);
