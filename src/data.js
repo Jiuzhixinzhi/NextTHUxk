@@ -742,9 +742,15 @@ NX.fetchCandidateCourses = async function () {
   const { SEM, BASE } = state;
   try {
     // 双解码抓取（OneTHU reqwest 自动转码等价）：GBK/UTF-8 各解各解析，
-    // 按行数选优——站点无论哪种编码，行都在，「吃行」不可能再发生
-    const dual = await NX.fetchPageDual(BASE + '/xkBks.vxkBksXkbBs.do?m=dlSearch&p_xnxq=' + SEM);
-    if (dual.gbk.includes('accessDenied') && dual.utf8.includes('accessDenied')) return [];
+    // 按行数选优——站点无论哪种编码，行都在，「吃行」不可能再发生。
+    // dlSearch 阶段未开放时服务器直接 500（用户实机日志实锤）——任何失败
+    // 都不提前放弃，降级进 kbSearch 课表兜底链
+    let dual = null;
+    try {
+      dual = await NX.fetchPageDual(BASE + '/xkBks.vxkBksXkbBs.do?m=dlSearch&p_xnxq=' + SEM);
+    } catch (e) {
+      console.warn(NX.TAG, 'dlSearch failed (' + e.message + ') → 课表兜底');
+    }
     const parseDl = html => {
       const out = [];
       const rowRe = /<tr[^>]*class="trr[12]"[^>]*>([\s\S]*?)<\/tr>/g;
@@ -776,7 +782,8 @@ NX.fetchCandidateCourses = async function () {
       }
       return out;
     };
-    const candidates = NX.pickDecoded(parseDl, dual);
+    if (dual && dual.gbk.includes('accessDenied') && dual.utf8.includes('accessDenied')) return [];
+    const candidates = dual ? NX.pickDecoded(parseDl, dual) : [];
     console.log(NX.TAG, 'candidate courses:', candidates.length);
     // dlSearch 零行 → 一级课表（kbSearch）兜底（OneTHU getQueueStatus 语义：
     // 「队列功能未开放」提示页/任何零行场景——用户语义：官网课表能看到排队课
