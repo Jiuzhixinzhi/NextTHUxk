@@ -90,6 +90,8 @@ const HTML = `
             <input type="text" class="nx-search" id="nextthuxk-search" placeholder="搜索课程名称、教师、课程号…">
             <button type="button" class="nx-search-clear" id="nextthuxk-search-clear" aria-label="清空搜索">×</button>
           </div>
+          <button id="nx-filter-toggle" class="nx-ghost-btn" style="width:100%;margin-top:4px;font-size:11px">筛选 ▾</button>
+          <div id="nx-filter-body" style="display:none">
           <div class="nx-filters" id="nextthuxk-filters">
             <button class="nx-chip on" data-f="all">全部</button>
             <button class="nx-chip" data-f="available">可选</button>
@@ -119,6 +121,7 @@ const HTML = `
             <select id="nx-filter-yjsrem" class="nx-zy-select" style="flex:1;min-width:100px"><option value="">研院余量: 不限</option><option value=">0">研究生余量&gt;0</option></select>
           </div>
           <div style="display:flex;gap:6px;margin-top:6px"><input type="text" id="nx-filter-xknote" class="nx-inp" style="flex:1;padding:6px 10px;font-size:12px" placeholder="选课文字说明搜索"></div>
+          </div>
         </div>
         <div class="nx-list" id="nextthuxk-list"><div class="nx-empty">点击右下角「选」按钮开始</div></div>
       </div>
@@ -490,6 +493,18 @@ NX.startVolAutoSync = function () {
 // ─── Event Bindings ───────────────────────────────────────────
 $('nextthuxk-launch').onclick = NX.launch;
 $('nextthuxk-exit').onclick = () => toggle(false);
+
+// 筛选栏折叠（用户三十六报：固定筛选占太多竖向空间，课程卡片展示区太少）
+{
+  const ft = $('nx-filter-toggle'), fb = $('nx-filter-body');
+  const apply = open => {
+    fb.style.display = open ? 'block' : 'none';
+    ft.textContent = open ? '收起筛选 ▴' : '展开筛选 ▾';
+    store.set('filtersOpen', open);
+  };
+  store.get('filtersOpen').then(v => apply(!!v)).catch(() => apply(false));
+  ft.onclick = () => apply(fb.style.display === 'none');
+}
 
 NX.syncQueueAndVol = async function () {
   const qResult = await NX.fetchQueueData(state.allCourses);
