@@ -116,13 +116,57 @@ NX.detectConflicts = function (courses) {
   return conflicts;
 };
 
+// 候选队列右栏区块（OneTHU「排队第X/共Y·候选中」语义）：每行课名(教师)·
+// 时间·排队位次·退队（dropCourse 走 m=dlDelete）；kbSearch 兜底候选无位次
+// 数据（课表只有格子），显示「候选中」。
+NX.renderQueueSection = function () {
+  const { state, esc, dropCourse, showXkResult, renderPreviewTT } = NX;
+  const sec = state.$('nextthuxk-queue-sec');
+  const list = state.$('nextthuxk-queue-list');
+  const countEl = state.$('nextthuxk-queue-count');
+  if (!sec || !list) return;
+  const cands = state.candidateCourses || [];
+  sec.style.display = cands.length ? '' : 'none';
+  if (!cands.length) { list.innerHTML = ''; return; }
+  if (countEl) countEl.textContent = cands.length + ' 门';
+  list.innerHTML = cands.map(c => {
+    const pos = c.myPos
+      ? '<span style="color:#ff9f1a;font-weight:600">排队第' + c.myPos + ' / 共' + (c.queueTotal || '?') + '人</span>'
+      : '<span style="color:#ff9f1a;font-weight:600">候选中</span>';
+    const meta = [c.time, c.teacher, c.typeLabel].filter(Boolean).map(x => esc(x)).join(' · ');
+    return '<div class="nx-plan-item" style="display:flex;align-items:center;gap:8px;padding:6px 8px">' +
+      '<div style="flex:1;min-width:0">' +
+        '<div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(c.name) + ' <span style="font-weight:400;color:var(--nx-ink-soft);font-size:11px">' + esc(c.code) + '</span></div>' +
+        '<div style="font-size:11px;color:var(--nx-ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (meta || '—') + '</div>' +
+      '</div>' +
+      '<div style="font-size:11px;white-space:nowrap">' + pos + '</div>' +
+      '<button class="nx-ghost-btn nx-queue-drop" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" style="font-size:11px;padding:2px 8px">退队</button>' +
+    '</div>';
+  }).join('');
+  list.querySelectorAll('.nx-queue-drop').forEach(btn => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      const r = await dropCourse(btn.dataset.code, btn.dataset.seq);
+      if (!r || !r.ok) { btn.disabled = false; showXkResult(r || { ok: false, msg: '退队失败' }); return; }
+      // 退队成功：从候选池移除并回刷（getPreviewCourses 候选数版本号自动失效）
+      state.candidateCourses = state.candidateCourses.filter(c => !(c.code === btn.dataset.code && String(c.seq || '0') === String(btn.dataset.seq)));
+      state.allCourses = state.allCourses.filter(c => !(c.isCandidate && c.code === btn.dataset.code && String(c.seq || '0') === String(btn.dataset.seq)));
+      NX.rebuildCourseMap();
+      NX.renderQueueSection();
+      NX.filterCourses();
+      renderPreviewTT(NX.getPreviewCourses(), (state.$('nextthuxk-preview-info') || {}).textContent || '当前已选');
+    };
+  });
+};
+
 // 当前预览课表（selected/stage/draft 三态），多处复用
 NX.getPreviewCourses = function () {
   const { allCourses, stageCart, savedDrafts, previewMode, previewDraftIdx } = NX.state;
   if (previewMode === 'selected') {
-    // selected 集合只在 resolveCourseZy 后变化，用版本号稳定引用（否则每次 filter 出新数组，索引缓存永不命中）
-    const v = NX.state.selVersion || 0;
-    if (NX._selCacheV !== v) { NX._selCache = allCourses.filter(c => c.selected); NX._selCacheV = v; }
+    // OneTHU Courses.tsx 语义：已选视图含候补课（琥珀块 lane 分道共处）——
+    // 候选只属于已选视图；版本号带上候选数（队列同步回刷不再吃掉候选块）
+    const v = (NX.state.selVersion || 0) + '|' + (NX.state.candidateCourses || []).length;
+    if (NX._selCacheV !== v) { NX._selCache = allCourses.filter(c => c.selected).concat(NX.state.candidateCourses || []); NX._selCacheV = v; }
     return NX._selCache;
   }
   if (previewMode === 'stage') return stageCart;

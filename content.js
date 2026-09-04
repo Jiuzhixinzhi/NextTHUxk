@@ -127,6 +127,7 @@ const HTML = `
       <div class="nx-right">
         <div class="nx-sec"><div class="nx-sec-title">我的培养方案</div><div id="nextthuxk-plan" class="nx-plans"><div class="nx-st">等待加载…</div></div><div id="nextthuxk-plan-detail" style="margin-top:8px;font-size:12px;color:var(--nx-ink-soft)"></div></div>
         <div class="nx-sec"><div class="nx-sec-title" style="display:flex;align-items:center;gap:8px">课表预览 <span id="nextthuxk-preview-info" style="font-size:11px;color:var(--nx-ink-soft);font-weight:400"></span><button class="nx-stage-btn" id="nextthuxk-add-manual" style="margin-left:auto">＋ 添加占用</button></div><div id="nextthuxk-preview-tt"><div class="nx-st">选课后自动生成预览</div></div><button class="nx-stage-btn" id="nextthuxk-preview-reset" style="display:none;margin-top:6px">返回当前已选课表</button></div>
+        <div class="nx-sec" id="nextthuxk-queue-sec" style="display:none"><div class="nx-sec-title" style="display:flex;align-items:center;gap:8px">候选队列 <span id="nextthuxk-queue-count" style="font-size:11px;color:#ff9f1a;font-weight:400"></span></div><div id="nextthuxk-queue-list" class="nx-plans"></div></div>
         <div class="nx-sec">
           <div class="nx-sec-title">暂存课表</div>
           <div id="nextthuxk-stage-list"><div class="nx-st">暂无暂存课程</div></div>
@@ -296,6 +297,7 @@ NX.launch = async function launch() {
       });
       NX.filterCourses();
       NX.renderPreviewTT(NX.getPreviewCourses(), (state.$('nextthuxk-preview-info') || {}).textContent || '当前已选');
+      NX.renderQueueSection();
     })();
     if (state.SEM === SEM0) {
       await store.set('staticData', { ver: DATA_VER, plan: state.planData, ts: Date.now() });
@@ -304,6 +306,7 @@ NX.launch = async function launch() {
     }
     renderPlan(state.planData);
     renderPreviewTT(pool.filter(c => c.selected).concat(state.candidateCourses), '当前已选');
+    NX.renderQueueSection();
     await renderStageAndDrafts();
     NX.finishLaunch({ ts: Date.now() }, selectedCourses.length, 0, false);
     NX.filterCourses();      // 初始落点：浏览模式第 1 页（1 个请求），随时查询
@@ -379,18 +382,23 @@ $('nextthuxk-refresh-queue').onclick = async () => {
   state.queueDataMap = qResult.map;
   state.isQueuePhase = qResult.phase || state.candidateCourses.length > 0;
   state.candidateCourses = await NX.fetchCandidateCourses();
+  if (state.candidateCourses.length) await NX.backfillCandidateMeta(state.candidateCourses).catch(e => console.warn(TAG, 'cand meta:', e));
   const candKeys = new Set(state.candidateCourses.map(c => c.code + '_' + String(c.seq || '0')));
   state.allCourses.forEach(c => { c.isCandidate = candKeys.has(c.code + '_' + String(c.seq || '0')); });
+  // 新候选入池（kbSearch 兜底来的不在池里——不入池则队列 chip 可见性断）
+  state.candidateCourses.forEach(c => {
+    if (!state.allCourses.some(ac => ac.code === c.code && String(ac.seq || '0') === String(c.seq || '0'))) state.allCourses.push({ ...c, isCandidate: true });
+  });
   // 池行余量合并（同 launch）
   state.allCourses.forEach(c => {
     const q = state.queueDataMap[c.code + '_' + String(c.seq || '0')];
     if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
   });
+  state.selVersion = (state.selVersion || 0) + 1;   // 预览缓存失效（候选集变了）
+  NX.rebuildCourseMap();
   filterCourses();
-  renderPreviewTT(
-    state.allCourses.filter(c => c.selected).concat(state.candidateCourses.filter(cc => !state.allCourses.some(ac => ac.selected && ac.code === cc.code))),
-    '当前已选'
-  );
+  NX.renderQueueSection();
+  renderPreviewTT(NX.getPreviewCourses(), '当前已选');
   if (btn) { btn.textContent = '刷新队列'; btn.disabled = false; }
   showXkResult({ ok: true, msg: '队列数据已刷新 · ' + Object.keys(state.queueDataMap).length + '门课余量 · ' + state.candidateCourses.length + '门我的队列' });
 };
