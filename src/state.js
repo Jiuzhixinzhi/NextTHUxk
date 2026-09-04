@@ -241,6 +241,30 @@ NX.backfillSelTimes = async function () {
   } catch (e) { console.warn(NX.TAG, '回填后预览重渲:', e); }
 };
 
+// ─── 课表时间持久缓存（knote：用户三十二报「暂存的时候把时间暂存起来不行吗」）───
+// 凡见过能解析的时间/说明列就记下（chrome.storage.local，跨会话），预览 join 时
+// 池里没有就用缓存兜底。外校课时间只在 kkxxSearch 说明列出现过一次也能永远用。
+NX.knoteLoad = async function () {
+  try {
+    const v = await NX.store.get('knote');
+    NX.state.knote = (v && typeof v === 'object') ? v : {};
+  } catch (e) { NX.state.knote = {}; }
+  return NX.state.knote;
+};
+let _knoteSaveT = null;
+NX.knoteRemember = function (code, seq, note, time) {
+  const parses = (NX.parseTimeSlots(time || '').length > 0)
+    || (NX.clockRangesOf(note || '', time || '').length > 0);
+  if (!code || !parses) return;
+  const kn = NX.state.knote || (NX.state.knote = {});
+  const k = code + '_' + (seq || '0');
+  const ex = kn[k];
+  if (ex && (ex.note || '') === (note || '') && (ex.time || '') === (time || '')) return;
+  kn[k] = { note: note || '', time: time || '' };
+  if (_knoteSaveT) clearTimeout(_knoteSaveT);
+  _knoteSaveT = setTimeout(() => { _knoteSaveT = null; try { NX.store.set('knote', kn); } catch (e) {} }, 400);
+};
+
 // OneTHU buildRows join（xklogic.ts catByCode.get(s.code) 原样移植）：
 // 已选/候补/暂存行时间解析不出 → 当场按课号借池行（同课号任意班次）的
 // note/time 合成预览行。每次渲染现算，不依赖回填时序——池里有目录行
@@ -258,11 +282,14 @@ NX.previewJoinRows = function (rows) {
   return rows.map(s => {
     if (NX.parseTimeSlots(s.time || '').length > 0 || NX.clockRangesOf(s.note || s.xkTextNote || '', s.time || '').length > 0) return s;
     const c0 = catByCode.get(s.code) || fallbackByCode.get(s.code);
-    if (!c0) return s;
+    const kn = NX.state.knote || {};
+    const knoteHit = c0 || kn[s.code + '_' + (s.seq || '0')]
+      || Object.keys(kn).map(k => kn[k] && k.indexOf(s.code + '_') === 0 ? kn[k] : null).filter(Boolean)[0];
+    if (!knoteHit) return s;
     return Object.assign({}, s, {
-      time: NX.parseTimeSlots(s.time || '').length ? s.time : (c0.time || s.time || ''),
-      note: c0.note || s.note || '',
-      xkTextNote: c0.xkTextNote || s.xkTextNote || '',
+      time: NX.parseTimeSlots(s.time || '').length ? s.time : (knoteHit.time || s.time || ''),
+      note: knoteHit.note || s.note || '',
+      xkTextNote: knoteHit.xkTextNote || knoteHit.note || s.xkTextNote || '',
     });
   });
 };
@@ -534,6 +561,7 @@ NX.addToStage = function (code, seq, flag, zy) {
   const { allCourses, stageCart } = state;
   const c = allCourses.find(x => x.code === code && String(x.seq || '0') === String(seq || '0'));
   if (!c) return;
+  NX.knoteRemember(c.code, c.seq, c.note || c.xkTextNote || '', c.time || '');   // 暂存的时候把时间暂存起来
   if (stageCart.some(s => s.code === code && String(s.seq) === String(seq || '0'))) {
     showXkResult({ ok: false, msg: '该课程已在暂存区' }); return;
   }

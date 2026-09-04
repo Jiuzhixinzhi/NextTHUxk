@@ -325,6 +325,7 @@ NX.launch = async function launch() {
     state.candidateCourses.forEach(c => {
       if (!pool.some(p => p.code === c.code && String(p.seq) === String(c.seq))) pool.push({ ...c, isCandidate: true });
     });
+    await NX.knoteLoad().catch(e => console.warn(TAG, 'knote:', e));   // 课表时间持久缓存先于首渲
     state.allCourses = pool;
     NX.rebuildCourseMap();   // code+seq → course 索引，渲染/查询统一 O(1)
     NX.applyLevelMap(pool);  // 池行类型补齐（必修/限选 chip + 提交选课 flag 用）

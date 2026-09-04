@@ -1344,6 +1344,7 @@ NX.mergeServerRows = function (rows) {
     // 新行的 note/time 借给它。本校多班次不受影响（已选行自带可解析时间，
     // parses 拦住）。先补 note；仍解析不出才换 time。
     if (parses(r)) {
+      NX.knoteRemember(r.code, r.seq, r.note || r.xkTextNote || '', r.time || '');   // 持久缓存：暂存的时候把时间暂存起来
       const borrowers = (borrowersByCode.get(r.code) || []).filter(ex2 => ex2 !== ex && !parses(ex2));
       for (const ex2 of borrowers) {
         if (!ex2.note && r.note) { ex2.note = r.note; filled++; }
