@@ -1302,6 +1302,14 @@ NX.mergeServerRows = function (rows) {
     if (!seen.has(k)) { state.allCourses.push(r); seen.add(k); added++; }
   }
   NX.applyLevelMap(rows);
+  // 搜索行属性探针（用户十六报）：每次搜索自动打——几行有属性、逐行命中否，
+  // 键错位（课序号两套编号疑点：tab 10430494_1 vs kkxx 7课序）一眼定论
+  if (rows.length) {
+    const wa = rows.filter(r => r.attr).length;
+    console.log(NX.TAG, 'server rows 属性: ' + wa + '/' + rows.length + ' | 样例: ' +
+      rows.slice(0, 3).map(r => r.code + '_' + (r.seq || '0') + '→' + (r.attr || '空') +
+        ((state.levelMap || {})[r.code + '_' + NX.normSeq(r.seq)] ? '(键命中)' : '(键未命中)')).join(' , '));
+  }
   if (NX.tbAttach) { try { NX.tbAttach(rows); } catch (e) {} }   // fail-soft
   // 志愿统计：已拉数据立刻应用到本批渲染行（launch 只把数据写进了池内
   // 旧行——搜索/跳转回来的新行对象此前永远拿不到，全卡「无数据」，

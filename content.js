@@ -304,7 +304,7 @@ NX.launch = async function launch() {
       const sr = state._searchRows || [];
       const withAttr = sr.filter(r => r.attr).length;
       if (badge) badge.textContent = '类型源: 分类 ' + nCat + ' · 课表 ' + nLv + ' · 当前行 ' + withAttr + '/' + sr.length + ' 有属性' + ((nCat + nLv) ? '' : '（空！点击重试）');
-      if (nCat) console.log(TAG, 'category keys 样例:', Object.keys(catAttrs).slice(0, 6).join(' , '));
+      if (nCat) console.log(TAG, 'category 全部键（' + nCat + '）:', Object.keys(catAttrs).join(' , '));
     }
     // 竞态修复：启动窗口内已渲染的搜索行也补上属性/志愿（此前只补池行）
     if (state._searchRows && state._searchRows.length) {
