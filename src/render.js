@@ -1200,7 +1200,18 @@ NX.runServerSearch = async function () {
         || opts.rxklxm || opts.kctsm || opts.onlyAvailable || opts.gradAvail);
       if (!queryMode) opts.page = state._browsePage || 1;   // 浏览模式：单页
       try {
-        const res = queryMode ? await NX.serverSearchStorm(opts) : await NX.serverSearch(opts);
+        let res = queryMode ? await NX.serverSearchStorm(opts) : await NX.serverSearch(opts);
+        // 外校课号 p_kch 搜不到（教务课号索引不含 PK/GPK/BW 前缀课号，用户实测：
+        // 跳转/搜索框输入 BW3w0008 显示无结果）→ 池里有这门课（已选/暂存/跳转
+        // 来源都带课名）→ 自动换课名重搜，卡片/回填链路全恢复
+        if (queryMode && opts.kch && !(res.rows || []).length) {
+          const poolHit = state.allCourses.find(c => c.name && (c.code === opts.kch || c.code.startsWith(opts.kch)));
+          if (poolHit) {
+            console.log(NX.TAG, '课号 0 行 → 课名重搜:', opts.kch, '→', poolHit.name);
+            const res2 = await NX.serverSearchStorm(Object.assign({}, opts, { kch: '', kcm: poolHit.name }));
+            if ((res2.rows || []).length) { res = res2; opts.kcm = poolHit.name; }
+          }
+        }
         // 搜索结果带核心池标记渲染（选中/候补徽章与按钮状态一致）
         const selKeys = new Set(state.allCourses.filter(c => c.selected).map(c => c.code + '_' + (c.seq || '0')));
         const candKeys = new Set(state.candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
