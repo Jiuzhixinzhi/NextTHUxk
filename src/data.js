@@ -998,12 +998,15 @@ NX.applyLevelMap = function (rows) {
   // 网格没有属性列（OneTHU/v1.5.0 解析器都置 attr=''），方案内课（微积分等
   // 必修）的三行网格全靠这条——重写时被我弄丢，用户十三报实锤「除已选外
   // 只剩任选」。方案外课维持任选（本来就该这么选）。
-  let planAttr = state._planAttrByCode;
-  if (!planAttr) {
-    planAttr = {};
-    (state.planData || []).forEach(p => { if (p.code && p.attr) planAttr[p.code] = p.attr; });
-    state._planAttrByCode = planAttr;
+  // planData 晚到/刷新时重建索引（启动竞态：首次调用可能先于 planData 就位，
+  // 空索引曾被永久缓存——方案回填整条死链）
+  if (!state._planAttrByCode || state._planAttrSrc !== state.planData) {
+    const pa = {};
+    (state.planData || []).forEach(p => { if (p.code && p.attr) pa[p.code] = p.attr; });
+    state._planAttrByCode = pa;
+    state._planAttrSrc = state.planData;
   }
+  const planAttr = state._planAttrByCode;
   (rows || []).forEach(c => {
     const e = map[c.code + '_' + NX.normSeq(c.seq)];
     if (e) {

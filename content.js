@@ -264,7 +264,10 @@ NX.launch = async function launch() {
           NX.applyLevelMap(NX.state.allCourses);
           if (NX.state._searchRows && NX.state._searchRows.length) NX.applyLevelMap(NX.state._searchRows);
           NX.filterCourses();
-          badge.textContent = '类型源: 分类 tab ' + Object.keys(cat).length + ' 门（已刷新）';
+          const sr2 = (NX.state._searchRows || []);
+          const wa2 = sr2.filter(r => r.attr).length;
+          badge.textContent = '类型源: 分类 ' + Object.keys(cat).length + ' · 当前行 ' + wa2 + '/' + sr2.length + ' 有属性（已刷新）';
+          console.log('[NextTHUxk] 重试后样例键:', Object.keys(cat).slice(0, 6).join(' , '), '| 首行:', sr2[0] ? (sr2[0].code + '_' + sr2[0].seq + ' → ' + (sr2[0].attr || '空')) : '无');
         } catch (e) {
           badge.textContent = '类型源: 拉取失败（' + (e && e.message || e) + '）';
         }
@@ -297,7 +300,11 @@ NX.launch = async function launch() {
       const badge = document.getElementById('nx-type-src');
       const nCat = Object.keys(catAttrs || {}).length;
       const nLv = Object.keys(levelMap || {}).length;
-      if (badge) badge.textContent = '类型源: 分类 tab ' + nCat + ' 门 · 一级课表 ' + nLv + ' 门' + (nCat + nLv ? '' : '（空！点击重试）');
+      // 探针：当前渲染行有几门带属性（端到端测管线；0 = 键错位/未应用）
+      const sr = state._searchRows || [];
+      const withAttr = sr.filter(r => r.attr).length;
+      if (badge) badge.textContent = '类型源: 分类 ' + nCat + ' · 课表 ' + nLv + ' · 当前行 ' + withAttr + '/' + sr.length + ' 有属性' + ((nCat + nLv) ? '' : '（空！点击重试）');
+      if (nCat) console.log(TAG, 'category keys 样例:', Object.keys(catAttrs).slice(0, 6).join(' , '));
     }
     // 竞态修复：启动窗口内已渲染的搜索行也补上属性/志愿（此前只补池行）
     if (state._searchRows && state._searchRows.length) {
