@@ -18,17 +18,36 @@ body {
   background: linear-gradient(160deg, #f4f6fa 0%, #eef1f7 55%, #e9edf5 100%);
 }
 .othu-logo {
-  display: inline-flex;
-  align-items: baseline;
+  display: inline-grid;
+  grid-template-columns: auto auto auto auto auto;
   line-height: 1;
-  white-space: nowrap;
+  text-align: center;
 }
-.othu-logo .lp { font-family: "SF Mono", Menlo, Consolas, monospace; font-weight: 400; transform: scaleY(1.06); }
-.othu-logo .ow { font-family: Georgia, "Playfair Display", serif; font-weight: 500; font-size: 1.14em; letter-spacing: -.035em; margin-right: .16em; }
-.othu-logo .tu { font-family: Inter, "SF Pro Display", system-ui, sans-serif; font-weight: 800; }
+.othu-logo .lp {
+  font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  font-weight: 400;
+  transform: scaleY(1.06);
+}
+.othu-logo .word {
+  grid-column: 2 / 5;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: Georgia, "Playfair Display", "Times New Roman", serif;
+  font-weight: 500;
+  font-size: 1.14em;
+  letter-spacing: -.035em;
+  line-height: 1;
+}
+.othu-logo .word i { font-style: normal; display: block; }
+.othu-logo .tu {
+  font-family: Inter, "SF Pro Display", "Helvetica Neue", system-ui, -apple-system, sans-serif;
+  font-weight: 800;
+  letter-spacing: -.01em;
+}
 .logo {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 7px;
   font-size: 16px;
   font-weight: 400;
@@ -74,7 +93,7 @@ body {
 </style>
 </head>
 <body>
-<div class="logo"><span class="othu-logo" style="font-size:15px"><span class="lp">(</span><span class="ow">One</span><span class="tu">THU</span><span class="lp">)</span></span>NextTHUxk</div>
+<div class="logo"><span class="othu-logo" style="font-size:15px"><span class="lp">(</span><span class="word"><i>O</i><i>n</i><i>e</i></span><span></span><span class="lp"> </span><span class="tu">T</span><span class="tu">H</span><span class="tu">U</span><span class="lp">)</span></span>NextTHUxk</div>
 <div class="sub">下一代选课 · AI 智能辅助</div>
 <div id="status" class="status">检测中…</div>
 <button class="btn" id="launch">启动选课工作台</button>

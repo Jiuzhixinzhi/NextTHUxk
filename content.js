@@ -49,7 +49,7 @@ const HTML = `
   </filter>
 </svg>
 <div id="nextthuxk-inner">
-  <button id="nextthuxk-launch" title="启动 NextTHUxk 下一代选课"><span class="othu-logo"><span class="lp">(</span><span class="ow">One</span><span class="tu">THU</span><span class="lp">)</span></span><span>NextTHUxk</span></button>
+  <button id="nextthuxk-launch" title="启动 NextTHUxk 下一代选课"><span class="othu-logo" style="font-size:13px"><span class="lp">(</span><span class="word"><i>O</i><i>n</i><i>e</i></span><span></span><span class="lp"> </span><span class="tu">T</span><span class="tu">H</span><span class="tu">U</span><span class="lp">)</span></span><span>NextTHUxk</span></button>
   <div id="nextthuxk-toast" class="nx-toast"></div>
   <div id="nextthuxk-dashboard">
   <div class="nx-modal-mask" id="nextthuxk-modal">
@@ -74,7 +74,7 @@ const HTML = `
     </div>
   </div>
     <div class="nx-header">
-      <div class="nx-logo"><span class="othu-logo"><span class="lp">(</span><span class="ow">One</span><span class="tu">THU</span><span class="lp">)</span></span><span>NextTHUxk</span><span id="nx-build-tag" style="font-size:9px;color:rgba(255,255,255,.35);margin-left:8px;letter-spacing:.5px">${NX.BUILD || ''}</span> <span id="nextthuxk-phase-tag" style="display:none;font-size:11px;background:rgba(47,107,255,.1);color:var(--nx-accent);padding:2px 8px;border-radius:4px;margin-left:6px"></span></div>
+      <div class="nx-logo"><span class="othu-logo" style="font-size:14px"><span class="lp">(</span><span class="word"><i>O</i><i>n</i><i>e</i></span><span></span><span class="lp"> </span><span class="tu">T</span><span class="tu">H</span><span class="tu">U</span><span class="lp">)</span></span><span>NextTHUxk</span><span id="nx-build-tag" style="font-size:9px;color:rgba(255,255,255,.35);margin-left:8px;letter-spacing:.5px">${NX.BUILD || ''}</span> <span id="nextthuxk-phase-tag" style="display:none;font-size:11px;background:rgba(47,107,255,.1);color:var(--nx-accent);padding:2px 8px;border-radius:4px;margin-left:6px"></span></div>
       <div style="display:flex;gap:8px;align-items:center">
         <span id="nextthuxk-cache-info" style="font-size:11px;color:var(--nx-ink-soft)"></span>
         <button id="nextthuxk-sem" class="nx-ghost-btn" title="点击修改学期"></button>

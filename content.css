@@ -1,22 +1,27 @@
 /* OneTHU 字标（照 OneTHU global.css .brand-logo 三字体混排：等线括号+衬线 One+粗黑 THU） */
 .othu-logo {
-  display: inline-flex;
-  align-items: baseline;
+  display: inline-grid;
+  grid-template-columns: auto auto auto auto auto;
   line-height: 1;
-  white-space: nowrap;
+  text-align: center;
 }
 .othu-logo .lp {
   font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
   font-weight: 400;
   transform: scaleY(1.06);
 }
-.othu-logo .ow {
+.othu-logo .word {
+  grid-column: 2 / 5;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
   font-family: Georgia, "Playfair Display", "Times New Roman", serif;
   font-weight: 500;
   font-size: 1.14em;
   letter-spacing: -.035em;
-  margin-right: .16em;
+  line-height: 1;
 }
+.othu-logo .word i { font-style: normal; display: block; }
 .othu-logo .tu {
   font-family: Inter, "SF Pro Display", "Helvetica Neue", system-ui, -apple-system, sans-serif;
   font-weight: 800;
@@ -152,7 +157,7 @@
   font-weight: 400;
   color: var(--nx-ink);
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 .nx-logo-sub {
