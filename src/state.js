@@ -172,18 +172,23 @@ NX.renderQueueSection = function () {
 NX.backfillSelTimes = async function () {
   const { state } = NX;
   if (!state.isZhjwxk && !state.isWebvpn) return;
-  const tried = state._selTried || (state._selTried = new Set());
+  const tried = state._selTried || (state._selTried = new Map());   // code_seq → 已试次数
   const sel = state.allCourses.filter(c => c.selected && !c.isCandidate);
-  const need = sel.filter(r => {
-    const k = r.code + '_' + (r.seq || '0');
-    if (tried.has(k)) return false;
-    const slots = (NX.parseTimeSlots(r.time || '') || []).length;
-    const clock = (NX.clockRangesOf(r.note || r.xkTextNote || '', r.time || '') || []).length;
-    return slots === 0 && clock === 0;
-  });
-  if (!need.length) return;
-  need.forEach(r => tried.add(r.code + '_' + (r.seq || '0')));
-  console.log(NX.TAG, '已选时间回填:', need.map(r => r.code + '_' + (r.seq || '0')).join(','));
+  const unparsed = sel.filter(r =>
+    (NX.parseTimeSlots(r.time || '') || []).length === 0 &&
+    (NX.clockRangesOf(r.note || r.xkTextNote || '', r.time || '') || []).length === 0);
+  const need = unparsed.filter(r => (tried.get(r.code + '_' + (r.seq || '0')) || 0) < 2);
+  if (!need.length) {
+    if (unparsed.length && !state._selBfLogged) {
+      state._selBfLogged = true;
+      console.log(NX.TAG, '已选时间回填: 无可查——' + unparsed.length + ' 门解析不出（' +
+        unparsed.map(r => r.code + '_' + (r.seq || '0') + ' time=[' + (r.time || '') + '] note=[' + ((r.note || r.xkTextNote) || '') + ']').join(' ; ') +
+        '），已试 ' + [...tried.entries()].filter(e => e[1] > 0).map(e => e[0]).join(','));
+    }
+    return;
+  }
+  need.forEach(r => { const k = r.code + '_' + (r.seq || '0'); tried.set(k, (tried.get(k) || 0) + 1); });
+  console.log(NX.TAG, '已选时间回填: 查 ' + need.map(r => r.code + '_' + (r.seq || '0')).join(','));
   const outcome = [];
   for (let i = 0; i < need.length; i += 5) {
     await Promise.all(need.slice(i, i + 5).map(async r => {

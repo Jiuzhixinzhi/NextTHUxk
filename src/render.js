@@ -394,6 +394,11 @@ NX.renderPreviewTT = function (courses, label) {
       undet.push({ lbl, ci, code: c.code, seq: c.seq || '0', credits: c.credits || 0, zy: c.zy || 0, manual: !!c.manual, id: c.id });
       console.log(NX.TAG, '时间未定 ' + c.code + '_' + (c.seq || '0') + ' time=[' + (c.time || '') + '] note=[' + ((c.note || c.xkTextNote) || '') + ']');
     }
+    // 未定课存在 → 防抖触发已选时间回填（launch 时可能查询失败/数据未就绪，
+    // 这里给每门课第二次机会；tried 计数两试封顶，不会循环）
+    if (undet.some(u => !u.manual) && NX.backfillSelTimes && !NX._undetBfT) {
+      NX._undetBfT = setTimeout(() => { NX._undetBfT = null; NX.backfillSelTimes().catch(e => console.warn(NX.TAG, '已选时间回填失败:', e)); }, 800);
+    }
   });
   // 同日重叠分道（OneTHU d822563 重叠簇制）：簇 = 首尾相接/重叠的块序列，
   // 簇内独立分道，lanes = 本簇深度；孤立块满宽。绝不用全日总道数劈半天。
