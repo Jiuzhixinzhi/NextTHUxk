@@ -430,9 +430,11 @@ NX.fetchVolCourse = async function (code) {
   const html = await fetchPage(state.BASE + '/xkBks.xkBksZytjb.do', {
     method: 'POST', credentials: 'include',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: 'm=tbzySearchBR&page=1&token=' + encodeURIComponent(token)
+    // 存档 doQuery 实锤：新查询 page="-1"（重置分页语义），p_sort.asc*
+    // 真值是 "true" 不是 "asc"——此前非法表单被服务器整体拒绝（0 行）
+    body: 'm=tbzySearchBR&page=-1&token=' + encodeURIComponent(token)
       + '&p_xnxq=' + encodeURIComponent(state.SEM)
-      + '&p_sort.p1=&p_sort.p2=&p_sort.asc1=asc&p_sort.asc2=asc'
+      + '&p_sort.p1=&p_sort.p2=&p_sort.asc1=true&p_sort.asc2=true'
       + '&p_kch=' + encodeURIComponent(code) + '&p_kcm=&p_lrdwnm=',
   });
   const all = NX.parseVolFromHtml(html);
