@@ -463,7 +463,11 @@ NX.renderPreviewTT = function (courses, label) {
   h += '</div>';
   // 时间未定课程单列（#16）
   if (undet.length) {
-    h += '<div style="margin-top:10px;font-size:11px;color:var(--nx-faint)">时间未定 / 无固定时段（' + undet.length + ' 门，不含在上方网格中）</div>' +
+    const bf = (NX.state && NX.state._bfStatus) || {};
+    const bfLine = undet.filter(u => !u.manual).map(u => bf[u.code] || '').filter(Boolean).join('，');
+    h += '<div style="margin-top:10px;font-size:11px;color:var(--nx-faint)">时间未定 / 无固定时段（' + undet.length + ' 门，不含在上方网格中）' +
+      '<button type="button" id="nx-undet-retry" style="margin-left:8px;background:rgba(47,107,255,.12);border:none;color:var(--nx-accent);border-radius:4px;padding:1px 8px;cursor:pointer;font-size:10px">重试解析</button>' +
+      (bfLine ? '<span style="margin-left:8px;color:var(--nx-ink-soft)">回填：' + esc(bfLine) + '</span>' : '') + '</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">' +
       undet.map(u => '<span class="nx-tt-undet" data-code="' + esc(u.code) + '" data-seq="' + esc(u.seq) + '" title="点击移除">' +
         esc(u.lbl) + ' · ' + u.credits + '学分' + (u.zy ? ' · 第' + u.zy + '志愿' : '') + ' <i>✕</i></span>').join('') +
@@ -494,6 +498,16 @@ NX.renderPreviewTT = function (courses, label) {
   el.querySelectorAll('.nx-tta-b.nx-tt-jump').forEach(bEl => {
     bEl.onclick = () => NX.jumpToCourse(bEl.dataset.code, bEl.dataset.seq);
   });
+  const retryBtn = el.querySelector('#nx-undet-retry');
+  if (retryBtn) retryBtn.onclick = () => {
+    retryBtn.textContent = '查询中…';
+    const st = NX.state;
+    const tried = st._selTried || (st._selTried = new Map());
+    undet.filter(u => !u.manual).forEach(u => tried.set(u.code + '_' + (u.seq || '0'), 0));   // 清计数重试
+    st._bfScanP = null;   // 浏览扫描缓存作废重扫
+    st._selBfLogged = false;
+    if (NX.backfillSelTimes) NX.backfillSelTimes().catch(e => console.warn(NX.TAG, '已选时间回填失败:', e));
+  };
   el.querySelectorAll('.nx-tt-undet').forEach(chip => {
     chip.onclick = () => handlePreviewRemove(chip.dataset.code, chip.dataset.seq);
   });

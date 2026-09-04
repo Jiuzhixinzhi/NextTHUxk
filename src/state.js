@@ -188,6 +188,9 @@ NX.backfillSelTimes = async function () {
     return;
   }
   need.forEach(r => { const k = r.code + '_' + (r.seq || '0'); tried.set(k, (tried.get(k) || 0) + 1); });
+  const bfStatus = state._bfStatus || (state._bfStatus = {});
+  need.forEach(r => { bfStatus[r.code] = '查询中'; });
+  try { NX.invalidatePreview(); if (state.previewMode === 'selected') NX.renderPreviewTT(NX.getPreviewCourses(), (state.$('nextthuxk-preview-info') || {}).textContent || '当前已选'); } catch (e) {}
   console.log(NX.TAG, '已选时间回填: 查 ' + need.map(r => r.code + '_' + (r.seq || '0')).join(','));
   const outcome = [];
   for (let i = 0; i < need.length; i += 5) {
@@ -223,17 +226,19 @@ NX.backfillSelTimes = async function () {
         }
         let hit = rows.find(c => c.code === r.code && String(c.seq || '0') === String(r.seq || '0'));
         if (!hit) hit = rows.find(c => c.code === r.code);   // 课序号对不上（两套编号）也认课号唯一行
-        if (hit) { NX.mergeServerRows([hit]); outcome.push(r.code + '✓'); }
-        else outcome.push(r.code + '×(搜到' + rows.length + '行无匹配)');
-      } catch (e) { outcome.push(r.code + '×(' + (e && e.message || e) + ')'); }
+        if (hit) { NX.mergeServerRows([hit]); outcome.push(r.code + '✓'); bfStatus[r.code] = '✓已上轴'; }
+        else { outcome.push(r.code + '×(搜到' + rows.length + '行无匹配)'); bfStatus[r.code] = '×搜到' + rows.length + '行无匹配'; }
+      } catch (e) { outcome.push(r.code + '×(' + (e && e.message || e) + ')'); bfStatus[r.code] = '×' + ((e && e.message || e) + '').slice(0, 30); }
     }));
     if (i + 5 < need.length) await new Promise(res => setTimeout(res, 60));
   }
   console.log(NX.TAG, '已选时间回填结果:', outcome.join(' , ') || '无');
+  // 无论成败结尾必重渲（用户三十报实锤：状态行只在重渲时显示，失败时不重渲
+  // = 状态永远憋在内存里，「点重试啥也没看见」）
   NX.invalidatePreview();
   try {
     if (NX.state.previewMode === 'selected') NX.renderPreviewTT(NX.getPreviewCourses(), (NX.state.$('nextthuxk-preview-info') || {}).textContent || '当前已选');
-  } catch (e) {}
+  } catch (e) { console.warn(NX.TAG, '回填后预览重渲:', e); }
 };
 
 NX.getPreviewCourses = function () {
