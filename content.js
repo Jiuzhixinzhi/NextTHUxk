@@ -398,26 +398,58 @@ NX.finishLaunch = function (sd, selCount, volTs, volRefreshed) {
 NX.renderCacheInfo = function (selCount) {
   const cacheEl = state.$('nextthuxk-cache-info');
   if (!cacheEl) return;
-  const next = state._nextVolSyncAt ? ' · 志愿/余量自动同步，下次 ' + NX.fmtTime(new Date(state._nextVolSyncAt)) : '';
+  const next = state._nextVolSyncAt ? ' · 志愿按教务检查点(8/12/16/20点)同步，下次 ' + NX.fmtTime(new Date(state._nextVolSyncAt)) : '';
   cacheEl.innerHTML = (state.isQueuePhase
     ? '课余量池内同步 ' + Object.keys(state.queueDataMap).length + ' 门 · 候补 ' + state.candidateCourses.length + ' 门 · 随时查询'
     : '随时查询模式 · 已选 ' + (selCount || state.allCourses.filter(c => c.selected).length) + ' 门 · 候补 ' + state.candidateCourses.length + ' 门') + next;
 };
 
-// 志愿/余量定时自动同步（用户：按钮删了，提醒下次刷新时间即可——数据本来就是实时爬的）
-NX.VOL_SYNC_MS = 5 * 60 * 1000;
+// 志愿/余量按教务固定检查点自动同步（插件本源，v1.5.0 update.js volNeedsRefresh 同款：
+// 每日 8/12/16/20 点）。按钮已删，顶栏提示下次检查点时间；到点自动同步。
+NX.VOL_CHECKPOINTS = [8, 12, 16, 20];
+NX.volNeedsRefresh = function (ts) {   // v1.5.0 原样移植
+  if (!ts) return true;
+  const now = new Date();
+  let lastUpdate = new Date(now);
+  lastUpdate.setHours(NX.VOL_CHECKPOINTS[0], 0, 0, 0);
+  for (let i = NX.VOL_CHECKPOINTS.length - 1; i >= 0; i--) {
+    const t = new Date(now);
+    t.setHours(NX.VOL_CHECKPOINTS[i], 0, 0, 0);
+    if (now >= t) { lastUpdate = t; break; }
+    if (i === 0) {
+      lastUpdate = new Date(now);
+      lastUpdate.setDate(lastUpdate.getDate() - 1);
+      lastUpdate.setHours(NX.VOL_CHECKPOINTS[NX.VOL_CHECKPOINTS.length - 1], 0, 0, 0);
+    }
+  }
+  return ts < lastUpdate.getTime();
+};
+NX.nextVolCheckpoint = function (now) {
+  const d = new Date(now);
+  for (const h of NX.VOL_CHECKPOINTS) {
+    const t = new Date(d);
+    t.setHours(h, 0, 0, 0);
+    if (t > d) return t;
+  }
+  const t = new Date(d);
+  t.setDate(t.getDate() + 1);
+  t.setHours(NX.VOL_CHECKPOINTS[0], 0, 0, 0);
+  return t;
+};
 NX.startVolAutoSync = function () {
   if (state._volSyncStarted) return;
   state._volSyncStarted = true;
-  const tick = async () => {
-    try { await NX.syncQueueAndVol(); } catch (e) { console.warn(TAG, '志愿自动同步:', e); }
-    state._nextVolSyncAt = Date.now() + NX.VOL_SYNC_MS;
+  const schedule = () => {
+    const next = NX.nextVolCheckpoint(Date.now());
+    state._nextVolSyncAt = next.getTime();
     NX.renderCacheInfo();
-    state._volSyncT = setTimeout(tick, NX.VOL_SYNC_MS);
+    state._volSyncT = setTimeout(async () => {
+      try { await NX.syncQueueAndVol(); } catch (e) { console.warn(TAG, '志愿检查点同步:', e); }
+      state._lastVolSyncAt = Date.now();
+      schedule();
+    }, Math.max(1000, next.getTime() - Date.now()));
   };
-  state._nextVolSyncAt = Date.now() + NX.VOL_SYNC_MS;
-  NX.renderCacheInfo();
-  state._volSyncT = setTimeout(tick, NX.VOL_SYNC_MS);
+  schedule();
 };
 
 // ─── Event Bindings ───────────────────────────────────────────
