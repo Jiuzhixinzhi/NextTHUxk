@@ -178,7 +178,11 @@ NX.currentProbLine = function (course, flag, zy) {
 };
 
 NX.fullProbGrid = function (courseOrAc, bf) {
-  const aFlags = NX.allowedFlags(bf);
+  // 显示侧全开（用户十六报拍板）：志愿统计本就是全校公开数据（教务志愿
+  // 查询页人人可看）——必修/限选/任选 三行永远全显，非池内课也能看别
+  // 人的竞争；体育课走体育志愿单行。提交身份下拉仍是池子语义（教务
+  // 不收池外必修），只是纯展示不再收窄。
+  const aFlags = NX.isSportsCourse(courseOrAc) ? ['ty'] : ['bx', 'xx', 'rx'];
   const rows = [];
   for (const f of aFlags) {
     const cells = [];
