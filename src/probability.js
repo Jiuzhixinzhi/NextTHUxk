@@ -27,12 +27,24 @@ NX.volColor = function (course) {
 
 NX.parseVolArr = function (s) {
   if (!s) return null;
-  const priMatch = String(s).match(/^\((\d+)\)/);
+  const str = String(s);
+  const priMatch = str.match(/^\((\d+)\)/);
   const pri = priMatch ? parseInt(priMatch[1]) : 0;
-  const cleaned = String(s).replace(/^\(\d+\)/, '');
-  const nums = cleaned.match(/\d+/g);
-  if (!nums || nums.length < 3) return null;
-  const arr = nums.slice(0, 3).map(n => parseInt(n, 10) || 0);
+  const cleaned = str.replace(/^\(\d+\)/, '').trim();
+  const nums = cleaned ? cleaned.match(/\d+/g) : null;
+  if (!nums || !nums.length) {
+    // 纯优先志愿「(N)」：无分级数据，仅优先人数
+    return pri > 0 ? Object.assign([0, 0, 0], { priority: pri }) : null;
+  }
+  // 志愿串 = 当前阶段开放志愿级的密集列表（从高到低）：
+  //   3 个 = 一/二/三志愿（旧全阶段「(1)2，4，5」）
+  //   1 个 = 仅第三志愿（新生预选：只开放第三志愿+优先志愿「(1)2」/「2」）
+  // 缺的高志愿位补 0（该阶段没人能填）。绝不再因数量 <3 整串判 null
+  // （旧版就是这里把新生预选的志愿数据全吃了）。
+  const vals = nums.map(n => parseInt(n, 10) || 0);
+  const arr = [0, 0, 0];
+  const base = 3 - Math.min(3, vals.length);
+  for (let i = 0; i < Math.min(3, vals.length); i++) arr[base + i] = vals[i];
   arr.priority = pri;
   return arr;
 };
