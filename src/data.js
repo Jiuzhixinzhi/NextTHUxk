@@ -417,6 +417,31 @@ NX.deptCodeOf = function (dept) {
   return hit ? NX.DEPT_CODES[hit] : '';
 };
 
+// 定向课号志愿查询（用户二十报：070 分院视图不含心智探秘——开课系
+// 显示社科学院但分院页就是没有它这行；不分院的完整列表里有）。BR 表
+// 单自带 p_kch 课号查询框：POST token+p_kch 即可精确拉该课全部课序的
+// 志愿行。只保留请求课号的行，服务器若忽略 p_kch 返回大列表也不污染。
+NX.fetchVolCourse = async function (code) {
+  const { state, fetchPage } = NX;
+  if (!state.isZhjwxk) return {};
+  const url = state.BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchBR&p_xnxq=' + state.SEM;
+  const fh = await fetchPage(url);
+  const token = (fh.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';
+  const html = await fetchPage(state.BASE + '/xkBks.xkBksZytjb.do', {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'm=tbzySearchBR&page=1&token=' + encodeURIComponent(token)
+      + '&p_xnxq=' + encodeURIComponent(state.SEM)
+      + '&p_sort.p1=&p_sort.p2=&p_sort.asc1=asc&p_sort.asc2=asc'
+      + '&p_kch=' + encodeURIComponent(code) + '&p_kcm=&p_lrdwnm=',
+  });
+  const all = NX.parseVolFromHtml(html);
+  const out = {};
+  for (const k of Object.keys(all)) if (all[k].code === String(code)) out[k] = all[k];
+  console.log(NX.TAG, 'volunteer 定向课号', code + ':', Object.keys(out).length, '行');
+  return out;
+};
+
 NX.fetchVolunteer = async function (courses, opts) {
   const { state, fetchPage, pagedFetch } = NX;
   if (!state.isZhjwxk) return {};
@@ -1329,6 +1354,20 @@ NX.mergeServerRows = function (rows) {
                 extra = await NX.fetchVolunteer(missing, { force: true }) || {};
                 state.volMap = Object.assign({}, state.volMap, extra);
               } catch (e2) { console.warn(NX.TAG, 'volunteer 缺行重拉失败', e2); }
+              // 分院页都没有（用户二十报：心智探秘在 070 分院视图缺行）
+              // → 逐课 p_kch 定向查询（每课每会话一次）
+              for (const r of missing) {
+                if (state.volMap[nk(r)]) continue;
+                if (retried['k:' + r.code]) continue;
+                retried['k:' + r.code] = 1;
+                try {
+                  const m2 = await NX.fetchVolCourse(r.code);
+                  if (Object.keys(m2).length) {
+                    extra = Object.assign({}, extra, m2);
+                    state.volMap = Object.assign({}, state.volMap, m2);
+                  }
+                } catch (e3) { console.warn(NX.TAG, 'volunteer 定向课号查询失败', r.code, e3); }
+              }
             }
             if (!Object.keys(vol).length && !Object.keys(extra).length) return;
             // 全量 volMap 重放：applyVolunteer 的 else 分支无条件清空，
