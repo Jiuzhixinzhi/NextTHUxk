@@ -1053,8 +1053,9 @@ NX.filterCourses = function () {
     || so.rxklxm || so.kctsm || so.onlyAvailable || so.gradAvail);
   let show = list;
   if (searchMode) {
+    // 页码钳到筛选后实际页数（本地筛掉行后第N页可能越界出空页）
     const totalPages = state._searchTotalPages || Math.max(1, Math.ceil(list.length / NX.PAGE_SIZE));
-    const page = Math.min(Math.max(1, state._uiPage || 1), totalPages);
+    const page = Math.min(Math.max(1, state._uiPage || 1), Math.max(1, Math.ceil(list.length / NX.PAGE_SIZE)));
     state._uiPage = page;
     show = list.slice((page - 1) * NX.PAGE_SIZE, page * NX.PAGE_SIZE);
   }
@@ -1105,12 +1106,26 @@ NX.renderListFooter = function (o) {
   goInput.placeholder = '页码';
   let gotoPage, totalPages, curPage, nextDis;
   if (o.searchMode) {
-    totalPages = state._searchTotalPages || Math.max(1, Math.ceil(o.list.length / NX.PAGE_SIZE));
-    curPage = Math.min(Math.max(1, state._uiPage || 1), totalPages);
-    gotoPage = n => { state._uiPage = n; NX.filterCourses(); };
-    nextDis = curPage >= totalPages;
-    cur.textContent = '第 ' + curPage + ' 页 / 共 ' + totalPages + ' 页' +
-      (!state._searchIncomplete ? '（' + (state._searchTotalRows > 0 ? state._searchTotalRows + ' 条记录' : o.list.length + ' 门') + '）' : '');
+    // 本地筛选（冲突/学分/文字说明/可选 chip/课组）生效时：显示满足全部
+    // 条件的已加载页数+条数（用户三十六报：不再挂关键词 alone 的教务总数）
+    const fNow = state.shadow.querySelector('.nx-chip.on')?.dataset.f || 'all';
+    const clientFiltered = fNow === 'available' || $('nx-filter-conflict')?.value
+      || $('nx-filter-credits')?.value || ($('nx-filter-xknote')?.value || '').trim()
+      || state.activeGroup;
+    if (clientFiltered) {
+      totalPages = Math.max(1, Math.ceil(o.list.length / NX.PAGE_SIZE));
+      curPage = Math.min(Math.max(1, state._uiPage || 1), totalPages);
+      gotoPage = n => { state._uiPage = Math.min(n, totalPages); NX.filterCourses(); };
+      nextDis = curPage >= totalPages;
+      cur.textContent = '第 ' + curPage + ' 页 / 共 ' + totalPages + ' 页（当前条件 ' + o.list.length + ' 条）';
+    } else {
+      totalPages = state._searchTotalPages || Math.max(1, Math.ceil(o.list.length / NX.PAGE_SIZE));
+      curPage = Math.min(Math.max(1, state._uiPage || 1), totalPages);
+      gotoPage = n => { state._uiPage = n; NX.filterCourses(); };
+      nextDis = curPage >= totalPages;
+      cur.textContent = '第 ' + curPage + ' 页 / 共 ' + totalPages + ' 页' +
+        (!state._searchIncomplete ? '（' + (state._searchTotalRows > 0 ? state._searchTotalRows + ' 条记录' : o.list.length + ' 门') + '）' : '');
+    }
   } else {
     curPage = state._browsePage || 1;
     totalPages = state._searchTotalPages || 0;
