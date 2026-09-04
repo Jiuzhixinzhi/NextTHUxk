@@ -392,6 +392,7 @@ NX.renderPreviewTT = function (courses, label) {
     if (!n) {
       // 时间未定/无固定时段（如二级选课阶段才定时间的实验课）→ 单列展示
       undet.push({ lbl, ci, code: c.code, seq: c.seq || '0', credits: c.credits || 0, zy: c.zy || 0, manual: !!c.manual, id: c.id });
+      console.log(NX.TAG, '时间未定 ' + c.code + '_' + (c.seq || '0') + ' time=[' + (c.time || '') + '] note=[' + ((c.note || c.xkTextNote) || '') + ']');
     }
   });
   // 同日重叠分道（OneTHU d822563 重叠簇制）：簇 = 首尾相接/重叠的块序列，

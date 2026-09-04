@@ -1309,19 +1309,62 @@ NX.mergeServerRows = function (rows) {
   const { state } = NX;
   if (!rows || !rows.length) return 0;
   const byKey = new Map(state.allCourses.map(c => [c.code + '_' + (c.seq || '0'), c]));
-  let added = 0;
+  let added = 0, filled = 0;
+  // 可解析 = 大节或钟点任一通（用于「已有行是垃圾 time（列序兜底抓到课号等），
+  // 新行带来真能上轴的 time/note」时安全替换）
+  const parses = c => (NX.parseTimeSlots(c.time || '').length > 0)
+    || (NX.clockRangesOf(c.note || c.xkTextNote || '', c.time || '').length > 0);
+  // 借用候选索引（一次建好，避免风暴页合并 O(行×池) 放大）
+  const borrowersByCode = new Map();
+  for (const c of state.allCourses) {
+    if ((c.selected || c.isCandidate) && !parses(c)) {
+      if (!borrowersByCode.has(c.code)) borrowersByCode.set(c.code, []);
+      borrowersByCode.get(c.code).push(c);
+    }
+  }
   for (const r of rows) {
     const k = r.code + '_' + (r.seq || '0');
     const ex = byKey.get(k);
-    if (!ex) { state.allCourses.push(r); byKey.set(k, r); added++; continue; }
-    // 池内已有行：回填缺失字段（OneTHU join 池语义——搜索/回填行带来的
-    // note（外校时间）能落到已选课上；已有真值不动，绝不覆盖）
-    if (!ex.note && r.note) ex.note = r.note;
-    if (!ex.time && r.time) ex.time = r.time;
-    if (!ex.teacher && r.teacher) ex.teacher = r.teacher;
-    if (!ex.credits && r.credits) ex.credits = r.credits;
-    if (!ex.department && r.department) ex.department = r.department;
-    if (!ex.xkTextNote && r.xkTextNote) ex.xkTextNote = r.xkTextNote;
+    if (!ex) { state.allCourses.push(r); byKey.set(k, r); added++; }
+    else {
+      // 池内已有行：回填缺失字段（OneTHU join 池语义——搜索/回填行带来的
+      // note（外校时间）能落到已选课上；已有真值不动，绝不覆盖）
+      const before = ex.note + '|' + ex.time;
+      if (!ex.note && r.note) ex.note = r.note;
+      if (!ex.time && r.time) ex.time = r.time;
+      else if (!parses(ex) && parses(r)) ex.time = r.time || ex.time;   // 垃圾 time（如已选行列序兜底抓到课号）换真能解析的
+      if (!ex.teacher && r.teacher) ex.teacher = r.teacher;
+      if (!ex.credits && r.credits) ex.credits = r.credits;
+      if (!ex.department && r.department) ex.department = r.department;
+      if (!ex.xkTextNote && r.xkTextNote) ex.xkTextNote = r.xkTextNote;
+      if (before !== ex.note + '|' + ex.time) filled++;
+    }
+    // 课号借用（OneTHU buildRows catByCode.get(code) 同款）：已选/候补/暂存行
+    // 课序号与 kkxx 两套编号对不上（外校课实锤）而解析不出时间 → 按课号把
+    // 新行的 note/time 借给它。本校多班次不受影响（已选行自带可解析时间，
+    // parses 拦住）。先补 note；仍解析不出才换 time。
+    if (parses(r)) {
+      const borrowers = (borrowersByCode.get(r.code) || []).filter(ex2 => ex2 !== ex && !parses(ex2));
+      for (const ex2 of borrowers) {
+        if (!ex2.note && r.note) { ex2.note = r.note; filled++; }
+        if (!parses(ex2) && r.time) { ex2.time = r.time; filled++; }
+        if (!ex2.xkTextNote && (r.note || r.xkTextNote)) ex2.xkTextNote = r.note || r.xkTextNote;
+      }
+    }
+    // 暂存项同步（加暂存时 note 还没到——搜索/回填后落上，课表预览立即可用）
+    for (const st of (state.stageCart || [])) {
+      if (st.code === r.code && (String(st.seq || '0') === String(r.seq || '0') || !parses(st))) {
+        if (!st.note && (r.note || r.xkTextNote)) { st.note = r.note || r.xkTextNote; }
+        if (!st.time && r.time) st.time = r.time;
+      }
+    }
+  }
+  // 回填命中已有行 → 课表预览重渲（OneTHU 是 React 派生态自动重渲；插件
+  // 命令式渲染，这里必须显式刷——否则 note 到了课表还停在「时间未定」）
+  if (filled) {
+    NX.invalidatePreview();
+    try { NX.renderPreviewTT(NX.getPreviewCourses(), (state.$('nextthuxk-preview-info') || {}).textContent || '当前已选'); } catch (e) {}
+    console.log(NX.TAG, '池内行回填 time/note:', filled, '门 → 课表已刷新');
   }
   NX.applyLevelMap(rows);
   // 搜索行属性探针（用户十六报）：每次搜索自动打——几行有属性、逐行命中否，
