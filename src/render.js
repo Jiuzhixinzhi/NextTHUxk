@@ -899,7 +899,9 @@ NX.filterCourses = function () {
   ]);
   const sigChanged = serverSig !== state._serverSig;
   state._serverSig = serverSig;
-  const localChip = f === 'selected' || f === 'queue';
+  // 必修/限选/体育也是本地池过滤（用户二十二报：v1.5.0 语义——chip 过滤
+  // 课程池而非当前搜索行；搜索行是浏览快照，attr 覆盖稀疏，滤完必空）
+  const localChip = f === 'selected' || f === 'queue' || f === 'required' || f === 'elective' || f === 'sports';
 
   let list;
   if (localChip) {
@@ -913,10 +915,11 @@ NX.filterCourses = function () {
         if (seen.has(k)) return false;
         seen.add(k); return true;
       });
-    } else {
+    } else if (f === 'queue') {
       const qKeys = new Set(candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
       list = list.filter(c => qKeys.has(c.code + '_' + (c.seq || '0')));
     }
+    // required/elective/sports：list 已是全池，走下面统一 chip 过滤
   } else {
     // —— 服务器随时查询路径：条件变了 → 调度查询 + 查询中提示（旧条件结果作废）
     if (sigChanged) {
@@ -942,13 +945,14 @@ NX.filterCourses = function () {
       }
     }
   }
-  // 本地 chip（已选/队列）不吃搜索框（OneTHU listRows 语义：这两 chip 恒全量，
-  // 跳转残留的课号/关键词绝不能把队列视图清空）
-  if (q && !localChip) list = list.filter(c => lc(c.name).includes(q) || c.code.includes(q) || lc(c.teacher).includes(q));
+  // 恒全量的只有已选/队列（OneTHU listRows 语义：跳转残留的课号/关键词
+  // 绝不能把队列视图清空）；必修/限选/体育池内 q 过滤照常（v1.5.0 同款）
+  const noQChip = f === 'selected' || f === 'queue';
+  if (q && !noQChip) list = list.filter(c => lc(c.name).includes(q) || c.code.includes(q) || lc(c.teacher).includes(q));
   if (f === 'available') list = list.filter(c => c.available);
   else if (f === 'required') list = list.filter(c => c.attr === '必修' || c.typeLabel === '必修');
   else if (f === 'elective') list = list.filter(c => c.attr === '限选' || c.typeLabel === '限选');
-  else if (f === 'sports') list = list.filter(c => c.attr === '体育' || c.typeLabel === '体育' || (c.department || '').includes('体育') || (c.department || '').includes('体武'));
+  else if (f === 'sports') list = list.filter(c => NX.isSportsCourse(c));
   if (activeGroup) list = list.filter(c => (c.group || c.attr) === activeGroup);
   const cf = $('nx-filter-credits')?.value;
   if (cf) {

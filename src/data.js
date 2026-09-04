@@ -149,12 +149,19 @@ NX.courseFlag = function (course) {
   return 'rx';
 };
 
+// 体育课判定（用户二十三报规则重写）：航空体育、书院专项体育、
+// 体育学术课（概论/管理/课程与教学论/科技前沿…）都不是体育课——
+// 不走体育志愿/体育选课，按任选/必修/限选处理。用户贴 Ty 页实锤
+// 这些课混在体育部列表里（容量>0 但三志愿全 0，没人走体育通道）。
+// 判定优先级：一级课表/zyMap 属性 > 体育部+非排除名 > 其他一律非体育。
+NX.NOT_SPORTS_NAME = /航空体育|书院专项体育|体育(概论|管理|课程与教学论|科技前沿)/;
 NX.isSportsCourse = function (course) {
-  return (course.attr || '') === '体育'
-    || (course.department || '').includes('体育')
-    || (course.name || '').includes('体育')
-    || course.typeLabel === '体育'
-    || course.typeCode === 'ty';
+  if (!course) return false;
+  if ((course.attr || '') === '体育' || course.typeLabel === '体育' || course.typeCode === 'ty') return true;
+  const dept = course.department || '';
+  if (!dept.includes('体育') && !dept.includes('体武')) return false;   // 名字带体育但院系不是体育部的不算（如「体育社会学」在社科学院）
+  if (NX.NOT_SPORTS_NAME.test(course.name || '')) return false;
+  return true;   // 体育部常规体育课（体育(N)、游泳、篮球、跆拳道…）
 };
 
 NX.baseFlag = function (course) {
