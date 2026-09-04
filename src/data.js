@@ -982,7 +982,7 @@ NX.fetchLevelTable = async function () {
       const isSports = !attr;
       const typeLabel = isSports ? '体育' : attr;
       const typeCode = isSports ? 'ty' : attr === '必修' ? '006' : attr === '限选' ? '008' : '007';
-      map[code + '_' + seq] = { typeCode, typeLabel, attr };
+      map[code + '_' + NX.normSeq(seq)] = { typeCode, typeLabel, attr };   // 键归一（课序号跨页前导零不一致）
     }
     console.log(NX.TAG, 'level table:', Object.keys(map).length, 'courses');
     return map;
@@ -992,13 +992,26 @@ NX.fetchLevelTable = async function () {
 // 行类型补齐：服务器搜索行/池行从 levelMap 拿 attr/typeLabel/typeCode
 // （kkxxSearch 行没有类型列——类型只在一级课表；体育课一级课表无 attr 标记）
 NX.applyLevelMap = function (rows) {
-  const map = NX.state.levelMap || {};
+  const state = NX.state;
+  const map = state.levelMap || {};
+  // v1.5.0 mergeStaticData 末块同款：培养方案按课号回填 attr。kkxxSearch
+  // 网格没有属性列（OneTHU/v1.5.0 解析器都置 attr=''），方案内课（微积分等
+  // 必修）的三行网格全靠这条——重写时被我弄丢，用户十三报实锤「除已选外
+  // 只剩任选」。方案外课维持任选（本来就该这么选）。
+  let planAttr = state._planAttrByCode;
+  if (!planAttr) {
+    planAttr = {};
+    (state.planData || []).forEach(p => { if (p.code && p.attr) planAttr[p.code] = p.attr; });
+    state._planAttrByCode = planAttr;
+  }
   (rows || []).forEach(c => {
-    const e = map[c.code + '_' + String(c.seq || '0')];
+    const e = map[c.code + '_' + NX.normSeq(c.seq)];
     if (e) {
       if (e.attr) c.attr = e.attr;
       c.typeLabel = e.typeLabel;
       c.typeCode = e.typeCode;
+    } else if (!c.attr && planAttr[c.code]) {
+      c.attr = planAttr[c.code];
     }
   });
   return rows;
