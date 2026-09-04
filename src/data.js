@@ -1287,15 +1287,25 @@ NX.mergeServerRows = function (rows) {
         .filter(dc => !state._volDepts[dc]);
       if (newDepts.length) {
         clearTimeout(state._volDebounce);
+        // 搜索是离散动作：立即拉（400ms 防抖用户等不到就截图——心智探秘
+        // 行社科学院数据 1-3s 后才到，用户十八报看到的全是补拉前状态）
+        clearTimeout(state._volDebounce);
         state._volDebounce = setTimeout(async () => {
           try {
+            console.log(NX.TAG, 'volunteer 按需补拉院系:', newDepts.join(','));
             const vol = await NX.fetchVolunteer(rows);
+            // 空结果 = 该院系已被别的批次拉过（并发竞态：两次搜索同一新
+            // 院系，第二次拿到空 map）——空 map 套 applyVolunteer 会把
+            // 刚上屏的数据清掉（else 清空分支）。没有新数据就不动现状。
+            if (!vol || !Object.keys(vol).length) return;
             state.volMap = Object.assign({}, state.volMap, vol);
             const targets = state.allCourses.concat(state._searchRows || []);
             NX.applyVolunteer(targets, vol);
             NX.filterCourses();
-          } catch (e) { /* 补拉失败容忍 */ }
-        }, 400);
+          } catch (e) {
+            console.warn(NX.TAG, 'volunteer 按需补拉失败:', newDepts.join(','), e);   // 不再静默（用户十八报：心智探秘行无数据无从排查）
+          }
+        }, 60);
       }
     }
   }
