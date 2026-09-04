@@ -381,6 +381,9 @@ NX.refreshSelected = async function () {
   const selected = await fetchSelectedCourses();
   const selMap = {};
   selected.forEach(s => { selMap[s.code + '_' + s.seq] = s; });
+  // 类型源失效重拉（学期内教务可能调整类型标记；1 请求）
+  if (NX.fetchLevelTable) state.levelMap = await NX.fetchLevelTable().catch(() => state.levelMap || {});
+  NX.applyLevelMap(allCourses);
   const zyCache = (await store.get('zyCache')) || {};
   const cacheUpdated = await resolveCourseZy(allCourses, selMap, zyCache);
   if (cacheUpdated) await store.set('zyCache', zyCache);

@@ -810,6 +810,58 @@ NX.fetchCandidateCourses = async function () {
 // 候补课元数据回填（OneTHU 同款：每门按课号单查一页，非全目录爬）：
 // dlSearch/kbSearch 行天生缺学分/容量——逐门 kch 精确查一页补齐，
 // 概率网格/学分统计/余量徽章即刻可用。
+// ─── 一级课表（课程类型源：必修/限选/任选/体育）──────────────────
+// v1.5.0 fetchLevelTable 移植 + 编码修正：pathContent='一级课表' 必须 GBK
+// 百分号编码（OneTHU client.ts:1221 注释——UTF-8 直发教务解乱码取不到页，
+// v1.5.0 用的 encodeURIComponent 是 UTF-8 → 一级课表页从来拿不到 →
+// 目录行 attr 恒空 → 必修/限选/体育 chip 全空转）。1 请求，launch 拉 1 次。
+NX.fetchLevelTable = async function () {
+  const { state } = NX;
+  if (!state.isZhjwxk) return {};
+  const { SEM, BASE } = state;
+  try {
+    const url = BASE + '/xkBks.vxkBksXkbBs.do?p_xnxq=' + SEM + '&pathContent=' + NX.gbkPercentEncode('一级课表');
+    const dual = await NX.fetchPageDual(url).catch(async () => null);
+    const html = dual ? (dual.gbk.includes('trr2') || dual.gbk.includes('trr1') ? dual.gbk : dual.utf8) : await NX.fetchPage(url);
+    const map = {};
+    const rowRe = /<tr[^>]*class="trr[12]"[^>]*>([\s\S]*?)<\/tr>/g;
+    let m;
+    while ((m = rowRe.exec(html)) !== null) {
+      const cells = [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(t => t[1].replace(/<[^>]*>/g, '').trim().replace(/\s+/g, ' '));
+      let code = '', seq = '', attr = '';
+      for (let i = 0; i < cells.length; i++) {
+        if (/^\d{8}$/.test(cells[i]) && !code) {
+          code = cells[i]; seq = cells[i + 1] || '0';
+          attr = cells[i + 2] || '';
+          if (!/^(必修|限选|任选)$/.test(attr)) attr = '';
+        }
+      }
+      if (!code) continue;
+      const isSports = !attr;
+      const typeLabel = isSports ? '体育' : attr;
+      const typeCode = isSports ? 'ty' : attr === '必修' ? '006' : attr === '限选' ? '008' : '007';
+      map[code + '_' + seq] = { typeCode, typeLabel, attr };
+    }
+    console.log(NX.TAG, 'level table:', Object.keys(map).length, 'courses');
+    return map;
+  } catch (e) { console.warn(NX.TAG, 'level table:', e); return {}; }
+};
+
+// 行类型补齐：服务器搜索行/池行从 levelMap 拿 attr/typeLabel/typeCode
+// （kkxxSearch 行没有类型列——类型只在一级课表；体育课一级课表无 attr 标记）
+NX.applyLevelMap = function (rows) {
+  const map = NX.state.levelMap || {};
+  (rows || []).forEach(c => {
+    const e = map[c.code + '_' + String(c.seq || '0')];
+    if (e) {
+      if (e.attr) c.attr = e.attr;
+      c.typeLabel = e.typeLabel;
+      c.typeCode = e.typeCode;
+    }
+  });
+  return rows;
+};
+
 NX.backfillCandidateMeta = async function (candidates) {
   const todo = (candidates || []).filter(c => c && c.code && !c.credits);
   if (!todo.length) return;
@@ -1008,7 +1060,10 @@ NX.serverSearchStorm = async function (opts) {
 };
 
 /** 服务端搜索结果合并进工作台课程池（会话级，不写 staticData 缓存）：
- *  code_seq 去重后并入 allCourses，卡片渲染/选课按钮即刻可用。返回新增数。 */
+ *  code_seq 去重后并入 allCourses，卡片渲染/选课按钮即刻可用。返回新增数。
+ *  合并时同步补类型（levelMap）+ 社区评价徽章（tbAttach 幂等）——否则搜索行
+ *  attr 恒空（必修/限选 chip 空转）、_tbRef 恒空（卡片评价徽章消失，建议栏却有
+ *  评分——建议栏单独匹配过，卡片没有）。 */
 NX.mergeServerRows = function (rows) {
   const { state } = NX;
   if (!rows || !rows.length) return 0;
@@ -1018,5 +1073,7 @@ NX.mergeServerRows = function (rows) {
     const k = r.code + '_' + (r.seq || '0');
     if (!seen.has(k)) { state.allCourses.push(r); seen.add(k); added++; }
   }
+  NX.applyLevelMap(rows);
+  if (NX.tbAttach) { try { NX.tbAttach(rows); } catch (e) {} }   // fail-soft
   return added;
 };

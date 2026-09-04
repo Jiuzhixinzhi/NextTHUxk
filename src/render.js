@@ -882,9 +882,11 @@ NX.filterCourses = function () {
   if (f === 'plan') { renderPlanView(q); return; }
 
   // —— 服务端条件指纹：这些变化 = 换一次服务器查询（OneTHU newSearch 语义）。
-  //    conflict/credits/reviews/sort/xknote 只本地细化，不触发查询。
+  //    注意 f（chip）不入指纹：必修/限选/体育/可选/已选/队列全是本地过滤
+  //    （教务无对应参数），chip 切换即时生效不重查（v1.5.0 语义）。
+  //    conflict/credits/reviews/sort/xknote 同样只本地细化。
   const serverSig = JSON.stringify([
-    rawQ.trim(), f, state.SEM, state._browsePage || 1,
+    rawQ.trim(), state.SEM, state._browsePage || 1,
     $('nx-filter-tongshi')?.value || '', $('nx-filter-feature')?.value || '',
     $('nx-filter-grade-filter')?.value || '', $('nx-filter-bksrem')?.value || '',
     $('nx-filter-yjsrem')?.value || '', $('nx-filter-day')?.value || '',
@@ -939,9 +941,9 @@ NX.filterCourses = function () {
   // 跳转残留的课号/关键词绝不能把队列视图清空）
   if (q && !localChip) list = list.filter(c => lc(c.name).includes(q) || c.code.includes(q) || lc(c.teacher).includes(q));
   if (f === 'available') list = list.filter(c => c.available);
-  else if (f === 'required') list = list.filter(c => c.attr === '必修');
-  else if (f === 'elective') list = list.filter(c => c.attr === '限选');
-  else if (f === 'sports') list = list.filter(c => c.attr === '体育' || (c.department || '').includes('体育') || (c.department || '').includes('体武'));
+  else if (f === 'required') list = list.filter(c => c.attr === '必修' || c.typeLabel === '必修');
+  else if (f === 'elective') list = list.filter(c => c.attr === '限选' || c.typeLabel === '限选');
+  else if (f === 'sports') list = list.filter(c => c.attr === '体育' || c.typeLabel === '体育' || (c.department || '').includes('体育') || (c.department || '').includes('体武'));
   if (activeGroup) list = list.filter(c => (c.group || c.attr) === activeGroup);
   const cf = $('nx-filter-credits')?.value;
   if (cf) {

@@ -262,11 +262,14 @@ NX.launch = async function launch() {
     // 候选不再 phase 门控（OneTHU getQueueStatus 语义：独立拉取，dlSearch 拿不到
     // 走一级课表 kbSearch 兜底——「看不到队列候选」实锤：xkqkSearch 阶段探测失败
     // 时旧代码直接跳过候选拉取）
-    const [selectedCourses, candCourses, planFresh] = await Promise.all([
+    const [selectedCourses, candCourses, planFresh, levelMap] = await Promise.all([
       fetchSelectedCourses().catch(e => { console.warn(TAG, 'selected:', e); return []; }),
       fetchCandidateCourses().catch(e => { console.warn(TAG, 'candidates:', e); return []; }),
       state.planData.length ? Promise.resolve(null) : fetchTrainingPlan().catch(e => { console.warn(TAG, 'plan:', e); return []; }),
+      // 课程类型源（必修/限选/任选/体育）：kkxxSearch 行没有类型列，只在一级课表
+      NX.fetchLevelTable().catch(e => { console.warn(TAG, 'level table:', e); return {}; }),
     ]);
+    state.levelMap = levelMap || {};
     if (!state.planData.length) state.planData = planFresh || [];
     state.candidateCourses = candCourses;
     // 候补元数据回填（OneTHU 同款：按课号逐门单查一页，非全目录爬）——
@@ -282,6 +285,7 @@ NX.launch = async function launch() {
     });
     state.allCourses = pool;
     NX.rebuildCourseMap();   // code+seq → course 索引，渲染/查询统一 O(1)
+    NX.applyLevelMap(pool);  // 池行类型补齐（必修/限选 chip + 提交选课 flag 用）
     // 课余量/排队：池内按需 API 同步（xkqkSearch 1 + kylSearch 逐门 + 批量排队 1，
     // 替代旧 320 页整库硬爬）；搜索结果余量由 kkxxSearch 行自带。
     // 非阻塞（OneTHU commitCore 语义：UI 先上屏，数据后到回填）——队列接口
