@@ -328,6 +328,7 @@ NX.launch = async function launch() {
       NX.filterCourses();
       NX.renderPreviewTT(NX.getPreviewCourses(), (state.$('nextthuxk-preview-info') || {}).textContent || '当前已选');
       NX.renderQueueSection();
+      try { NX.renderStageCart(); } catch (e) {}   // 暂存条概率跟志愿数据一起到（不刷=点之前全灰无数据，点一下才绿）
     })();
     if (state.SEM === SEM0) {
       await store.set('staticData', { ver: DATA_VER, plan: state.planData, ts: Date.now() });
