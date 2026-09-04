@@ -71,8 +71,9 @@ NX.courseCardHtml = function (c, ctx) {
     }
     const volHtml = volParts.length ? '<div class="nx-vol">' + volParts.join('') + '</div>' : '';
     const defFlag = baseFlag(c);
-    const volApplied = c.volApplied || 0;
-    const volCap = c.volCapacity || c.capacity || 0;
+    const occ = NX.occupancyOf(c);   // 已满(余0)绝不显示 0/N 竞争宽松（用户实锤）
+    const volApplied = occ.applied;
+    const volCap = occ.cap;
     const compLabel = vc.level === 'easy' ? '竞争宽松' : vc.level === 'medium' ? '竞争适中' : vc.level === 'hard' ? '竞争激烈' : '';
     const compHtml = volCap > 0 ? '<div class="nx-comp"><div class="nx-comp-bar" style="width:' + vc.pct + '%;background:' + vc.color + '"></div><span class="nx-comp-txt" style="color:' + vc.color + '">' + volApplied + '/' + volCap + ' · ' + compLabel + '</span></div>' : '';
     const currentFlag = c.selected ? typeCodeToFlag(c.typeCode) : defFlag;

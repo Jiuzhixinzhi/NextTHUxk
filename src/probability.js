@@ -15,9 +15,25 @@ NX.fmtVol = function (v) {
   return s;
 };
 
+// 占用对（已报/容量）：课余量行最优先（容量-余量 = 实时已选，与卡片
+// 「已满/余0」标签永远一致——用户实锤「已满却显示 0/80 竞争宽松」）；
+// 无余量数据才退志愿统计（volApplied/volCapacity），最后退裸容量。
+NX.occupancyOf = function (c) {
+  const cap = Number(c.capacity) || 0;
+  const rem = c.remaining;
+  if (cap > 0 && rem !== undefined && rem !== null && rem !== '' && Number(rem) >= 0) {
+    return { applied: Math.max(0, cap - Number(rem)), cap };
+  }
+  if (Number(c.volCapacity) > 0 && c.volApplied != null) {
+    return { applied: Number(c.volApplied) || 0, cap: Number(c.volCapacity) };
+  }
+  return { applied: Number(c.volApplied) || 0, cap: Number(c.volCapacity) || cap || 0 };
+};
+
 NX.volColor = function (course) {
-  const cap = course.volCapacity || course.capacity || 0;
-  const applied = course.volApplied || 0;
+  const occ = NX.occupancyOf(course);
+  const cap = occ.cap;
+  const applied = occ.applied;
   if (!cap || cap === 0) return { level: 'unknown', color: '#9aa1ac', bg: 'rgba(154,161,172,.08)', pct: 0 };
   const ratio = applied / cap;
   if (ratio <= 0.8) return { level: 'easy', color: '#07c160', bg: 'rgba(7,193,96,.1)', pct: Math.min(ratio * 100, 100) };

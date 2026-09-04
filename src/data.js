@@ -1212,21 +1212,26 @@ NX.mergeServerRows = function (rows) {
   }
   NX.applyLevelMap(rows);
   if (NX.tbAttach) { try { NX.tbAttach(rows); } catch (e) {} }   // fail-soft
-  // 志愿统计按需补拉：非队列阶段，搜索行院系未拉过 → 拉完合并回刷（防抖）。
-  // 院系定向（1 院系 1-3 请求），不整库爬；已拉院系本会话不重拉。
-  // （_volDepts 未初始化 = 首搜先于 launch 志愿同步 → 静默跳过，launch 会覆盖）
-  if (!state.isQueuePhase && state._volDepts) {
-    const newDepts = [...new Set(rows.map(c => NX.deptCodeOf(c.department)).filter(Boolean))]
-      .filter(dc => !state._volDepts[dc]);
-    if (newDepts.length) {
-      clearTimeout(state._volDebounce);
-      state._volDebounce = setTimeout(async () => {
-        try {
-          const vol = await NX.fetchVolunteer(rows);
-          NX.applyVolunteer(state.allCourses, vol);
-          NX.filterCourses();
-        } catch (e) { /* 补拉失败容忍 */ }
-      }, 400);
+  // 志愿统计：已拉数据立刻应用到本批渲染行（launch 只把数据写进了池内
+  // 旧行——搜索/跳转回来的新行对象此前永远拿不到，全卡「无数据」，
+  // 用户十一报实锤）；未拉院系防抖补拉，拉完合并 volMap 回刷全池+当前行。
+  if (!state.isQueuePhase) {
+    if (state.volMap) NX.applyVolunteer(rows, state.volMap);
+    if (state._volDepts) {
+      const newDepts = [...new Set(rows.map(c => NX.deptCodeOf(c.department)).filter(Boolean))]
+        .filter(dc => !state._volDepts[dc]);
+      if (newDepts.length) {
+        clearTimeout(state._volDebounce);
+        state._volDebounce = setTimeout(async () => {
+          try {
+            const vol = await NX.fetchVolunteer(rows);
+            state.volMap = Object.assign({}, state.volMap, vol);
+            const targets = state.allCourses.concat(state._searchRows || []);
+            NX.applyVolunteer(targets, vol);
+            NX.filterCourses();
+          } catch (e) { /* 补拉失败容忍 */ }
+        }, 400);
+      }
     }
   }
   return added;

@@ -306,6 +306,7 @@ NX.launch = async function launch() {
         // 绝不整库硬爬）
         try {
           const vol = await NX.fetchVolunteer(pool);
+          state.volMap = Object.assign({}, state.volMap, vol);   // 全局持久：搜索/跳转新行可取
           NX.applyVolunteer(pool, vol);
         } catch (e) { console.warn(TAG, 'volunteer:', e); }
       }
