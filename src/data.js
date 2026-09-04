@@ -536,8 +536,12 @@ NX.fetchSelectedCourses = async function () {
       const isSportsCourse = !cell(1) && zyFromCell;
       const zyNum = zyInfo.zy || (zyFromCell ? ({ '一': 1, '二': 2, '三': 3 }[zyFromCell[1]]) : 0);
       const typeLabel = isSportsCourse ? '体育' : (cell(1) || zyInfo.typeLabel || '');
+      // 2026-2027-1 起已选表列序变更（OneTHU 样本实证）：课号独立成列 →
+      // cell(3)=课号、cell(4)=课名。自适应取第一个非纯数字候选格，新旧列序
+      // 通吃——否则预览课表整屏课号（OneTHU 实测事故，同款）。
+      const nameCell = [cell(4), cell(3)].find(x => x !== '' && !/^\d+$/.test(x)) || '';
       selected.push({
-        code, seq, name: cell(3) || cell(1), teacher: cell(7) || cell(2),
+        code, seq, name: nameCell || cell(1), teacher: cell(7) || cell(2),
         time: cell(6) || cell(3), credits: parseFloat(cell(8) || cell(4)) || 0,
         typeLabel,
         zy: zyNum,
@@ -884,9 +888,10 @@ NX.serverSearchStorm = async function (opts) {
   let rows = first.rows || [];
   const tp = first.totalPages || 0;
   // 风暴护栏（OneTHU 原码语义）：总页数 ≤25 → 全量；>25 → 只探 5 页（深分页
-  // 大多是宽泛词）；tp 解析失败保守探 25 页。绝不做课号深页探测（教务返回
-  // 无过滤首页 + 25 连发打满代理 token 双雷）。
-  const probeTo = exactCode ? 1 : (tp > 0 ? (tp <= 25 ? tp : 5) : 25);
+  // 大多是宽泛词）；tp 解析失败保守探 25 页。forceAll=「加载全部」按钮 →
+  // 显式全量补齐（用户主动点击，OneTHU loadAllSearch 同款）。
+  // 绝不做课号深页探测（教务返回无过滤首页 + 25 连发打满代理 token 双雷）。
+  const probeTo = exactCode ? 1 : (o.forceAll ? (tp > 0 ? tp : 25) : (tp > 0 ? (tp <= 25 ? tp : 5) : 25));
   if (probeTo > 1) {
     const merged = {};
     rows.forEach(r => { merged[r.code + '_' + (r.seq || '0')] = r; });

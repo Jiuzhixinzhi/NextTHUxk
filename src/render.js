@@ -418,8 +418,12 @@ NX.renderPreviewTT = function (courses, label) {
     }
     flush();
   }
-  // 时间轴渲染：钟点轴（08:00-21:45）+ 7 日列 + 绝对定位课块
-  const A0 = NX.PV_AXIS_BEGIN, A1 = NX.PV_AXIS_END, PX = NX.PV_PX_PER_MIN;
+  // 时间轴渲染：钟点轴（08:00-21:45 起步）+ 7 日列 + 绝对定位课块
+  // 自由时间轴：占用可越出默认轴（早自习/晚自习），轴随块伸缩（30 分钟对齐）
+  const PX = NX.PV_PX_PER_MIN;
+  let A0 = NX.PV_AXIS_BEGIN, A1 = NX.PV_AXIS_END;
+  for (const b of raw) { A0 = Math.min(A0, b.begin); A1 = Math.max(A1, b.end); }
+  A0 = Math.floor(A0 / 30) * 30; A1 = Math.ceil(A1 / 30) * 30;
   const H = Math.round((A1 - A0) * PX);
   const hm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
   let axisLines = '';
@@ -457,7 +461,9 @@ NX.renderPreviewTT = function (courses, label) {
     h += '<div class="nx-manual-list"><span class="nx-manual-list-label">自定义占用</span>' +
       manualEvents.map(e => {
         const slots = parseTimeSlots(e.time || '');
-        const when = slots.map(s => s.day + ' ' + s.slot).join('、');
+        const when = (e.begin && e.end)
+          ? '周' + '一二三四五六日'[(Number(e.day) || 1) - 1] + ' ' + e.begin + '-' + e.end
+          : slots.map(s => s.day + ' ' + s.slot).join('、');
         return '<button type="button" class="nx-manual-chip" data-id="' + esc(e.id) + '" title="删除此占用">' + esc(e.name) + (when ? ' · ' + esc(when) : '') + '　✕</button>';
       }).join('') + '</div>';
   }
@@ -907,6 +913,7 @@ NX.filterCourses = function () {
     // —— 服务器随时查询路径：条件变了 → 调度查询 + 查询中提示（旧条件结果作废）
     if (sigChanged) {
       state._searchRows = null;
+      state._uiPage = 1;   // 新查询回第 1 页（OneTHU searchRunId 同款）
       NX.scheduleServerSearch();
       const listEl = $('nextthuxk-list');
       if (listEl) {
@@ -915,11 +922,14 @@ NX.filterCourses = function () {
       }
     }
     list = state._searchRows || [];
-    // 查询异常显式上屏（不再静默空白）：unknown 页 / 网络失败带原因
+    // 查询异常显式上屏（不再静默空白）：unknown 页 / 网络失败带原因 + 重试
     if (!list.length && state._searchError) {
       const listEl2 = $('nextthuxk-list');
       if (listEl2) {
-        listEl2.innerHTML = '<div class="nx-empty nx-st err" title="' + esc(state._searchError) + '">' + esc(state._searchError) + '</div>';
+        listEl2.innerHTML = '<div class="nx-empty nx-st err">' + esc(state._searchError) + '</div>' +
+          '<div style="text-align:center;padding:6px 0 2px"><button type="button" class="nx-stage-btn" id="nx-retry-search">重试</button></div>';
+        const rb = listEl2.querySelector('#nx-retry-search');
+        if (rb) rb.onclick = () => { state._serverSig = null; NX.filterCourses(); NX.scheduleServerSearch(true); };
         return;
       }
     }
@@ -1000,28 +1010,124 @@ NX.filterCourses = function () {
       return 0;
     });
   }
-  renderCourses(list);
-  // —— 浏览模式翻页器（随时查询：一页一请求，绝不连发）——
-  if (!localChip) {
-    const listEl = $('nextthuxk-list');
-    if (listEl && state._browseHasMore) {
-      const pager = document.createElement('div');
-      pager.style.cssText = 'display:flex;gap:8px;justify-content:center;padding:10px 0 4px';
-      const mk = (label, page, dis) => {
-        const b = document.createElement('button');
-        b.className = 'nx-stage-btn'; b.textContent = label; b.disabled = !!dis;
-        b.onclick = () => NX.browseGoto(page);
-        return b;
-      };
-      pager.appendChild(mk('‹ 上一页', (state._browsePage || 1) - 1, (state._browsePage || 1) <= 1));
-      const cur = document.createElement('span');
-      cur.style.cssText = 'align-self:center;font-size:11px;color:var(--nx-faint)';
-      cur.textContent = '第 ' + (state._browsePage || 1) + ' 页 · 随时查询';
-      pager.appendChild(cur);
-      pager.appendChild(mk('下一页 ›', (state._browsePage || 1) + 1, false));
-      listEl.appendChild(pager);
-    }
+  // —— 分页（OneTHU 教务同款）：浏览模式 = 服务端翻页（一页一请求）；
+  //    搜索模式 = 本地翻页（已加载池在手，翻页零请求），总页数/总数用
+  //    服务端真值，未加载尾部页有不完整提示条 + 加载全部入口。
+  const so = NX.buildSearchOpts();
+  const searchMode = !localChip && !!(so.kch || so.kcm || so.weekday || so.section || so.grade
+    || so.rxklxm || so.kctsm || so.onlyAvailable || so.gradAvail);
+  let show = list;
+  if (searchMode) {
+    const totalPages = state._searchTotalPages || Math.max(1, Math.ceil(list.length / NX.PAGE_SIZE));
+    const page = Math.min(Math.max(1, state._uiPage || 1), totalPages);
+    state._uiPage = page;
+    show = list.slice((page - 1) * NX.PAGE_SIZE, page * NX.PAGE_SIZE);
   }
+  renderCourses(show);
+  NX.renderListFooter({ localChip, searchMode, list, show });
+};
+
+NX.PAGE_SIZE = 20;   // OneTHU 同款每页条数
+
+// 底部分页条 + 搜索结果捕捉（OneTHU 同款）：第N页/共M页（共K条记录）、
+// 上一页/下一页、跳至 GO、数据不完整提示 + 「加载当前关键词全部」。
+NX.renderListFooter = function (o) {
+  const { state } = NX;
+  const $ = state.$;
+  const listEl = $('nextthuxk-list');
+  if (!listEl || o.localChip || !o.list.length) return;
+  // 搜索模式翻到未加载的尾部页（OneTHU 同款提示；服务端总页数 > 本地已加载）
+  if (o.searchMode && !o.show.length) {
+    listEl.innerHTML = '<div class="nx-empty">此页未加载——点下方「加载当前关键词全部」后可查看</div>';
+  }
+  const mkBtn = (label, dis, onclick) => {
+    const b = document.createElement('button');
+    b.className = 'nx-stage-btn';
+    b.textContent = label;
+    b.disabled = !!dis;
+    b.onclick = onclick;
+    return b;
+  };
+  // 数据不完整提示（OneTHU 同款）：宽泛词只探测了前几页 → 显式补齐入口
+  if (o.searchMode && state._searchIncomplete) {
+    const html = '<div class="nx-st" style="display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;padding:8px 0 2px;font-size:11px;color:#b8860b">' +
+      '数据不完整：已加载 ' + o.list.length + ' 门' +
+      (state._searchTotalPages > 0 ? '，教务共 ' + state._searchTotalPages + ' 页' : '') +
+      (state._searchTotalRows > 0 ? '（共 ' + state._searchTotalRows + ' 门）' : '') +
+      '<button type="button" class="nx-stage-btn nx-loadall" style="margin-left:6px"' + (state._loadingAll ? ' disabled' : '') + '>' +
+      (state._loadingAll ? '加载中…' : '加载当前关键词全部') + '</button></div>';
+    listEl.insertAdjacentHTML('afterbegin', html);
+    const lb = listEl.querySelector('.nx-loadall');
+    if (lb) lb.onclick = () => NX.loadAllSearch();
+  }
+  const pager = document.createElement('div');
+  pager.style.cssText = 'display:flex;gap:8px;justify-content:center;align-items:center;padding:10px 0 4px;flex-wrap:wrap';
+  const cur = document.createElement('span');
+  cur.style.cssText = 'align-self:center;font-size:11px;color:var(--nx-faint)';
+  const goInput = document.createElement('input');
+  goInput.className = 'nx-inp';
+  goInput.style.cssText = 'width:52px;padding:2px 4px;font-size:11px;text-align:center';
+  goInput.placeholder = '页码';
+  let gotoPage, totalPages, curPage, nextDis;
+  if (o.searchMode) {
+    totalPages = state._searchTotalPages || Math.max(1, Math.ceil(o.list.length / NX.PAGE_SIZE));
+    curPage = Math.min(Math.max(1, state._uiPage || 1), totalPages);
+    gotoPage = n => { state._uiPage = n; NX.filterCourses(); };
+    nextDis = curPage >= totalPages;
+    cur.textContent = '第 ' + curPage + ' 页 / 共 ' + totalPages + ' 页' +
+      (!state._searchIncomplete ? '（' + (state._searchTotalRows > 0 ? state._searchTotalRows + ' 条记录' : o.list.length + ' 门') + '）' : '');
+  } else {
+    curPage = state._browsePage || 1;
+    totalPages = state._searchTotalPages || 0;
+    gotoPage = n => NX.browseGoto(n);
+    nextDis = !state._browseHasMore && !(totalPages > curPage);
+    cur.textContent = '第 ' + curPage + ' 页' +
+      (totalPages > 0 ? ' / 共 ' + totalPages + ' 页' : '') +
+      (state._searchTotalRows > 0 ? '（共 ' + state._searchTotalRows + ' 条记录）' : ' · 随时查询');
+  }
+  const doJump = () => {
+    const n = parseInt(goInput.value, 10);
+    goInput.value = '';
+    if (!Number.isFinite(n) || n < 1) return;
+    gotoPage(n);
+  };
+  goInput.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); doJump(); } };
+  pager.appendChild(mkBtn('‹ 上一页', curPage <= 1, () => gotoPage(curPage - 1)));
+  pager.appendChild(cur);
+  pager.appendChild(mkBtn('下一页 ›', nextDis, () => gotoPage(curPage + 1)));
+  pager.appendChild(goInput);
+  pager.appendChild(mkBtn('GO', false, doJump));
+  listEl.appendChild(pager);
+};
+
+// 「加载全部」（OneTHU loadAllSearch 同款）：forceAll 全量补齐探测页，
+// 结果沿用当前关键词的服务端真值，页码/条数刷新。
+NX.loadAllSearch = async function () {
+  const state = NX.state;
+  if (state._loadingAll) return;
+  state._loadingAll = true;
+  NX.filterCourses();   // 提示条立即变「加载中…」
+  try {
+    const opts = NX.buildSearchOpts();
+    opts.forceAll = true;
+    const res = await NX.serverSearchStorm(opts);
+    const selKeys = new Set(state.allCourses.filter(c => c.selected).map(c => c.code + '_' + (c.seq || '0')));
+    const candKeys = new Set(state.candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
+    (res.rows || []).forEach(r => {
+      const k = r.code + '_' + (r.seq || '0');
+      r.selected = selKeys.has(k);
+      r.isCandidate = candKeys.has(k);
+    });
+    state._searchRows = res.rows || [];
+    state._searchIncomplete = false;
+    if (res.totalPages) state._searchTotalPages = res.totalPages;
+    if (res.totalRows) state._searchTotalRows = res.totalRows;
+    state._searchError = res.pageKind === 'unknown' ? '教务返回异常页，可能需退出重新登录' : '';
+  } catch (e) {
+    console.warn(NX.TAG, 'load all:', e);
+  }
+  state._loadingAll = false;
+  NX.filterCourses();
 };
 
 // 浏览模式跳页：置页码 → 作废指纹 → 重新走查询管线（一次一页）
@@ -1083,6 +1189,11 @@ NX.runServerSearch = async function () {
         });
         state._searchRows = res.rows || [];
         state._browseHasMore = res.pageKind === 'ok' && (res.rows || []).length > 0;
+        state._searchTotalPages = res.totalPages || 0;
+        state._searchTotalRows = res.totalRows || 0;
+        // 捕捉不完整（OneTHU 同款）：已加载 < 服务端总数 → 尾部页未探测，
+        // 分页条出「加载全部」补齐入口
+        state._searchIncomplete = queryMode && !!(res.totalRows && (res.rows || []).length < res.totalRows);
         state._searchError = res.pageKind === 'unknown'
           ? '教务返回异常页' + (res.htmlHead ? '（' + String(res.htmlHead).slice(0, 80) + '…）' : '') + '，可能需退出重新登录'
           : (res.pageKind === 'empty' ? '' : '');

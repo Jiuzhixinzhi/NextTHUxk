@@ -84,14 +84,33 @@ NX.originOf = function (code) {
 };
 NX.ORIGIN_COLORS = { '北大': '#c0392b', '北大研': '#c0392b', '北外': '#1f4e79' };
 
+// 冲突检测（区间重叠制，OneTHU 同款语义）：课程大节 → 钟点区间，自定义
+// 占用直接用钟点区间；跨边界部分重叠也能测出（旧版按「同日同大节」精确
+// 匹配，8:00-9:35 与 9:00-10:30 这类跨界重叠全漏）。
 NX.detectConflicts = function (courses) {
-  const slotMap = {};
+  const { parseTimeSlots, SLOT_RANGE, pvToMin } = NX;
+  const dayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  const slotNames = ['1-2节', '3-4节', '5-6节', '7-8节', '9-10节', '11-12节'];
+  const spans = [];   // {dayN, begin, end, name, when}
   const conflicts = [];
+  const addSpan = (dayN, begin, end, name, when) => {
+    for (const s of spans) {
+      if (s.dayN === dayN && begin < s.end && s.begin < end) {
+        conflicts.push({ day: dayNames[dayN - 1], slot: when, a: s.name, b: name });
+      }
+    }
+    spans.push({ dayN, begin, end, name, when });
+  };
   courses.concat(NX.state.manualEvents || []).forEach(c => {
-    NX.parseTimeSlots(c.time).forEach(({ day, slot }) => {
-      const k = day + '|' + slot;
-      if (slotMap[k]) conflicts.push({ day, slot, a: slotMap[k], b: c.name });
-      else slotMap[k] = c.name;
+    if (c.manual && c.begin && c.end && c.day && pvToMin(c.begin) < pvToMin(c.end)) {
+      addSpan(Number(c.day), pvToMin(c.begin), pvToMin(c.end), c.name, c.begin + '-' + c.end);
+      return;
+    }
+    parseTimeSlots(c.time).forEach(({ day, slot }) => {
+      const d = dayNames.indexOf(day) + 1;
+      const s = slotNames.indexOf(slot) + 1;
+      const r = SLOT_RANGE[s - 1];
+      if (d && r) addSpan(d, r[0], r[1], c.name, slot);
     });
   });
   return conflicts;
@@ -145,8 +164,9 @@ NX.showManualEventModal = function () {
   body.innerHTML = '<div class="nx-manual-form">' +
     '<label>活动名称<input id="nx-manual-name" class="nx-inp" placeholder="例如：社团例会"></label>' +
     '<label>星期<select id="nx-manual-day" class="nx-inp"><option value="1">周一</option><option value="2">周二</option><option value="3">周三</option><option value="4">周四</option><option value="5">周五</option><option value="6">周六</option><option value="7">周日</option></select></label>' +
-    '<label>时间段<select id="nx-manual-slot" class="nx-inp"><option value="1">1-2节</option><option value="2">3-4节</option><option value="3">5-6节</option><option value="4">7-8节</option><option value="5">9-10节</option><option value="6">11-12节</option></select></label>' +
-    '<div class="nx-manual-hint">自定义占用会保存在本地，并参与课程冲突检测。</div>' +
+    '<div style="display:flex;gap:8px"><label style="flex:1">开始时间<input id="nx-manual-begin" type="time" class="nx-inp" value="18:00"></label>' +
+    '<label style="flex:1">结束时间<input id="nx-manual-end" type="time" class="nx-inp" value="19:30"></label></div>' +
+    '<div class="nx-manual-hint">自由时间轴：任意起止钟点（不限于大节），保存在本地并参与冲突检测。</div>' +
     '<button id="nx-manual-save" class="nx-ai-btn">添加到课表</button></div>';
   mask.classList.add('show');
   const nameInput = $('nx-manual-name');
@@ -154,16 +174,21 @@ NX.showManualEventModal = function () {
   $('nx-manual-save').onclick = async () => {
     const name = nameInput.value.trim();
     if (!name) { NX.showXkResult({ ok: false, msg: '请输入活动名称' }); return; }
+    const day = parseInt($('nx-manual-day').value, 10);
+    const begin = ($('nx-manual-begin').value || '').trim();
+    const end = ($('nx-manual-end').value || '').trim();
+    if (!/^\d{1,2}:\d{2}$/.test(begin) || !/^\d{1,2}:\d{2}$/.test(end) || NX.pvToMin(begin) >= NX.pvToMin(end)) {
+      NX.showXkResult({ ok: false, msg: '起止时间无效：需 HH:MM 且开始早于结束' });
+      return;
+    }
     const now = Date.now();
-    const day = $('nx-manual-day').value;
-    const slot = $('nx-manual-slot').value;
-    state.manualEvents.push({ id: now, name, code: 'manual-' + now, seq: '0', time: day + '-' + slot + '(自定义)', manual: true, credits: 0 });
+    state.manualEvents.push({ id: now, name, code: 'manual-' + now, seq: '0', day, begin, end, time: '', manual: true, credits: 0 });
     await NX.store.set('manualEvents', state.manualEvents);
     NX.invalidatePreview();
     NX.renderPreviewTT(NX.getPreviewCourses(), $('nextthuxk-preview-info')?.textContent || '当前已选');
     NX.filterCourses();
     mask.classList.remove('show');
-    NX.showXkResult({ ok: true, msg: '已添加「' + name + '」' });
+    NX.showXkResult({ ok: true, msg: '已添加「' + name + '」（周' + '一二三四五六日'[day - 1] + ' ' + begin + '-' + end + '）' });
   };
 };
 
