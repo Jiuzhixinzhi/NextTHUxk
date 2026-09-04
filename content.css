@@ -154,7 +154,8 @@
 .nx-logo {
   font-family: -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Noto Sans SC", sans-serif;
   font-size: 16px;
-  font-weight: 400;
+  font-weight: 700;
+  letter-spacing: .06em;
   color: var(--nx-ink);
   display: flex;
   align-items: center;
