@@ -412,7 +412,7 @@ NX.refreshSelected = async function () {
         if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
       });
     } else {
-      const vol = await NX.fetchVolunteer(allCourses);
+      const vol = await NX.fetchVolunteer(allCourses, { force: true });   // 提交后志愿统计必变，重拉
       NX.applyVolunteer(allCourses, vol);
     }
   } catch (e) { /* 保持现有余量数据 */ }

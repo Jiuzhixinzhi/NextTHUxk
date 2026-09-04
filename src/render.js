@@ -331,15 +331,19 @@ NX.renderPreviewTT = function (courses, label) {
   courses.concat(manualEvents).forEach((c, ci) => {
     const lbl = c.teacher ? c.name + '(' + c.teacher + ')' : c.name;
     let cellColor = '', probLabel = '', probBgColor = '';
+    const qKey = c.code + '_' + (c.seq || '0');
+    const qd = queueDataMap[qKey];
+    const cand = candidateCourses.find(cc => cc.code === c.code && String(cc.seq) === String(c.seq || '0'));
     if (c.manual) {
       cellColor = '#8b5cf6'; probLabel = '自定义'; probBgColor = 'rgba(139,92,246,.14)';
+    } else if (c.isCandidate && cand && cand.myPos) {
+      // 候选提示不 gate 在 isQueuePhase（预选阶段候补课同样要看见位次；
+      // kbSearch 兜底候选无位次 → 下方「候选中」分支）
+      cellColor = '#ff9f1a'; probLabel = '排队第' + cand.myPos + '/' + cand.queueTotal + '人'; probBgColor = 'rgba(255,159,26,.14)';
+    } else if (c.isCandidate) {
+      cellColor = '#ff9f1a'; probLabel = '候选中'; probBgColor = 'rgba(255,159,26,.14)';
     } else if (isQueuePhase) {
-      const qKey = c.code + '_' + (c.seq || '0');
-      const qd = queueDataMap[qKey];
-      const cand = candidateCourses.find(cc => cc.code === c.code && String(cc.seq) === String(c.seq || '0'));
-      if (c.isCandidate && cand) {
-        cellColor = '#ff9f1a'; probLabel = '排队第' + cand.myPos + '/' + cand.queueTotal + '人'; probBgColor = 'rgba(255,159,26,.14)';
-      } else if (state.previewMode === 'selected') {
+      if (state.previewMode === 'selected') {
         probLabel = '已选'; cellColor = '#07c160'; probBgColor = 'rgba(7,193,96,.14)';
       } else if (qd) {
         if (qd.qRemaining > 0) { cellColor = '#07c160'; probLabel = '余' + qd.qRemaining; probBgColor = 'rgba(7,193,96,.14)'; }

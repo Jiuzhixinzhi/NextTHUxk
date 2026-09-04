@@ -295,92 +295,178 @@ NX.fetchCourseCatalog = async function () {
 // 1 课 1-2 请求、4 并发 30ms 错峰、失败容忍（0 行/HTTP 错 = 该课无数据，
 // 概率显示「无数据」，绝不回退硬爬）。非队列阶段（预选/志愿期）才有意义；
 // 队列阶段概率走排队/余量模型（queueDataMap），跳过志愿同步。
-NX.fetchVolunteer = async function (courses) {
-  const { state } = NX;
+// ─── 志愿统计（院系定向实时拉取，v1.5.1 三改）──────────────────────
+// 数据源 = 教务「按人头统计」页（xkBksZytjb.do）：
+//   BR（tbzySearchBR）9 列：课号/序号/课名/院系/容量/已报/必修/限选/任选志愿
+//   Ty（tbzySearchTy）6 列：课号/序号/课名/容量/已报/体育志愿
+// 关键事实（存档表单 AI选课分析系统/志愿查询_files/xkBks.xkBksZytjb.html）：
+//   ① 该页唯一筛选字段是 p_lrdwnm = 院系代码下拉（86 项，值=数字码），
+//      没有课号筛选——之前猜的 p_kch 被服务端无视，返回的是未过滤第 1 页，
+//      部分无关课数据混进池（课表冒错概率/卡片空白的一堆怪象根因）。
+//   ② Ty 页表单无 p_lrdwnm（体育志愿无院系轴）→ 池含体育课时全量拉
+//      ≤20 页（v1.5.0 同款 maxPages）。
+// 拉取策略 = 实时院系定向：池内课程按院系去重 → 逐院系 GET
+//   （v1.5.0 同款：首页无 page 无 token，翻页 &page=N）→ 院系内分页
+//   通常 1-3 页。搜索结果行遇到未拉院系按需补拉（防抖、不重拉）。
+// 阶段门控：仅非队列阶段（预选/志愿期）——队列阶段概率走排队/余量模型。
+NX.DEPT_CODES = {
+  '建筑学院': '000',
+  '城规系': '001',
+  '建筑系': '002',
+  '土木系': '003',
+  '水利系': '004',
+  '环境学院': '005',
+  '机械系': '012',
+  '精仪系': '013',
+  '能动系': '014',
+  '车辆学院': '015',
+  '工业工程系': '016',
+  '电机系': '022',
+  '电子系': '023',
+  '计算机系': '024',
+  '自动化系': '025',
+  '集成电路学院': '026',
+  '航院': '031',
+  '工物系': '032',
+  '化工系': '034',
+  '材料学院': '035',
+  '数学系': '042',
+  '物理系': '043',
+  '化学系': '044',
+  '生命学院': '045',
+  '地学系': '046',
+  '交叉信息院': '047',
+  '高研院': '048',
+  '经管学院': '051',
+  '公管学院': '059',
+  '金融学院': '060',
+  '中文系': '063',
+  '外文系': '064',
+  '法学院': '066',
+  '新闻学院': '067',
+  '马克思主义学院': '068',
+  '人文学院': '069',
+  '社科学院': '070',
+  '体育部': '072',
+  '图书馆': '075',
+  '艺教中心': '078',
+  '美术学院': '080',
+  '统计系': '088',
+  '建管系': '091',
+  '天文系': '092',
+  '安全学院': '093',
+  '人工智能学院': '094',
+  '心理系': '095',
+  '卫健学院': '096',
+  '苏世民书院': '097',
+  '建筑技术': '099',
+  '核研院': '101',
+  '教育学院': '103',
+  '训练中心': '151',
+  '电工电子中心': '155',
+  '学生部': '207',
+  '武装部': '209',
+  '教务处': '254',
+  '研究生院': '255',
+  '校医院': '305',
+  '药学院': '402',
+  '临床医学院': '405',
+  '软件学院': '410',
+  '网络研究院': '412',
+  '地区研究院': '413',
+  '航发院': '415',
+  '语言中心': '420',
+  '新雅书院': '470',
+  '致理书院': '471',
+  '日新书院': '472',
+  '未央书院': '473',
+  '行健书院': '475',
+  '求真书院': '476',
+  '为先书院': '477',
+  '秀钟书院': '478',
+  '笃实书院': '479',
+  '紫荆书院': '482',
+  '自强书院': '483',
+  '水木书院': '484',
+  '数学教学中心': '492',
+  '医学院': '500',
+  '基础医学院': '501',
+  '生医工程学院': '502',
+  '医疗管理学院': '503',
+  '国际研究生院': '599',
+  '清华大学全球创新学院': '601'
+};
+
+// 院系名 → 码（精确优先，双向 includes 兜底；外校课无志愿数据自然 miss）
+NX.deptCodeOf = function (dept) {
+  const d = (dept || '').trim();
+  if (!d) return '';
+  if (NX.DEPT_CODES[d]) return NX.DEPT_CODES[d];
+  const hit = Object.keys(NX.DEPT_CODES).find(k => d.includes(k) || k.includes(d));
+  return hit ? NX.DEPT_CODES[hit] : '';
+};
+
+NX.fetchVolunteer = async function (courses, opts) {
+  const { state, fetchPage, pagedFetch } = NX;
   if (!state.isZhjwxk) return {};
   const { SEM, BASE } = state;
-  const cacheKey = 'vol_' + SEM;
-  const cacheTTL = 30 * 60 * 1000;   // 志愿统计随填报动态变，30 分钟即够预览
-
-  // ① 缓存（同学期 30 分钟内不重复爬——OneTHU/v1.5.0 语义：一次爬全会话内复用）
-  try {
-    const cached = await NX.store.get(cacheKey);
-    if (cached && cached.map && Date.now() - (cached.ts || 0) < cacheTTL) {
-      console.log(NX.TAG, 'volunteer (cached):', Object.keys(cached.map).length, 'entries');
-      return cached.map;
-    }
-  } catch (e) { /* 缓存读失败当无缓存 */ }
-
+  const force = !!(opts && opts.force);
+  const done = state._volDepts || (state._volDepts = {});   // 本会话已拉院系（refreshSelected 用 force 重拉）
+  const pool = (courses || []).filter(c => c && c.code && !c.isCandidate);
   const map = {};
-
-  // ② 快路：池内逐门 p_kch 单查（教务检索组件同构的猜测路径；命中即省全量爬）
-  const todo = (courses || []).filter(c => c && c.code && !c.isCandidate);
-  let fetched = 0;
-  if (todo.length) {
-    await NX.runPool(todo, 4, async c => {
-      await new Promise(r => setTimeout(r, 30));   // 微错峰
-      try {
-        const br = BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchBR&p_xnxq=' + SEM + '&p_kch=' + encodeURIComponent(c.code) + '&_t=' + Date.now();
-        const dual = await NX.fetchPageDual(br);
-        const html = dual.gbk.includes('trr1') || dual.gbk.includes('trr2') ? dual.gbk : dual.utf8;
-        const batch = NX.parseVolFromHtml(html) || {};
-        for (const k in batch) { map[k] = batch[k]; fetched++; }
-        const isSports = c.typeCode === 'ty' || (c.typeLabel || '') === '体育' || (c.department || '').includes('体育');
-        if (isSports) {
-          try {
-            const ty = BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchTy&p_xnxq=' + SEM + '&p_kch=' + encodeURIComponent(c.code) + '&_t=' + Date.now();
-            const tyDual = await NX.fetchPageDual(ty);
-            const tyHtml = tyDual.gbk.includes('trr1') || tyDual.gbk.includes('trr2') ? tyDual.gbk : tyDual.utf8;
-            const tyBatch = NX.parseVolSportsFromHtml(tyHtml) || {};
-            for (const k in tyBatch) {
-              map[k] = Object.assign({ capacity: 0, applied: 0, volRequired: '', volElective: '', volOptional: '' }, map[k], tyBatch[k]);
-            }
-          } catch (e) { /* 体育统计失败容忍 */ }
-        }
-      } catch (e) { /* 单课失败容忍 */ }
-    });
-    console.log(NX.TAG, 'volunteer (pool-sync):', fetched, 'entries for', todo.length, 'courses');
-  }
-  if (fetched > 0) {
-    try { await NX.store.set(cacheKey, { ts: Date.now(), map }); } catch (e) {}
-    return map;
-  }
-
-  // ③ 兜底：OneTHU getXkVolunteer 原样分页爬（用户实锤「这网页和我们之前
-  // 弄的一模一样」——tbzySearchBR ≤200 页 + tbzySearchTy ≤20 页，5 并发
-  // 30ms 节流；快路 p_kch 服务端不认时走这里。阶段门控保证只在非队列
-  // 阶段（预选/志愿期）触发，且为后台非阻塞任务）。
-  const mkUrl = m => p => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM + (p > 0 ? '&page=' + p : '') + '&_t=' + Date.now();
-  const grab = async (m, parseFn, maxPages) => {
-    let fh = '';
-    try { fh = await NX.fetchPage(mkUrl(m)(0)); }
-    catch (e) { console.warn(NX.TAG, m, 'first page:', e); return []; }
-    const pg = NX.parsePagerInfo(fh);
-    const items = await NX.pagedFetch({
-      firstHtml: fh,
-      fetchPage: mkUrl(m),
-      parse: html => { const b = parseFn(html); const arr = Object.values(b); return { items: arr, hasData: arr.length > 0 }; },
-      maxPages, concurrency: 5, throttle: 30,
-      dedupe: v => v.code + '_' + v.seq,
-      expectPages: pg.pages, label: m,
-    });
-    return items;
+  const deptCodes = new Set();
+  pool.forEach(c => {
+    const code = NX.deptCodeOf(c.department);
+    if (code && (force || !done[code])) deptCodes.add(code);
+  });
+  const hasSports = pool.some(c => NX.isSportsCourse(c));
+  const parseVol = parseFn => html => {
+    const b = parseFn(html); const arr = Object.values(b);
+    return { items: arr, hasData: arr.length > 0 };
   };
-  try {
-    const volItems = await grab('tbzySearchBR', NX.parseVolFromHtml, 200);
-    volItems.forEach(v => { map[v.code + '_' + v.seq] = v; });
-  } catch (e) { console.warn(NX.TAG, 'volunteer crawl BR:', e); }
-  try {
-    const sportsItems = await grab('tbzySearchTy', NX.parseVolSportsFromHtml, 20);
-    sportsItems.forEach(v => {
-      map[v.code + '_' + v.seq] = Object.assign(
-        { capacity: 0, applied: 0, volRequired: '', volElective: '', volOptional: '' },
-        map[v.code + '_' + v.seq], v
-      );
-    });
-  } catch (e) { console.warn(NX.TAG, 'sports volunteer fetch:', e); }
-  console.log(NX.TAG, 'volunteer (crawl):', Object.keys(map).length, 'entries');
-  try { await NX.store.set(cacheKey, { ts: Date.now(), map }); } catch (e) {}
+  let reqs = 0;
+  // BR：逐院系（已拉的跳过；失败容忍不记 done，下次可重试）
+  for (const code of deptCodes) {
+    try {
+      const first = BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchBR&p_xnxq=' + SEM + '&p_lrdwnm=' + code;
+      const fh = await fetchPage(first);
+      reqs++;
+      const pg = NX.parsePagerInfo(fh);
+      const items = await pagedFetch({
+        firstHtml: fh,
+        fetchPage: p => p <= 1 ? Promise.resolve(fh) : fetchPage(first + '&page=' + p + '&_t=' + Date.now()),
+        parse: parseVol(NX.parseVolFromHtml),
+        maxPages: 25, concurrency: 3, throttle: 50,
+        dedupe: v => v.code + '_' + v.seq,
+        expectPages: pg.pages, label: 'vol-BR-' + code,
+      });
+      items.forEach(v => { map[v.code + '_' + v.seq] = v; });
+      done[code] = Date.now();
+    } catch (e) { console.warn(NX.TAG, 'volunteer dept ', code, e); }
+  }
+  // Ty：体育志愿（无院系轴，全量 ≤20 页；force 重拉）
+  if (hasSports && (force || !done.ty)) {
+    try {
+      const first = BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchTy&p_xnxq=' + SEM;
+      const fh = await fetchPage(first);
+      reqs++;
+      const pg = NX.parsePagerInfo(fh);
+      const items = await pagedFetch({
+        firstHtml: fh,
+        fetchPage: p => p <= 1 ? Promise.resolve(fh) : fetchPage(first + '&page=' + p + '&_t=' + Date.now()),
+        parse: parseVol(NX.parseVolSportsFromHtml),
+        maxPages: 20, concurrency: 3, throttle: 50,
+        dedupe: v => v.code + '_' + v.seq,
+        expectPages: pg.pages, label: 'vol-Ty',
+      });
+      items.forEach(v => {
+        map[v.code + '_' + v.seq] = Object.assign(
+          { capacity: 0, applied: 0, volRequired: '', volElective: '', volOptional: '' }, map[v.code + '_' + v.seq], v);
+      });
+      done.ty = Date.now();
+    } catch (e) { console.warn(NX.TAG, 'volunteer Ty:', e); }
+  }
+  console.log(NX.TAG, 'volunteer (dept-sync): ', Object.keys(map).length, 'entries,', reqs, 'depts fetched');
   return map;
 };
 
@@ -1113,5 +1199,22 @@ NX.mergeServerRows = function (rows) {
   }
   NX.applyLevelMap(rows);
   if (NX.tbAttach) { try { NX.tbAttach(rows); } catch (e) {} }   // fail-soft
+  // 志愿统计按需补拉：非队列阶段，搜索行院系未拉过 → 拉完合并回刷（防抖）。
+  // 院系定向（1 院系 1-3 请求），不整库爬；已拉院系本会话不重拉。
+  // （_volDepts 未初始化 = 首搜先于 launch 志愿同步 → 静默跳过，launch 会覆盖）
+  if (!state.isQueuePhase && state._volDepts) {
+    const newDepts = [...new Set(rows.map(c => NX.deptCodeOf(c.department)).filter(Boolean))]
+      .filter(dc => !state._volDepts[dc]);
+    if (newDepts.length) {
+      clearTimeout(state._volDebounce);
+      state._volDebounce = setTimeout(async () => {
+        try {
+          const vol = await NX.fetchVolunteer(rows);
+          NX.applyVolunteer(state.allCourses, vol);
+          NX.filterCourses();
+        } catch (e) { /* 补拉失败容忍 */ }
+      }, 400);
+    }
+  }
   return added;
 };
