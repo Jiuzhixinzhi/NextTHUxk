@@ -79,7 +79,7 @@ NX.courseCardHtml = function (c, ctx) {
     const currentZy = c.selected ? (c.zy || 3) : 3;
     const currentProbHtml = currentProbLine(c, currentFlag, currentZy);
     const probHtml = fullProbGrid(c, defFlag);
-    const qKey = c.code + '_' + (c.seq || '0');
+    const qKey = c.code + '_' + NX.normSeq(c.seq);
     const qd = queueDataMap[qKey];
     const cand = ctx.candMap.get(qKey);
     let queueInfoHtml = '';
@@ -331,7 +331,7 @@ NX.renderPreviewTT = function (courses, label) {
   courses.concat(manualEvents).forEach((c, ci) => {
     const lbl = c.teacher ? c.name + '(' + c.teacher + ')' : c.name;
     let cellColor = '', probLabel = '', probBgColor = '';
-    const qKey = c.code + '_' + (c.seq || '0');
+    const qKey = c.code + '_' + NX.normSeq(c.seq);
     const qd = queueDataMap[qKey];
     const cand = candidateCourses.find(cc => cc.code === c.code && String(cc.seq) === String(c.seq || '0'));
     if (c.manual) {
@@ -537,7 +537,7 @@ NX.stageProbHtml = function (c) {
   const ac = getCourse(c.code, c.seq);
   if (!ac) return '';
   if (isQueuePhase) {
-    const qKey = c.code + '_' + (c.seq || '0');
+    const qKey = c.code + '_' + NX.normSeq(c.seq);
     const qd = queueDataMap[qKey];
     if (qd) {
       const rc = qd.qRemaining > 0 ? '#07c160' : '#ee4d4d';
@@ -615,7 +615,7 @@ NX.draftCourseProbHtml = function (c) {
   const ac = getCourse(c.code, c.seq);
   if (!ac) return '';
   if (isQueuePhase) {
-    const qKey = c.code + '_' + (c.seq || '0');
+    const qKey = c.code + '_' + NX.normSeq(c.seq);
     const qd = queueDataMap[qKey];
     if (qd) {
       const rc = qd.qRemaining > 0 ? '#07c160' : '#ee4d4d';

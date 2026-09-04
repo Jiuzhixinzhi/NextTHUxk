@@ -297,7 +297,7 @@ NX.launch = async function launch() {
       if (state.isQueuePhase) {
         // 队列阶段：池行余量合并（卡片 余X/Y 徽章、可选筛选、概率网格用）
         pool.forEach(c => {
-          const q = state.queueDataMap[c.code + '_' + (c.seq || '0')];
+          const q = state.queueDataMap[c.code + '_' + NX.normSeq(c.seq)];
           if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
         });
       } else {
@@ -410,7 +410,7 @@ $('nextthuxk-refresh-queue').onclick = async () => {
   });
   // 池行余量合并（同 launch）
   state.allCourses.forEach(c => {
-    const q = state.queueDataMap[c.code + '_' + String(c.seq || '0')];
+    const q = state.queueDataMap[c.code + '_' + NX.normSeq(c.seq)];
     if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
   });
   state.selVersion = (state.selVersion || 0) + 1;   // 预览缓存失效（候选集变了）

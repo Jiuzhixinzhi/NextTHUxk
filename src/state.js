@@ -408,7 +408,7 @@ NX.refreshSelected = async function () {
     state.isQueuePhase = qResult.phase;   // 同 content.js：纯 xkqkSearch 探针
     if (state.isQueuePhase) {
       allCourses.forEach(c => {
-        const q = state.queueDataMap[c.code + '_' + (c.seq || '0')];
+        const q = state.queueDataMap[c.code + '_' + NX.normSeq(c.seq)];
         if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
       });
     } else {

@@ -470,12 +470,25 @@ NX.fetchVolunteer = async function (courses, opts) {
   return map;
 };
 
-// 志愿数据合并进池行（卡片概率/暂存概率网格用；mergeStaticData 同款字段）
+// 课序号归一：教务各页前导零不一致（志愿统计 "1" vs 选课页 "01"）
+NX.normSeq = function (s) { return String(parseInt(s, 10) || 0); };
+
+// 志愿数据合并进池行（卡片概率/暂存概率网格用）
+// 段匹配规则（用户实锤「5/2」张冠李戴事故）：志愿统计页的课序号与选课页
+// 前导零不一致（存档 Ty 行 "10720011","1" vs 一级课表/搜索行 "01"）——
+// ① 原始键 ② 归一化键（parseInt 去前导零）③ 逐行归一比对；
+// 段对不上且该课多段时**宁缺毋滥**（旧 byCode 任意取首段 = 拿别的班的
+// 容量/报名人数冒充本班——卡片出现莫名其妙的比例），单段才允许回退。
 NX.applyVolunteer = function (courses, volData) {
-  const byCode = {};
-  for (const v of Object.values(volData || {})) if (!byCode[v.code]) byCode[v.code] = v;
+  const byCodeAll = {};
+  for (const v of Object.values(volData || {})) (byCodeAll[v.code] = byCodeAll[v.code] || []).push(v);
+  const norm = s => String(parseInt(s, 10) || 0);
   (courses || []).forEach(c => {
-    const v = (c.seq && volData[c.code + '_' + c.seq]) || byCode[c.code];
+    const rows = byCodeAll[c.code] || [];
+    let v = volData[c.code + '_' + (c.seq || '0')]
+      || volData[c.code + '_' + norm(c.seq)]
+      || rows.find(r => norm(r.seq) === norm(c.seq))
+      || (rows.length === 1 ? rows[0] : null);   // 多段不盲配
     if (v) {
       c.volRequired = v.volRequired; c.volElective = v.volElective; c.volOptional = v.volOptional;
       c.volSports = v.volSports || '';
@@ -786,7 +799,7 @@ NX.fetchQueueData = async function (courses) {
     const map = {};
     let gm;
     while ((gm = gridRegex.exec(firstHtml)) !== null) {
-      const key = gm[1] + '_' + gm[2];
+      const key = gm[1] + '_' + (NX.normSeq ? NX.normSeq(gm[2]) : gm[2]);   // 段号归一（前导零）
       map[key] = { code: gm[1], seq: gm[2], qCapacity: parseInt(gm[3]) || 0, qRemaining: parseInt(gm[4]) || 0, qQueue: 0 };
     }
     const token = (firstHtml.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';
@@ -813,7 +826,7 @@ NX.fetchQueueData = async function (courses) {
           let pm;
           const re = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
           while ((pm = re.exec(html)) !== null) {
-            const key = pm[1] + '_' + pm[2];
+            const key = pm[1] + '_' + (NX.normSeq ? NX.normSeq(pm[2]) : pm[2]);
             if (!map[key]) map[key] = { code: pm[1], seq: pm[2], qCapacity: parseInt(pm[3]) || 0, qRemaining: parseInt(pm[4]) || 0, qQueue: 0 };
           }
         } catch (e) { console.warn(NX.TAG, 'kyl code', code, e); }
@@ -836,7 +849,7 @@ NX.fetchQueueData = async function (courses) {
         const qData = JSON.parse(qText);
         if (Array.isArray(qData)) {
           qData.forEach(obj => {
-            const key = obj.kch + '_' + obj.kxh;
+            const key = obj.kch + '_' + NX.normSeq(obj.kxh);   // 课序号归一（前导零跨页不一致）
             if (map[key]) map[key].qQueue = parseInt(obj.dlrs) || 0;
           });
           qFailStreak = 0;

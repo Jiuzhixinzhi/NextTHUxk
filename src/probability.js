@@ -110,7 +110,9 @@ NX.probResult = function (rem, applicants) {
   }
   const remShown = Math.max(0, Math.round(rem));
   const applicantsShown = Math.max(0, Math.round(applicants));
-  if (rem <= 0) return { prob: 0, label: '0%', percentLabel: '0%', ratioLabel: remShown + '/' + applicantsShown, color: '#ee4d4d' };
+  // 比例标签 = 人数/名额（「2/5」=2人抢5位；用户实锤：与占用条 已选/容量
+  // 同向。旧版 剩余/人数「5/2」在卡片上和上面的 2/5 并排，读起来像搞反了）
+  if (rem <= 0) return { prob: 0, label: '0%', percentLabel: '0%', ratioLabel: applicantsShown + '/' + remShown, color: '#ee4d4d' };
   const prob = applicants === 0 ? 1 : Math.min(1, rem / applicants);
   if (!Number.isFinite(prob)) return { prob: -1, label: '无数据', percentLabel: '无数据', ratioLabel: '无数据', color: '#9aa1ac' };
   let color;
@@ -118,7 +120,7 @@ NX.probResult = function (rem, applicants) {
   else if (prob >= 0.5) color = '#ff9f1a';
   else color = '#ee4d4d';
   const percentLabel = Math.round(prob * 100) + '%';
-  const ratioLabel = remShown + '/' + applicantsShown;
+  const ratioLabel = applicantsShown + '/' + remShown;   // 人数/名额，见上
   return { prob, label: percentLabel, percentLabel, ratioLabel, color };
 };
 
