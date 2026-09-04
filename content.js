@@ -256,17 +256,18 @@ NX.launch = async function launch() {
     // 搜索时服务器随时查——绝不整库预爬（原版 320 页目录 + 220 页志愿
     // ≈ 500+ 请求已删）。staticData 只存培养方案（DATA_VER=6 起旧缓存清空）。
     state.planData = sd?.plan || [];
-    listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;正在读取已选/课余量…</div>';
-    console.log(TAG, 'on-demand mode: fetching selected + queue + plan only');
-    const [selectedCourses, qResult, planFresh] = await Promise.all([
+    listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;正在读取已选/队列…</div>';
+    console.log(TAG, 'on-demand mode: fetching selected + candidates + plan');
+    // 候选不再 phase 门控（OneTHU getQueueStatus 语义：独立拉取，dlSearch 拿不到
+    // 走一级课表 kbSearch 兜底——「看不到队列候选」实锤：xkqkSearch 阶段探测失败
+    // 时旧代码直接跳过候选拉取）
+    const [selectedCourses, candCourses, planFresh] = await Promise.all([
       fetchSelectedCourses().catch(e => { console.warn(TAG, 'selected:', e); return []; }),
-      fetchQueueData(),
+      fetchCandidateCourses().catch(e => { console.warn(TAG, 'candidates:', e); return []; }),
       state.planData.length ? Promise.resolve(null) : fetchTrainingPlan().catch(e => { console.warn(TAG, 'plan:', e); return []; }),
     ]);
     if (!state.planData.length) state.planData = planFresh || [];
-    state.queueDataMap = qResult.map;
-    state.isQueuePhase = qResult.phase;
-    state.candidateCourses = state.isQueuePhase ? await fetchCandidateCourses() : [];
+    state.candidateCourses = candCourses;
     // 核心池 = 已选 + 候补（预览/暂存/冲突/AI 的基础；搜索结果运行时带标记渲染）
     const pool = selectedCourses.map(c => ({ ...c, selected: true }));
     state.candidateCourses.forEach(c => {
@@ -274,6 +275,17 @@ NX.launch = async function launch() {
     });
     state.allCourses = pool;
     NX.rebuildCourseMap();   // code+seq → course 索引，渲染/查询统一 O(1)
+    // 课余量/排队：池内按需 API 同步（xkqkSearch 1 + kylSearch 逐门 + 批量排队 1，
+    // 替代旧 320 页整库硬爬）；搜索结果余量由 kkxxSearch 行自带
+    listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;正在同步课余量…</div>';
+    const qResult = await NX.fetchQueueData(pool).catch(e => { console.warn(TAG, 'queue:', e); return { map: {}, phase: false }; });
+    state.queueDataMap = qResult.map;
+    state.isQueuePhase = qResult.phase || candCourses.length > 0;
+    // 池行余量合并（卡片 余X/Y 徽章、可选筛选、概率网格用）
+    pool.forEach(c => {
+      const q = state.queueDataMap[c.code + '_' + (c.seq || '0')];
+      if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
+    });
     if (state.SEM === SEM0) {
       await store.set('staticData', { ver: DATA_VER, plan: state.planData, ts: Date.now() });
     } else {
@@ -312,8 +324,8 @@ NX.finishLaunch = function (sd, selCount, volTs, volRefreshed) {
   const cacheEl = $('nextthuxk-cache-info');
   if (cacheEl) {
     cacheEl.innerHTML = state.isQueuePhase
-      ? '课余量实时数据 · ' + Object.keys(state.queueDataMap).length + '门 · 随时查询模式'
-      : '随时查询模式 · 已选 ' + selCount + ' 门（不再整库预爬）';
+      ? '课余量池内同步 ' + Object.keys(state.queueDataMap).length + ' 门 · 候补 ' + state.candidateCourses.length + ' 门 · 随时查询'
+      : '随时查询模式 · 已选 ' + selCount + ' 门 · 候补 ' + state.candidateCourses.length + ' 门（不再整库预爬）';
   }
   store.get('config').then(cfg => {
     if (!cfg) return;
@@ -352,12 +364,17 @@ $('nextthuxk-refresh').onclick = async () => {
 $('nextthuxk-refresh-queue').onclick = async () => {
   const btn = $('nextthuxk-refresh-queue');
   if (btn) { btn.textContent = '刷新中…'; btn.disabled = true; }
-  const qResult = await NX.fetchQueueData();
+  const qResult = await NX.fetchQueueData(state.allCourses);
   state.queueDataMap = qResult.map;
-  state.isQueuePhase = qResult.phase;
+  state.isQueuePhase = qResult.phase || state.candidateCourses.length > 0;
   state.candidateCourses = await NX.fetchCandidateCourses();
-  const candCodes = new Set(state.candidateCourses.map(c => c.code));
-  state.allCourses.forEach(c => { c.isCandidate = candCodes.has(c.code); });
+  const candKeys = new Set(state.candidateCourses.map(c => c.code + '_' + String(c.seq || '0')));
+  state.allCourses.forEach(c => { c.isCandidate = candKeys.has(c.code + '_' + String(c.seq || '0')); });
+  // 池行余量合并（同 launch）
+  state.allCourses.forEach(c => {
+    const q = state.queueDataMap[c.code + '_' + String(c.seq || '0')];
+    if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
+  });
   filterCourses();
   renderPreviewTT(
     state.allCourses.filter(c => c.selected).concat(state.candidateCourses.filter(cc => !state.allCourses.some(ac => ac.selected && ac.code === cc.code))),

@@ -52,7 +52,10 @@ NX.parseCatalog = function (doc) {
     const cell = i => (tds[i]?.textContent || '').trim().replace(/\s+/g, ' ');
     const code = cell(1);
     const name = cell(3);
-    if (!code || !name || !/^\d+$/.test(code)) return;
+    // 外校课程课号带前缀：PK=北大、GPK=北大研、BW=北外（如 BW3w0007 含小写
+    // 字母）。OneTHU 同款规则：纯字母数字且至少含一个数字——旧版 /^\d+$/
+    // 把 PK/GPK/BW 行全吃了（「北大北外课搜不到」实锤）。
+    if (!code || !name || !/^[A-Za-z0-9]+$/.test(code) || !/\d/.test(code)) return;
     const bksCap = parseInt(cell(6)) || 0;
     const bksRem = parseInt(cell(7)) || 0;
     const teacherLink = tds[5]?.querySelector('a[href*="showJsDetail"]');
@@ -642,61 +645,57 @@ NX.fetchCourseDetail = async function (teacherId, code) {
 
 // ─── Queue Data (课余量 + 排队人数) ──────────────────────────
 
-NX.fetchQueueData = async function () {
+// ─── 课余量/排队（xk-1.5.1 改造：池内按需 API 同步，替代整库 320 页硬爬）──
+// 旧版 kylSearch 全量翻页（≤320 页 ≈ 325 请求）已删——任何数据都不整库预爬。
+// 新流（传池内课程）：xkqkSearch 首页 1 个请求（阶段探测 + token）→ 池内课程
+// 逐门 kylSearch POST（p_kch 精确，1 课 1 请求，5 并发微错峰）→ 排队人数
+// selectBksDlCount 批 100（池内 keys，通常 1 个请求）。搜索结果的余量由
+// kkxxSearch 行自带（remaining/gradRemaining 列），不经此路。
+NX.fetchQueueData = async function (courses) {
   const { state, fetchPage } = NX;
   if (!state.isZhjwxk) return { map: {}, phase: false };
   const { SEM, BASE } = state;
   try {
-    const map = {};
     const firstHtml = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=xkqkSearch&p_xnxq=' + SEM);
     if (!firstHtml.includes('gridData') || firstHtml.includes('accessDenied')) return { map: {}, phase: false };
     const gridRegex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
+    const map = {};
     let gm;
     while ((gm = gridRegex.exec(firstHtml)) !== null) {
       const key = gm[1] + '_' + gm[2];
       map[key] = { code: gm[1], seq: gm[2], qCapacity: parseInt(gm[3]) || 0, qRemaining: parseInt(gm[4]) || 0, qQueue: 0 };
     }
-    const tokenMatch = firstHtml.match(/name="token"\s+value="([^"]+)"/);
-    const token = tokenMatch ? tokenMatch[1] : '';
+    const token = (firstHtml.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';
     const formAction = BASE + '/xkBks.vxkBksJxjhBs.do';
-    const pgRegex = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
     if (token) {
-      const gPager = NX.parsePagerInfo(firstHtml);
-      const parseKyl = html => {
-        if (!html.includes('gridData')) return { items: [], hasData: false };
-        const items = [];
-        let pm;
-        while ((pm = pgRegex.exec(html)) !== null) {
-          items.push({ code: pm[1], seq: pm[2], qCapacity: parseInt(pm[3]) || 0, qRemaining: parseInt(pm[4]) || 0, qQueue: 0 });
-        }
-        return { items, hasData: items.length > 0 };
-      };
-      // v1.3.13：并发 POST（同 catalog 速度回退）。kyl 表单无院系字段；
-      // 与 catalog 一样，深分页固定截断（实测 ~2759~5563 随 session 情况浮动），不再强求全量
-      const kylPost = async p => {
+      // 池内课程逐门精确查（p_kch）：1 课 1 请求，绝不翻页连发
+      const codes = [...new Set((courses || []).map(c => String(c.code || '').trim()).filter(Boolean))];
+      const kylPost = async code => {
         const body = new URLSearchParams({
-          m: 'kylSearch', page: String(p), token,
+          m: 'kylSearch', page: '1', token,
           'p_sort.p1': '', 'p_sort.p2': '', 'p_sort.asc1': 'true', 'p_sort.asc2': 'true',
           p_xnxq: SEM, pathContent: '',
-          p_kch: '', p_kxh: '', p_kcm: '', p_skxq: '', p_skjc: '', bt: '',
+          p_kch: code, p_kxh: '', p_kcm: '', p_skxq: '', p_skjc: '', bt: '',
         });
         const resp = await fetch(formAction, { method: 'POST', credentials: 'include', body });
         const buf = await resp.arrayBuffer();
         return new TextDecoder('gbk').decode(buf);
       };
-      const addToMap = list => list.forEach(q => { const key = q.code + '_' + q.seq; if (!map[key]) map[key] = q; });
-      const items = await NX.pagedFetch({
-        firstHtml,
-        fetchPage: p => kylPost(p),
-        parse: parseKyl,
-        maxPages: 320, concurrency: 5, throttle: 30,
-        dedupe: q => q.code + '_' + q.seq,
-        expectPages: gPager.pages, label: 'kylSearch',
+      await NX.runPool(codes, 5, async (code, idx) => {
+        await new Promise(r => setTimeout(r, 30 * (idx % 5)));   // 微错峰（40/74 教训）
+        try {
+          const html = await kylPost(code);
+          if (!html.includes('gridData')) return;
+          let pm;
+          const re = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
+          while ((pm = re.exec(html)) !== null) {
+            const key = pm[1] + '_' + pm[2];
+            if (!map[key]) map[key] = { code: pm[1], seq: pm[2], qCapacity: parseInt(pm[3]) || 0, qRemaining: parseInt(pm[4]) || 0, qQueue: 0 };
+          }
+        } catch (e) { console.warn(NX.TAG, 'kyl code', code, e); }
       });
-      addToMap(items);
     }
-    if (!Object.keys(map).length) return { map: {}, phase: false };
-    // Fetch real-time queue counts（并发 4；连续失败熔断 + 提示重登录，避免 session 失效时连撞错）
+    // 排队人数（selectBksDlCount 批 100；只查池内 keys；连败 3 批熔断）
     const parts = Object.values(map).map(q => SEM + '_' + q.code + '_' + q.seq);
     const batchSize = 100;
     const batches = [];
@@ -709,8 +708,7 @@ NX.fetchQueueData = async function () {
           credentials: 'include',
         });
         if (!qResp.ok) { qFailStreak++; return; }
-        const qBuf = await qResp.arrayBuffer();
-        const qText = new TextDecoder('gbk').decode(qBuf);
+        const qText = new TextDecoder('gbk').decode(await qResp.arrayBuffer());
         const qData = JSON.parse(qText);
         if (Array.isArray(qData)) {
           qData.forEach(obj => {
@@ -723,12 +721,12 @@ NX.fetchQueueData = async function () {
         qFailStreak++;
         if (!qFailWarned && qFailStreak >= 3) {
           qFailWarned = true;
-          console.warn(NX.TAG, 'queue count batches keep failing — session may be invalidated; please re-login');
-          if (!NX.state.fetchWarn) NX.state.fetchWarn = '课余量排队人数获取失败，可能需退出重新登录';
+          console.warn(NX.TAG, 'queue count batches keep failing — session may be invalidated');
+          if (!NX.state.fetchWarn) NX.state.fetchWarn = '排队人数获取失败，可能需退出重新登录';
         }
       }
     });
-    console.log(NX.TAG, 'queue data:', Object.keys(map).length, 'courses');
+    console.log(NX.TAG, 'queue data (pool-sync):', Object.keys(map).length, 'courses');
     return { map, phase: true };
   } catch (e) {
     console.warn(NX.TAG, 'queue data fetch:', e);
@@ -744,7 +742,9 @@ NX.fetchCandidateCourses = async function () {
   const { SEM, BASE } = state;
   try {
     const html = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=dlSearch&p_xnxq=' + SEM);
-    if (html.includes('accessDenied') || !html.includes('trr2')) return [];
+    if (html.includes('accessDenied')) return [];
+    // 无 trr2（「队列功能未开放」提示页等）不早退：继续解析出 0 行后走
+    // kbSearch 兜底（OneTHU getQueueStatus 语义：rows==0 && 提示信息 → 课表爬候选）
     const doc = new DOMParser().parseFromString(html, 'text/html');
     const rows = doc.querySelectorAll('tr.trr2');
     const candidates = [];
@@ -773,11 +773,56 @@ NX.fetchCandidateCourses = async function () {
       });
     });
     console.log(NX.TAG, 'candidate courses:', candidates.length);
+    // 「队列功能未开放」等拦截兜底（OneTHU getQueueStatus 同款）：dlSearch 零行
+    // 且页面带提示信息 → 从一级课表（kbSearch）脚本块里挖候选课（p_id=课号 +
+    // 「候选：课名」+ 格子 id a{节}_{天}）。课表也没有就安静空着不报错。
+    if (!candidates.length && html.includes('提示信息')) {
+      try {
+        const kb = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=kbSearch&p_xnxq=' + SEM);
+        const kbCand = NX.parseTimetableCandidates(kb);
+        console.log(NX.TAG, 'queue closed → kbSearch candidates:', kbCand.length);
+        if (kbCand.length) return kbCand;
+      } catch (e) { console.warn(NX.TAG, 'kbSearch fallback:', e); }
+    }
     return candidates;
   } catch (e) {
     console.warn(NX.TAG, 'candidate fetch:', e);
     return [];
   }
+};
+
+// 一级课表 → 候选课兜底（OneTHU parseTimetableCandidates 逐行移植）：
+// 逐块扫脚本：p_id=..;课号 …候选：名 …getElementById('a{节}_{天}')——格子 id
+// 即真实时间正源（不依赖目录加载顺序）。教师在块内 strHTML1 "；X" 行
+// （教师/类型/周次）。同课多格（跨节次）按课号合并时间为逗号串。
+NX.parseTimetableCandidates = function (html) {
+  const byCode = new Map();
+  const re = /p_id=\d+;(\d{6,})[\s\S]{0,600}?候选：([^<&"'\n]{1,60})[\s\S]{0,600}?getElementById\('a([1-6])_([1-7])'\)/g;
+  let m;
+  while ((m = re.exec(html)) !== null) {
+    const code = m[1];
+    const name = (m[2] || '').trim();
+    // 格子 id 是 a{节}_{天}（a6_4=周四第6节，与 dlSearch「4-6」同位不同序——实测对齐）
+    const slot = m[3], day = m[4];
+    if (!code || !name || !day || !slot) continue;
+    const block = html.slice(m.index, m.index + m[0].length);
+    const parts = [...block.matchAll(/strHTML1 \+= "；([^"]*)"/g)].map(x => x[1] || '');
+    const slotStr = day + '-' + slot + '(' + (parts[2] || '全周') + ')';
+    const prev = byCode.get(code);
+    if (prev) {
+      if (!prev.time.includes(slotStr)) prev.time += ',' + slotStr;
+      continue;
+    }
+    byCode.set(code, {
+      typeLabel: parts[1] || '',
+      zyStr: '',
+      code, name, seq: '0', queueTotal: 0, myPos: 0,
+      time: slotStr, teacher: parts[0] || '',
+      credits: 0, typeCode: '007', zy: 3,
+      isCandidate: true, selected: false,
+    });
+  }
+  return [...byCode.values()];
 };
 
 // ─── Merge ────────────────────────────────────────────────────
