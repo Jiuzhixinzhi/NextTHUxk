@@ -282,16 +282,21 @@ NX.launch = async function launch() {
     state.allCourses = pool;
     NX.rebuildCourseMap();   // code+seq → course 索引，渲染/查询统一 O(1)
     // 课余量/排队：池内按需 API 同步（xkqkSearch 1 + kylSearch 逐门 + 批量排队 1，
-    // 替代旧 320 页整库硬爬）；搜索结果余量由 kkxxSearch 行自带
-    listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;正在同步课余量…</div>';
-    const qResult = await NX.fetchQueueData(pool).catch(e => { console.warn(TAG, 'queue:', e); return { map: {}, phase: false }; });
-    state.queueDataMap = qResult.map;
-    state.isQueuePhase = qResult.phase || candCourses.length > 0;
-    // 池行余量合并（卡片 余X/Y 徽章、可选筛选、概率网格用）
-    pool.forEach(c => {
-      const q = state.queueDataMap[c.code + '_' + (c.seq || '0')];
-      if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
-    });
+    // 替代旧 320 页整库硬爬）；搜索结果余量由 kkxxSearch 行自带。
+    // 非阻塞（OneTHU commitCore 语义：UI 先上屏，数据后到回填）——队列接口
+    // 再慢/再挂也绝不挡已选/候补首屏渲染。
+    (async () => {
+      const qResult = await NX.fetchQueueData(pool).catch(e => { console.warn(TAG, 'queue:', e); return { map: {}, phase: false }; });
+      state.queueDataMap = qResult.map;
+      state.isQueuePhase = qResult.phase || state.candidateCourses.length > 0;
+      // 池行余量合并（卡片 余X/Y 徽章、可选筛选、概率网格用），完成后回刷
+      pool.forEach(c => {
+        const q = state.queueDataMap[c.code + '_' + (c.seq || '0')];
+        if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
+      });
+      NX.filterCourses();
+      NX.renderPreviewTT(NX.getPreviewCourses(), (state.$('nextthuxk-preview-info') || {}).textContent || '当前已选');
+    })();
     if (state.SEM === SEM0) {
       await store.set('staticData', { ver: DATA_VER, plan: state.planData, ts: Date.now() });
     } else {

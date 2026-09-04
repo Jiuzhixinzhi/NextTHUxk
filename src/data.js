@@ -741,50 +741,56 @@ NX.fetchCandidateCourses = async function () {
   if (!state.isZhjwxk) return [];
   const { SEM, BASE } = state;
   try {
-    const html = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=dlSearch&p_xnxq=' + SEM);
-    if (html.includes('accessDenied')) return [];
-    // OneTHU parseQueueCandidates 逐行移植（regex 版，不依赖 DOMParser）：
-    // ①行类放宽 trr2→trr[12]——新学期版式换行类时只认 trr2 会静默空列表
-    //   （「我的队列被吃了」实测事故，OneTHU 注释原话）；trr1 是表头无 td，
-    //   天然被列数门槛过滤；②列数门槛 ≥7（旧版 <9 会把新列序整表吃掉）。
-    const candidates = [];
-    const rowRe = /<tr[^>]*class="trr[12]"[^>]*>([\s\S]*?)<\/tr>/g;
-    let m;
-    while ((m = rowRe.exec(html)) !== null) {
-      const tds = [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(t => t[1].replace(/<[^>]*>/g, '').trim());
-      if (tds.length < 7) continue;
-      const td = i => tds[i] || '';
-      const typeLabel = td(0);
-      const zyStr = td(1);
-      const code = td(2);
-      const name = td(3);
-      const seq = td(4);
-      const queueTotal = parseInt(td(5)) || 0;
-      const myPos = parseInt(td(6)) || 0;
-      const time = td(7) || '';
-      const teacher = td(8) || '';
-      if (!code || !name) continue;
-      const zyNum = zyStr.match(/第([一二三1-3])志愿/);   // 一二三/1-3 两种写法都收
-      const typeCode = typeLabel === '必修' ? '006' : typeLabel === '限选' ? '008' : '007';
-      candidates.push({
-        code, seq: seq || '0', name, teacher, time,
-        credits: 0, typeLabel, typeCode,
-        zy: zyNum ? ({ '一': 1, '二': 2, '三': 3 }[zyNum[1]] || parseInt(zyNum[1]) || 3) : 3,
-        queueTotal, myPos,
-        isCandidate: true,
-        selected: false,
-      });
-    }
+    // 双解码抓取（OneTHU reqwest 自动转码等价）：GBK/UTF-8 各解各解析，
+    // 按行数选优——站点无论哪种编码，行都在，「吃行」不可能再发生
+    const dual = await NX.fetchPageDual(BASE + '/xkBks.vxkBksXkbBs.do?m=dlSearch&p_xnxq=' + SEM);
+    if (dual.gbk.includes('accessDenied') && dual.utf8.includes('accessDenied')) return [];
+    const parseDl = html => {
+      const out = [];
+      const rowRe = /<tr[^>]*class="trr[12]"[^>]*>([\s\S]*?)<\/tr>/g;
+      let m;
+      while ((m = rowRe.exec(html)) !== null) {
+        const tds = [...m[1].matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(t => t[1].replace(/<[^>]*>/g, '').trim());
+        if (tds.length < 7) continue;
+        const td = i => tds[i] || '';
+        const typeLabel = td(0);
+        const zyStr = td(1);
+        const code = td(2);
+        const name = td(3);
+        const seq = td(4);
+        const queueTotal = parseInt(td(5)) || 0;
+        const myPos = parseInt(td(6)) || 0;
+        const time = td(7) || '';
+        const teacher = td(8) || '';
+        if (!code || !name) continue;
+        const zyNum = zyStr.match(/第([一二三1-3])志愿/);   // 一二三/1-3 两种写法都收
+        const typeCode = typeLabel === '必修' ? '006' : typeLabel === '限选' ? '008' : '007';
+        out.push({
+          code, seq: seq || '0', name, teacher, time,
+          credits: 0, typeLabel, typeCode,
+          zy: zyNum ? ({ '一': 1, '二': 2, '三': 3 }[zyNum[1]] || parseInt(zyNum[1]) || 3) : 3,
+          queueTotal, myPos,
+          isCandidate: true,
+          selected: false,
+        });
+      }
+      return out;
+    };
+    const candidates = NX.pickDecoded(parseDl, dual);
     console.log(NX.TAG, 'candidate courses:', candidates.length);
     // dlSearch 零行 → 一级课表（kbSearch）兜底（OneTHU getQueueStatus 语义：
     // 「队列功能未开放」提示页/任何零行场景——用户语义：官网课表能看到排队课
     // 就从课表爬；课表也没有就安静空着不报错）
     if (!candidates.length) {
       try {
-        const kb = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=kbSearch&p_xnxq=' + SEM);
-        const kbCand = NX.parseTimetableCandidates(kb);
+        // kbSearch 双解码：脚本块「候选：」中文标记只在正确解码下能被正则命中
+        // （「候选：」→ 错误解码下变乱码 → 0 命中，天然判别器）
+        const kbDual = await NX.fetchPageDual(BASE + '/xkBks.vxkBksXkbBs.do?m=kbSearch&p_xnxq=' + SEM);
+        const kbCand = NX.pickDecoded(h => NX.parseTimetableCandidates(h), kbDual);
         console.log(NX.TAG, 'dlSearch empty → kbSearch candidates:', kbCand.length);
         if (kbCand.length) return kbCand;
+        // 诊断（OneTHU zhjwxkDebug 语义）：0 命中时把页面形态留在控制台
+        console.warn(NX.TAG, 'kbSearch 0 candidates: gbk len', kbDual.gbk.length, 'utf8 len', kbDual.utf8.length, 'p_id blocks:', (kbDual.gbk.match(/p_id=/g) || []).length);
       } catch (e) { console.warn(NX.TAG, 'kbSearch fallback:', e); }
     }
     return candidates;

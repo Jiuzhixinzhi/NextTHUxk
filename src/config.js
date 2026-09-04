@@ -79,23 +79,52 @@ NX.store = {
 // ─── Network ──────────────────────────────────────────────────
 NX._GBK_URL_RE = /zhjw|xkBks|jhBks|vjsKcbBs/;
 
+// 编码探测解码（OneTHU reqvest 自动按响应转码的忠实等价）：
+// ①服务端声明 charset → 按声明；②GBK/UTF-8 各解一遍，替换符（U+FFFD）
+// 单侧出现即判定；③都无替换符 → 标签数多者胜（错码会吃掉 "<"/'"' 减标签）；
+// ④仍平（纯 ASCII）→ xkBks 教务默认 GBK。
+// 旧版对 xkBks URL 无条件 GBK：源为 UTF-8 时中文尾字节吞掉标签引号，
+// dlSearch/kbSearch 结构损坏解析 0 行——「候选彻底消失」实锤根因。
+NX.decodeBest = function (buf, url) {
+  const asGbk = new TextDecoder('gbk').decode(buf);
+  const asUtf8 = new TextDecoder('utf-8').decode(buf);
+  const REPL = String.fromCharCode(0xFFFD);   // U+FFFD 解码替换符
+  const gbkBad = asGbk.includes(REPL);
+  const utf8Bad = asUtf8.includes(REPL);
+  if (gbkBad !== utf8Bad) return gbkBad ? asUtf8 : asGbk;
+  const gTags = (asGbk.match(/</g) || []).length;
+  const uTags = (asUtf8.match(/</g) || []).length;
+  if (gTags !== uTags) return gTags > uTags ? asGbk : asUtf8;
+  return NX._GBK_URL_RE.test(url) ? asGbk : asUtf8;
+};
+
 NX.fetchPage = async function (url, opts = {}) {
   const resp = await fetch(url, { credentials: 'include', ...opts });
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const buf = await resp.arrayBuffer();
-  // URL 命中已知 GBK 接口 → 直接 GBK 解码，跳过无谓的 UTF-8 试解码
-  if (NX._GBK_URL_RE.test(url)) return new TextDecoder('gbk').decode(buf);
   const ct = (resp.headers.get('content-type') || '').toLowerCase();
-  const rawStr = new TextDecoder().decode(buf);
-  const hasGbkCt = ct.includes('gb');
-  const hasGbkMeta =
-    rawStr.includes('charset=GBK') ||
-    rawStr.includes('charset=gb2312') ||
-    rawStr.includes('charset="GBK"');
-  if (hasGbkCt || hasGbkMeta) {
-    return new TextDecoder('gbk').decode(buf);
-  }
-  return rawStr;
+  if (ct.includes('gb')) return new TextDecoder('gbk').decode(buf);
+  if (ct.includes('utf-8')) return new TextDecoder('utf-8').decode(buf);
+  return NX.decodeBest(buf, url);
+};
+
+// 双解码抓取（OneTHU reqwest 自动转码的最忠实等价）：返回 gbk/utf8 两种解码，
+// 由调用方按解析结果挑——kbSearch 的「候选：」正则只在正确解码下命中，
+// 天然判别器；行数同则替换符少者胜，再同则教务默认 GBK。
+NX.fetchPageDual = async function (url, opts = {}) {
+  const resp = await fetch(url, { credentials: 'include', ...opts });
+  if (!resp.ok) throw new Error('HTTP ' + resp.status);
+  const buf = await resp.arrayBuffer();
+  return { gbk: new TextDecoder('gbk').decode(buf), utf8: new TextDecoder('utf-8').decode(buf) };
+};
+
+// 双解码结果选优：score = parse(html).length ×2 +（无替换符 +1）；平分回退 gbk。
+NX.pickDecoded = function (parse, dual) {
+  const REPL = String.fromCharCode(0xFFFD);
+  const ga = parse(dual.gbk), ua = parse(dual.utf8);
+  const gs = ga.length * 2 + (dual.gbk.includes(REPL) ? 0 : 1);
+  const us = ua.length * 2 + (dual.utf8.includes(REPL) ? 0 : 1);
+  return us > gs ? ua : ga;
 };
 
 // ─── 并发分页抓取器 ───────────────────────────────────────────
