@@ -200,6 +200,27 @@ NX.backfillSelTimes = async function () {
           const byName = await NX.serverSearch({ kcm: r.name });
           rows = byName.rows || [];
         }
+        if (!rows.length) {
+          // 双索引全缺兜底：浏览页扫描。外校课号 000/BW/GPK 前缀字典序排最前，
+          // 前 10 页（200 行）必含；共享一次扫描（Promise 去重防并发双扫），
+          // 会话缓存。p_kch 不含外校课号（用户实锤）且 p_kcm 全名也可能搜不到。
+          if (!state._bfScanP) {
+            state._bfScanP = (async () => {
+              const scanned = [];
+              for (let p = 1; p <= 10; p++) {
+                try {
+                  const res3 = await NX.serverSearch({ page: p });
+                  const rs = res3.rows || [];
+                  if (!rs.length) break;
+                  scanned.push(...rs);
+                } catch (e) { break; }
+              }
+              console.log(NX.TAG, '回填浏览扫描: ' + scanned.length + ' 行（外校课号排序靠前）');
+              return scanned;
+            })();
+          }
+          rows = (await state._bfScanP).filter(c => c.code === r.code);
+        }
         let hit = rows.find(c => c.code === r.code && String(c.seq || '0') === String(r.seq || '0'));
         if (!hit) hit = rows.find(c => c.code === r.code);   // 课序号对不上（两套编号）也认课号唯一行
         if (hit) { NX.mergeServerRows([hit]); outcome.push(r.code + '✓'); }
