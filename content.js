@@ -420,6 +420,10 @@ NX.startVolAutoSync = function () {
   state._volSyncT = setTimeout(tick, NX.VOL_SYNC_MS);
 };
 
+// ─── Event Bindings ───────────────────────────────────────────
+$('nextthuxk-launch').onclick = NX.launch;
+$('nextthuxk-exit').onclick = () => toggle(false);
+
 NX.syncQueueAndVol = async function () {
   const qResult = await NX.fetchQueueData(state.allCourses);
   state.queueDataMap = qResult.map;

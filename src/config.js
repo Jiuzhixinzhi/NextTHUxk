@@ -11,7 +11,7 @@ NX.TAG = '[NextTHUxk]';
 NX.SP = 'nextthuxk_';
 NX.DATA_VER = 6;
 NX.CUR_VER = '1.5.1';
-NX.BUILD = '7e96bf';   // 构建标记：面板+启动日志可见，防「页面刷新了但扩展没刷新」的旧构建疑案
+NX.BUILD = '285ea5';   // 构建标记：面板+启动日志可见，防「页面刷新了但扩展没刷新」的旧构建疑案
 NX.DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 NX.ZY_LIMITS = {
   bx: [[1,1],[2,2],[3,Infinity]], // 必修：1志愿1门, 2志愿2门, 3志愿无限
