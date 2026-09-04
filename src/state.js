@@ -129,20 +129,25 @@ NX.renderQueueSection = function () {
   sec.style.display = cands.length ? '' : 'none';
   if (!cands.length) { list.innerHTML = ''; return; }
   if (countEl) countEl.textContent = cands.length + ' 门';
+  // 暂存区同款玻璃卡样式（nx-stage-item）——右栏视觉一致
   list.innerHTML = cands.map(c => {
     const pos = c.myPos
-      ? '<span style="color:#ff9f1a;font-weight:600">排队第' + c.myPos + ' / 共' + (c.queueTotal || '?') + '人</span>'
-      : '<span style="color:#ff9f1a;font-weight:600">候选中</span>';
+      ? '排队第' + c.myPos + ' / 共' + (c.queueTotal || '?') + '人'
+      : '候选中';
     const meta = [c.time, c.teacher, c.typeLabel].filter(Boolean).map(x => esc(x)).join(' · ');
-    return '<div class="nx-plan-item" style="display:flex;align-items:center;gap:8px;padding:6px 8px">' +
-      '<div style="flex:1;min-width:0">' +
-        '<div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + esc(c.name) + ' <span style="font-weight:400;color:var(--nx-ink-soft);font-size:11px">' + esc(c.code) + '</span></div>' +
-        '<div style="font-size:11px;color:var(--nx-ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (meta || '—') + '</div>' +
+    return '<div class="nx-stage-item" style="flex-direction:column;align-items:stretch;gap:2px">' +
+      '<div style="display:flex;align-items:center;gap:6px">' +
+        '<span class="nx-stage-name nx-jumpable" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" title="点击按课号搜索此课程" style="min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:pointer">' + esc(c.name) +
+          ' <span style="color:#9aa1ac;font-weight:400;font-size:11px">' + esc(c.code) + '</span></span>' +
+        '<span style="font-size:11px;color:#ff9f1a;font-weight:600;white-space:nowrap">' + pos + '</span>' +
+        '<button class="nx-stage-rm nx-queue-drop" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" title="退出候补队列">退队</button>' +
       '</div>' +
-      '<div style="font-size:11px;white-space:nowrap">' + pos + '</div>' +
-      '<button class="nx-ghost-btn nx-queue-drop" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" style="font-size:11px;padding:2px 8px">退队</button>' +
+      '<div style="font-size:11px;color:var(--nx-ink-soft);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + (meta || '—') + '</div>' +
     '</div>';
   }).join('');
+  list.querySelectorAll('.nx-jumpable').forEach(item => {
+    item.onclick = ev => { ev.stopPropagation(); NX.jumpToCourse(item.dataset.code, item.dataset.seq); };
+  });
   list.querySelectorAll('.nx-queue-drop').forEach(btn => {
     btn.onclick = async () => {
       btn.disabled = true;
