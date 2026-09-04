@@ -879,13 +879,14 @@ NX.serverSearch = async function (opts) {
 NX.serverSearchStorm = async function (opts) {
   const { runPool, serverSearch } = NX;
   const o = opts || {};
-  const exactCode = /^\d{5,10}$/.test((o.kch || '').trim());
+  const exactCode = !o.kcm && !!(o.kch || '').trim();   // OneTHU 语义：kch 非空即精确（含 PK/BW 外校课号）
   const first = await serverSearch({ ...o, page: 1 });
   let rows = first.rows || [];
   const tp = first.totalPages || 0;
-  // 风暴护栏（OneTHU 实证）：总页数 ≤25 → 全量；>25 → 只探 5 页（深分页大多是
-  // 宽泛词，前 5 页已够补全）；未知 → 5 页。绝不做未知 25 连发。
-  const probeTo = exactCode ? 1 : (tp > 0 ? (tp <= 25 ? tp : 5) : 5);
+  // 风暴护栏（OneTHU 原码语义）：总页数 ≤25 → 全量；>25 → 只探 5 页（深分页
+  // 大多是宽泛词）；tp 解析失败保守探 25 页。绝不做课号深页探测（教务返回
+  // 无过滤首页 + 25 连发打满代理 token 双雷）。
+  const probeTo = exactCode ? 1 : (tp > 0 ? (tp <= 25 ? tp : 5) : 25);
   if (probeTo > 1) {
     const merged = {};
     rows.forEach(r => { merged[r.code + '_' + (r.seq || '0')] = r; });

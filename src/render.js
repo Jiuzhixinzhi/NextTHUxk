@@ -486,13 +486,15 @@ NX.renderPreviewTT = function (courses, label) {
 
 // 从课表预览定位到左侧课程列表。重置会隐藏目标课程的筛选条件，
 // 用课程号搜索后精确滚动到对应课序号。
+// 跳转语义（OneTHU jumpTo 定稿）：课号注入搜索栏并保持（无自动清词），
+// 重置筛选 → 服务端按课号精确搜索 → 结果渲染后高亮目标卡片 1.8s。
+// 随时查询版：不再依赖本地 courseMap（核心池只有已选/候补）。
 NX.jumpToCourse = function (code, seq) {
   const { state } = NX;
   const $ = state.$;
-  const course = NX.getCourse(code, seq);
   const search = $('nextthuxk-search');
   const list = $('nextthuxk-list');
-  if (!course || !search || !list) return;
+  if (!search || !list || !code) return;
 
   state.activeGroup = null;
   state.shadow.querySelectorAll('.nx-chip').forEach(chip => {
@@ -507,21 +509,13 @@ NX.jumpToCourse = function (code, seq) {
   const note = $('nx-filter-xknote');
   if (note) note.value = '';
 
-  search.value = course.code;
+  search.value = code;
+  state._jumpCode = code;
+  state._jumpSeq = seq || '0';
+  state._serverSig = null;   // 强制发新服务端查询（课号 → kch 精确）
   NX.filterCourses();
+  NX.scheduleServerSearch(true);   // 跳转立即查（不等防抖）
   list.scrollTop = 0;
-
-  requestAnimationFrame(() => {
-    const target = [...list.querySelectorAll('.nx-card')].find(card =>
-      card.dataset.code === String(code) &&
-      String(card.dataset.seq || '0') === String(seq || '0')
-    );
-    if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    target.classList.add('nx-jump-target');
-    setTimeout(() => target.classList.remove('nx-jump-target'), 1800);
-    search.focus({ preventScroll: true });
-  });
 };
 
 // ─── Stage Cart Rendering ─────────────────────────────────────
@@ -560,12 +554,16 @@ NX.renderStageCart = function () {
     const prob = NX.stageProbHtml(c);
     return '<div class="nx-stage-item" style="flex-direction:column;align-items:stretch;gap:2px">' +
       '<div style="display:flex;align-items:center;gap:4px">' +
-      '<span class="nx-stage-name" style="min-width:80px">' + esc(c.name) + (c.teacher ? ' <span style="color:#9aa1ac;font-weight:400">' + esc(c.teacher) + '</span>' : '') + '</span>' +
+      '<span class="nx-stage-name nx-jumpable" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" title="点击按课号搜索此课程" style="min-width:80px;cursor:pointer">' + esc(c.name) + (c.teacher ? ' <span style="color:#9aa1ac;font-weight:400">' + esc(c.teacher) + '</span>' : '') + '</span>' +
       '<span class="nx-stage-info">' + c.credits + '学分</span>' +
       '<select class="nx-stage-flag-sel" data-idx="' + i + '" style="padding:2px 4px;border-radius:6px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer">' + flOpts + '</select>' +
       '<select class="nx-stage-zy-sel" data-idx="' + i + '" style="padding:2px 4px;border-radius:6px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer">' + zyOpts + '</select>' +
       '<button class="nx-stage-rm" data-idx="' + i + '">✕</button></div>' + prob + '</div>';
   }).join('');
+  // 暂存课名点击 → 课号注入搜索栏并按课号精确搜索（OneTHU jumpTo 语义）
+  el.querySelectorAll('.nx-jumpable').forEach(item => {
+    item.onclick = ev => { ev.stopPropagation(); NX.jumpToCourse(item.dataset.code, item.dataset.seq); };
+  });
   el.querySelectorAll('.nx-stage-flag-sel').forEach(sel => {
     sel.onchange = () => {
       const i = parseInt(sel.dataset.idx);
@@ -641,7 +639,7 @@ NX.renderDrafts = function () {
         const zyOpts = [1, 2, 3].map(z => '<option value="' + z + '"' + (c.zy === z ? ' selected' : '') + '>' + z + '志愿</option>').join('');
         const prob = NX.draftCourseProbHtml(c);
         courseList += '<div style="display:flex;align-items:center;gap:4px;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(0,0,0,.03)">' +
-          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#1f2329">' + esc(c.name) + '</span>' +
+          '<span class="nx-jumpable" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" title="点击按课号搜索此课程" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#1f2329;cursor:pointer">' + esc(c.name) + '</span>' +
           '<span style="font-size:10px;color:#9aa1ac">' + c.credits + '学分</span>' +
           '<select class="nx-draft-flag" data-di="' + di + '" data-ci="' + ci + '" style="padding:1px 3px;border-radius:5px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer">' + flOpts + '</select>' +
           '<select class="nx-draft-zy" data-di="' + di + '" data-ci="' + ci + '" style="padding:1px 3px;border-radius:5px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer">' + zyOpts + '</select>' +
@@ -659,6 +657,10 @@ NX.renderDrafts = function () {
       state.expandedDraft = expandedDraft === idx ? -1 : idx;
       NX.renderDrafts();
     };
+  });
+  // 草稿课名点击 → 课号注入搜索栏并按课号精确搜索（OneTHU jumpTo 语义）
+  el.querySelectorAll('.nx-jumpable').forEach(item => {
+    item.onclick = ev => { ev.stopPropagation(); NX.jumpToCourse(item.dataset.code, item.dataset.seq); };
   });
   el.querySelectorAll('.nx-draft-flag').forEach(sel => {
     sel.onchange = () => {
@@ -820,11 +822,15 @@ NX.renderPlanView = function (searchQuery) {
       const statusHtml = p.covered
         ? '<span style="color:#07c160;font-size:11px;white-space:nowrap">' + esc(p.coveredBy || '已满足') + '</span>'
         : '<span style="color:#ee4d4d;font-size:11px">未满足</span>';
-      html += '<div class="nx-stage-item" style="background:' + bg + ';gap:8px"><span style="font-size:12px">' + icon + '</span><span class="nx-stage-name">' + esc(p.name) + ' <span style="color:#9aa1ac;font-size:10px">' + p.code + '</span></span><span class="nx-stage-info">' + p.credits + '学分</span>' + statusHtml + '</div>';
+      html += '<div class="nx-stage-item nx-jumpable" style="background:' + bg + ';gap:8px;cursor:pointer" data-code="' + esc(p.code) + '" title="点击按课号搜索此课程"><span style="font-size:12px">' + icon + '</span><span class="nx-stage-name">' + esc(p.name) + ' <span style="color:#9aa1ac;font-size:10px">' + p.code + '</span></span><span class="nx-stage-info">' + p.credits + '学分</span>' + statusHtml + '</div>';
     });
     html += '</div>';
   }
   el.innerHTML = html;
+  // 条目点击 → 课号注入搜索栏并按课号精确搜索（OneTHU jumpTo 语义）
+  el.querySelectorAll('.nx-jumpable').forEach(item => {
+    item.onclick = () => NX.jumpToCourse(item.dataset.code, '0');
+  });
 };
 
 NX.renderPlan = function (plan) {
@@ -837,12 +843,19 @@ NX.renderPlan = function (plan) {
   el.innerHTML = Object.entries(groups).map(([name, items]) => {
     const cr = items.reduce((s, c) => s + c.credits, 0);
     const cov = items.filter(c => c.covered).reduce((s, c) => s + c.credits, 0);
-    return '<div class="nx-plan-card" data-g="' + esc(name) + '"><div class="nx-plan-num">' + cov + '<small style="font-size:12px;font-weight:400;color:#9aa1ac">/' + cr + '学分</small></div><div class="nx-plan-lbl">' + esc(name) + ' (' + items.length + '门)</div></div>';
+    return '<div class="nx-plan-card" data-g="' + esc(name) + '" title="点击在培养方案视图查看本组"><div class="nx-plan-num">' + cov + '<small style="font-size:12px;font-weight:400;color:#9aa1ac">/' + cr + '学分</small></div><div class="nx-plan-lbl">' + esc(name) + ' (' + items.length + '门)</div></div>';
   }).join('');
   const detail = $('nextthuxk-plan-detail');
   const total = coverage.reduce((s, c) => s + c.credits, 0);
   const totalCov = coverage.filter(c => c.covered).reduce((s, c) => s + c.credits, 0);
   if (detail) detail.textContent = '共 ' + coverage.length + ' 门，' + totalCov + '/' + total + ' 学分已覆盖';
+  // 右栏卡片点击 → 切培养方案视图（OneTHU 同款修复：此前点击静默无效）
+  el.querySelectorAll('.nx-plan-card').forEach(card => {
+    card.onclick = () => {
+      const planChip = state.shadow.querySelector('.nx-chip[data-f="plan"]');
+      if (planChip) planChip.click();
+    };
+  });
 };
 
 // ─── Filters ──────────────────────────────────────────────────
@@ -852,7 +865,7 @@ NX.renderPlan = function (plan) {
 // 搜索一律服务器 kkxxSearch 随时查（GBK+风暴护栏）；已选/我的队列走本地
 // 核心池；浏览模式（空关键词）一页一请求翻页，绝不连发。
 NX.filterCourses = function () {
-  const { state, renderCourses, renderPlanView, lc } = NX;
+  const { state, renderCourses, renderPlanView, lc, esc } = NX;
   const $ = state.$;
   const { allCourses, candidateCourses, activeGroup } = state;
   const rawQ = $('nextthuxk-search').value;
@@ -894,7 +907,7 @@ NX.filterCourses = function () {
     // —— 服务器随时查询路径：条件变了 → 调度查询 + 查询中提示（旧条件结果作废）
     if (sigChanged) {
       state._searchRows = null;
-      NX.serverSearchScheduled();
+      NX.scheduleServerSearch();
       const listEl = $('nextthuxk-list');
       if (listEl) {
         listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;正在查询教务（服务器精确匹配 · 随时查询模式）…</div>';
@@ -902,6 +915,14 @@ NX.filterCourses = function () {
       }
     }
     list = state._searchRows || [];
+    // 查询异常显式上屏（不再静默空白）：unknown 页 / 网络失败带原因
+    if (!list.length && state._searchError) {
+      const listEl2 = $('nextthuxk-list');
+      if (listEl2) {
+        listEl2.innerHTML = '<div class="nx-empty nx-st err" title="' + esc(state._searchError) + '">' + esc(state._searchError) + '</div>';
+        return;
+      }
+    }
   }
   if (q) list = list.filter(c => lc(c.name).includes(q) || c.code.includes(q) || lc(c.teacher).includes(q));
   if (f === 'available') list = list.filter(c => c.available);
@@ -1011,35 +1032,44 @@ NX.browseGoto = function (page) {
   NX.filterCourses();
 };
 
-// ─── 服务器随时查询调度（500ms 防抖，OneTHU 实测值）──────────────
-// 查询模式（关键词/服务端筛选非空）→ 风暴护栏版多页探测（≤25 页封顶）；
-// 浏览模式（全空）→ 只取当前页 1 个请求。跑动中条件再变 → 收敛后自动补跑。
-NX.serverSearchScheduled = NX.debounce(async function () {
+// ─── 服务器随时查询调度（OneTHU 同款：输入 500ms 防抖，回车立即查）────
+// 查询模式（关键词/服务端筛选非空）→ 风暴护栏版多页探测；浏览模式（全空）
+// → 只取当前页 1 个请求。跑动中条件再变 → 收敛后自动补跑。
+// 课号路由（OneTHU Courses.tsx codeLike 规则，支持 PK/GPK/BW 外校课号）：
+// ≥5 位、无中文、含数字、字母数字连字符 → 课号（截「-」前段）；否则课名。
+NX.isCodeLike = function (kw) {
+  kw = String(kw || '').trim();
+  return kw.length >= 5 && !/[\u4e00-\u9fff]/.test(kw) && /\d/.test(kw) && /^[A-Za-z0-9][-A-Za-z0-9]*$/.test(kw);
+};
+NX.buildSearchOpts = function () {
   const state = NX.state;
   const $ = state.$;
-  if (state._ssBusy) return;   // 收敛循环会在本轮结束时补跑最新条件
+  const rawQ = ($('nextthuxk-search').value || '').trim();
+  const f = state.shadow.querySelector('.nx-chip.on')?.dataset.f || 'all';
+  const codeLike = NX.isCodeLike(rawQ);
+  return {
+    // 课号注入搜索栏（OneTHU 定稿：课号保持，无自动清词）
+    kch: codeLike ? rawQ.split(/[-–]/)[0].trim() : '',
+    kcm: codeLike ? '' : rawQ,
+    weekday: $('nx-filter-day')?.value || '',
+    section: $('nx-filter-period')?.value || '',
+    grade: $('nx-filter-grade-filter')?.value || '',
+    rxklxm: $('nx-filter-tongshi')?.value || '',
+    kctsm: $('nx-filter-feature')?.value || '',
+    onlyAvailable: $('nx-filter-bksrem')?.value === '>0' || f === 'available',
+    gradAvail: $('nx-filter-yjsrem')?.value === '>0',
+  };
+};
+NX.runServerSearch = async function () {
+  const state = NX.state;
+  if (state._ssBusy) { state._ssPending = true; return; }
   state._ssBusy = true;
   try {
     for (let guard = 0; guard < 4; guard++) {
       const ranSig = state._serverSig;
-      const rawQ = ($('nextthuxk-search').value || '').trim();
-      const f = state.shadow.querySelector('.nx-chip.on')?.dataset.f || 'all';
-      const digitCode = /^\d{5,10}$/.test(rawQ);
-      const serverFilters = ($('nx-filter-tongshi')?.value || $('nx-filter-feature')?.value
-        || $('nx-filter-grade-filter')?.value || $('nx-filter-bksrem')?.value
-        || $('nx-filter-yjsrem')?.value || $('nx-filter-day')?.value || $('nx-filter-period')?.value);
-      const opts = {
-        kch: digitCode ? rawQ : '',
-        kcm: digitCode ? '' : rawQ,
-        weekday: $('nx-filter-day')?.value || '',
-        section: $('nx-filter-period')?.value || '',
-        grade: $('nx-filter-grade-filter')?.value || '',
-        rxklxm: $('nx-filter-tongshi')?.value || '',
-        kctsm: $('nx-filter-feature')?.value || '',
-        onlyAvailable: $('nx-filter-bksrem')?.value === '>0' || f === 'available',
-        gradAvail: $('nx-filter-yjsrem')?.value === '>0',
-      };
-      const queryMode = !!(rawQ || serverFilters || opts.onlyAvailable || opts.gradAvail);
+      const opts = NX.buildSearchOpts();
+      const queryMode = !!(opts.kch || opts.kcm || opts.weekday || opts.section || opts.grade
+        || opts.rxklxm || opts.kctsm || opts.onlyAvailable || opts.gradAvail);
       if (!queryMode) opts.page = state._browsePage || 1;   // 浏览模式：单页
       try {
         const res = queryMode ? await NX.serverSearchStorm(opts) : await NX.serverSearch(opts);
@@ -1053,21 +1083,51 @@ NX.serverSearchScheduled = NX.debounce(async function () {
         });
         state._searchRows = res.rows || [];
         state._browseHasMore = res.pageKind === 'ok' && (res.rows || []).length > 0;
-        if (res.pageKind === 'unknown' && res.htmlHead && !state.fetchWarn) {
-          state.fetchWarn = '服务端查询返回异常页，可能需退出重新登录';
-        }
+        state._searchError = res.pageKind === 'unknown'
+          ? '教务返回异常页' + (res.htmlHead ? '（' + String(res.htmlHead).slice(0, 80) + '…）' : '') + '，可能需退出重新登录'
+          : (res.pageKind === 'empty' ? '' : '');
       } catch (e) {
         console.warn(NX.TAG, 'server search scheduled:', e);
         state._searchRows = state._searchRows || [];
         state._browseHasMore = false;
+        state._searchError = '查询失败：' + (e && e.message ? e.message : e);
       }
       if (state._serverSig === ranSig) break;   // 条件未再变 → 收敛
     }
   } finally {
     state._ssBusy = false;
   }
+  if (state._ssPending) { state._ssPending = false; NX.runServerSearch(); return; }
   NX.filterCourses();   // sig 未变 → 直接渲染新结果（不再触发查询）
-}, 500);
+  NX.highlightJumpTarget();
+};
+// 防抖入口（filterCourses 用）；immediate=true 时跳过防抖立即查（回车/跳转用）
+NX.scheduleServerSearch = function (immediate) {
+  clearTimeout(NX._ssTimer);
+  NX._ssTimer = setTimeout(() => { NX._ssTimer = null; NX.runServerSearch(); }, immediate ? 0 : 500);
+};
+
+/** 跳转目标高亮（OneTHU jumpTo 定稿语义：课号注入搜索栏并保持，
+ *  高亮 1.8s 瞬时清除；无自动清词） */
+NX.highlightJumpTarget = function () {
+  const state = NX.state;
+  if (!state._jumpCode) return;
+  const $ = state.$;
+  const code = state._jumpCode, seq = state._jumpSeq || '0';
+  state._jumpCode = null;
+  requestAnimationFrame(() => {
+    const list = $('nextthuxk-list');
+    if (!list) return;
+    const target = [...list.querySelectorAll('.nx-card')].find(card =>
+      card.dataset.code === String(code) &&
+      String(card.dataset.seq || '0') === String(seq));
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.add('nx-jump-target');
+      setTimeout(() => target.classList.remove('nx-jump-target'), 1800);
+    }
+  });
+};
 
 NX.updateSearchClear = function () {
   const $ = NX.state.$;

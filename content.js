@@ -372,8 +372,13 @@ $('nextthuxk-search').oninput = NX.debounce(function () {
 }, 120);
 $('nextthuxk-search').addEventListener('keydown', function (e) {
   try {
-    if (NX.suggestKey && NX.suggestKey(e)) e.stopPropagation();
+    if (NX.suggestKey && NX.suggestKey(e)) { e.stopPropagation(); return; }
   } catch (err) {}
+  // 回车立即查询（跳过 500ms 防抖，OneTHU 同款显式提交语义）
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    try { NX.filterCourses(); NX.scheduleServerSearch(true); } catch (err) {}
+  }
 });
 $('nextthuxk-search').addEventListener('blur', function () {
   // 稍作延迟以便点击联想行时先触发 click（面板 pointerdown 已 preventDefault 保焦）

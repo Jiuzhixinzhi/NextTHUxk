@@ -29,6 +29,7 @@
       ],
       "js": [
         "src/config.js",
+        "src/gbk.js",
         "src/data.js",
         "src/probability.js",
         "src/reviews.js",
