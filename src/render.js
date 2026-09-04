@@ -3,6 +3,31 @@
 // ═══════════════════════════════════════════════════════════════
 var NX = NX || {};
 
+// ─── 课表预览时间轴常量（OneTHU Courses.tsx 同款，xk-1.5.1）────────
+// 大节→钟点映射（清华第1-14节标准时段）；预览轴 08:00-21:45，0.72px/分钟。
+const PV_BEGIN = ['', '08:00', '08:50', '09:50', '10:40', '11:30', '13:30', '14:20', '15:20', '16:10', '17:05', '17:55', '19:20', '20:10', '21:00'];
+const PV_END = ['', '08:45', '09:35', '10:35', '11:25', '12:15', '14:15', '15:05', '16:05', '16:55', '17:50', '18:40', '20:05', '20:55', '21:45'];
+NX.pvToMin = hm => { const p = String(hm).split(':'); return Number(p[0]) * 60 + Number(p[1] || 0); };
+NX.SLOT_RANGE = [
+  [NX.pvToMin(PV_BEGIN[1]), NX.pvToMin(PV_END[2])],
+  [NX.pvToMin(PV_BEGIN[3]), NX.pvToMin(PV_END[5])],
+  [NX.pvToMin(PV_BEGIN[6]), NX.pvToMin(PV_END[7])],
+  [NX.pvToMin(PV_BEGIN[8]), NX.pvToMin(PV_END[9])],
+  [NX.pvToMin(PV_BEGIN[10]), NX.pvToMin(PV_END[11])],
+  [NX.pvToMin(PV_BEGIN[12]), NX.pvToMin(PV_END[14])],
+];
+NX.PV_PX_PER_MIN = 0.72;
+NX.PV_AXIS_BEGIN = 8 * 60;
+NX.PV_AXIS_END = NX.pvToMin(PV_END[14]);
+/** 课块配色（无概率色时按课名稳定取色，同 OneTHU 正式课表） */
+const PV_PALETTE = ['#6d7ff0', '#3d8bfd', '#1fa487', '#e07a4f', '#b463d6', '#2f9edb', '#c9971f', '#4caf6e', '#d45c8a', '#7a63e8'];
+NX.pvColorOf = function (name) {
+  let h = 0;
+  const s = String(name || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return PV_PALETTE[h % PV_PALETTE.length] || '#6d7ff0';
+};
+
 // ─── THUbook 评分徽章（有数据才出现；按分数段分色便于扫读）──
 // ≥4.5 神课绿 · 4.0~4.4 优质靛蓝 · 3.0~3.9 一般琥珀 · <3.0 避课红
 NX.tbBadgeHtml = function (c) {
@@ -23,6 +48,8 @@ NX.courseCardHtml = function (c, ctx) {
   const { queueDataMap, isQueuePhase } = state;
   const stageSet = ctx.stageSet;
     const tags = [];
+    const _org = NX.originOf(c.code);
+    if (_org) tags.push('<span class="nx-tag" style="color:#fff;background:' + (NX.ORIGIN_COLORS[_org] || '#666') + ';border:none">' + _org + '</span>');
     if (c.available) tags.push('<span class="nx-tag nx-tag-ok">可选</span>');
     else tags.push('<span class="nx-tag nx-tag-no">已满</span>');
     if (c.selected) tags.push('<span class="nx-tag nx-tag-sel">已选</span>');
@@ -299,7 +326,7 @@ NX.renderPreviewTT = function (courses, label) {
   if (label && label.startsWith('草稿「')) state.previewMode = 'draft';
   const manualEvents = state.manualEvents || [];
   if (!courses.length && !manualEvents.length) { el.innerHTML = '<div class="nx-st">暂无课程</div>'; return; }
-  const tt = {};
+  const raw = [];
   const undet = [];   // 时间未定/无固定时段课程（#16）：不进网格，单列在表格下方
   courses.concat(manualEvents).forEach((c, ci) => {
     const lbl = c.teacher ? c.name + '(' + c.teacher + ')' : c.name;
@@ -327,53 +354,97 @@ NX.renderPreviewTT = function (courses, label) {
       const ac = NX.getCourse(c.code, c.seq);
       if (ac) { const p = calcProb(ac, c.flag, c.zy); if (p.prob >= 0) { cellColor = p.color; probLabel = p.percentLabel || p.label; probBgColor = probBg(p.color); } }
     }
-    const slots = parseTimeSlots(c.time);
-    if (!slots.length) {
+    // 课块：清华课按大节→钟点；外校课（PK/GPK/BW）time 无槽位，
+    // 从 note 解析「周X HH:MM-HH:MM」（钟点解析 v2，含复合日/单双周/周段）
+    const mk = (day, begin, end, tag) => ({
+      key: (c.code || 'm') + '_' + (c.seq || '0') + '_' + tag, day, begin, end,
+      label: lbl, color: cellColor, probLabel, probBgColor,
+      manual: !!c.manual, id: c.id, code: c.code, seq: c.seq || '0',
+      origin: NX.originOf(c.code), tag,
+    });
+    let n = 0;
+    const _dayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    const _slotNames = ['1-2节', '3-4节', '5-6节', '7-8节', '9-10节', '11-12节'];
+    parseTimeSlots(c.time).forEach(({ day, slot }) => {
+      // 插件 parseTimeSlots 返回标签（周一/1-2节），OneTHU 返回数字——此处换算
+      const dNum = _dayNames.indexOf(day) + 1;
+      const sNum = _slotNames.indexOf(slot) + 1;
+      const r = NX.SLOT_RANGE[sNum - 1];
+      if (!dNum || !r) return;
+      raw.push(mk(dNum, r[0], r[1], '' + sNum));
+      n += 1;
+    });
+    if (!n && c.manual && c.begin && c.end && c.day && NX.pvToMin(c.begin) < NX.pvToMin(c.end)) {
+      raw.push(mk(c.day, NX.pvToMin(c.begin), NX.pvToMin(c.end), 'clock'));
+      n += 1;
+    }
+    if (!n) {
+      NX.clockRangesOf(c.note, c.time).forEach(cr => {
+        raw.push(Object.assign(mk(cr.day, cr.begin, cr.end, 'c' + cr.begin), { tag: cr.tag }));
+        n += 1;
+      });
+    }
+    if (!n) {
       // 时间未定/无固定时段（如二级选课阶段才定时间的实验课）→ 单列展示
       undet.push({ lbl, ci, code: c.code, seq: c.seq || '0', credits: c.credits || 0, zy: c.zy || 0, manual: !!c.manual, id: c.id });
     }
-    slots.forEach(({ day, slot }) => {
-      if (!tt[day]) tt[day] = {};
-      const entry = { label: lbl, ci, code: c.code, seq: c.seq || '0', color: cellColor, probLabel, probBgColor, manual: !!c.manual, id: c.id };
-      if (tt[day][slot]) {
-        const old = tt[day][slot];
-        const existing = old.conflict ? old.items : [old];
-        // Same course (code+seq) in same slot? Skip — split time range, not a conflict
-        if (existing.some(e => e.code === entry.code && e.seq === entry.seq)) return;
-        const labels = existing.concat(entry);
-        tt[day][slot] = { label: labels.map(e => e.label).join(' / '), conflict: true, items: labels };
-      } else tt[day][slot] = entry;
-    });
   });
-  const days = ['周一','周二','周三','周四','周五','周六','周日'];
-  const sls = ['1-2节','3-4节','5-6节','7-8节','9-10节','11-12节'];
-  let h = '<table class="nx-tt"><thead><tr><th></th>';
-  days.forEach(d => h += '<th>' + d + '</th>');
-  h += '</tr></thead><tbody>';
-  sls.forEach(slot => {
-    h += '<tr><th>' + slot + '</th>';
-    days.forEach(day => {
-      const val = tt[day]?.[slot];
-      if (val) {
-        const isC = val.conflict;
-        const items = isC ? val.items : [val];
-        const btns = items.map(it => '<span class="nx-tt-rm" data-code="' + esc(it.code) + '" data-seq="' + esc(it.seq) + '"' + (it.manual ? ' data-manual-id="' + esc(it.id) + '"' : '') + ' title="移除 ' + esc(it.label) + '">✕</span>').join('');
-        const linesHtml = items.map(it => {
-          const probHtml = it.probLabel ? '<span class="nx-tt-prob" style="background:' + it.probBgColor + ';color:' + it.color + '">' + it.probLabel + '</span>' : '';
-            return '<div class="nx-tt-line' + (it.manual ? ' nx-tt-manual' : ' nx-tt-jump') + '"' + (it.manual ? '' : ' data-code="' + esc(it.code) + '" data-seq="' + esc(it.seq) + '" title="在左侧课程列表中查看"') + '><span class="nx-tt-text">' + esc(it.label) + '</span>' + probHtml + '</div>';
-        }).join('');
-        let cellClass = isC ? 'nx-c' : 'nx-s';
-        let cellStyle = '';
-        if (!isC && val.color) {
-          const alpha = val.color === '#07c160' ? '.1' : val.color === '#ff9f1a' ? '.1' : '.1';
-          cellStyle = 'background:' + val.color + (val.color.startsWith('rgba') ? '' : alpha) + ';color:' + val.color;
-        }
-        h += '<td class="' + cellClass + '" ' + (cellStyle ? 'style="' + cellStyle + '"' : '') + '><div class="nx-tt-cell">' + linesHtml + btns + '</div></td>';
-      } else h += '<td></td>';
-    });
-    h += '</tr>';
+  // 同日重叠分道（OneTHU d822563 重叠簇制）：簇 = 首尾相接/重叠的块序列，
+  // 簇内独立分道，lanes = 本簇深度；孤立块满宽。绝不用全日总道数劈半天。
+  const lanesOf = new Map();
+  for (let day = 1; day <= 7; day++) {
+    const list = raw.filter(b => b.day === day).sort((a, b) => a.begin - b.begin || a.end - b.end);
+    let cluster = [];
+    let clusterEnd = -1;
+    const flush = () => {
+      const ends = [];
+      for (const b of cluster) {
+        let lane = ends.findIndex(le => le <= b.begin);
+        if (lane === -1) { lane = ends.length; ends.push(b.end); }
+        else ends[lane] = b.end;
+        lanesOf.set(b.key, { lane, lanes: ends.length });
+      }
+      for (const b of cluster) {
+        const e = lanesOf.get(b.key);
+        if (e) lanesOf.set(b.key, { lane: e.lane, lanes: ends.length });
+      }
+      cluster = [];
+      clusterEnd = -1;
+    };
+    for (const b of list) {
+      if (cluster.length && b.begin >= clusterEnd) flush();
+      cluster.push(b);
+      clusterEnd = Math.max(clusterEnd, b.end);
+    }
+    flush();
+  }
+  // 时间轴渲染：钟点轴（08:00-21:45）+ 7 日列 + 绝对定位课块
+  const A0 = NX.PV_AXIS_BEGIN, A1 = NX.PV_AXIS_END, PX = NX.PV_PX_PER_MIN;
+  const H = Math.round((A1 - A0) * PX);
+  const hm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  let axisLines = '';
+  for (let m = A0; m <= A1; m += 60) axisLines += '<span class="nx-tta-hl" style="top:' + Math.round((m - A0) * PX) + 'px">' + hm(m) + '</span>';
+  let h = '<div class="nx-tta"><div class="nx-tta-axis" style="height:' + H + 'px">' + axisLines + '</div>';
+  const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  days.forEach((dn, di) => {
+    const blocks = raw.filter(b => b.day === di + 1).map(b => {
+      const ln = lanesOf.get(b.key) || { lane: 0, lanes: 1 };
+      const top = Math.round((b.begin - A0) * PX);
+      const hgt = Math.max(14, Math.round((b.end - b.begin) * PX) - 2);
+      const bc = b.color || NX.pvColorOf(b.label);
+      const bg = b.color ? (b.probBgColor || bc + '22') : bc + '22';
+      const originHtml = b.origin ? '<span class="nx-tta-origin" style="background:' + (NX.ORIGIN_COLORS[b.origin] || '#666') + '">' + b.origin + '</span>' : '';
+      const tagHtml = b.tag ? '<span class="nx-tta-tag">' + esc(b.tag) + '</span>' : '';
+      const probHtml = b.probLabel ? '<span class="nx-tt-prob" style="background:' + b.probBgColor + ';color:' + b.color + '">' + b.probLabel + '</span>' : '';
+      return '<div class="nx-tta-b' + (b.manual ? ' nx-tt-manual' : ' nx-tt-jump') + '" style="top:' + top + 'px;height:' + hgt + 'px;left:calc(' + (ln.lane * 100 / ln.lanes) + '% + 1px);width:calc(' + (100 / ln.lanes) + '% - 2px);background:' + bg + ';border-left:3px solid ' + bc + '"' +
+        (b.manual ? ' data-manual-id="' + esc(b.id) + '"' : ' data-code="' + esc(b.code) + '" data-seq="' + esc(b.seq) + '"') +
+        ' title="' + esc(b.label + (b.tag ? ' · ' + b.tag : '')) + '">' +
+        '<div class="nx-tta-l">' + originHtml + esc(b.label) + probHtml + tagHtml + '</div>' +
+        '<span class="nx-tta-x" title="移除">✕</span></div>';
+    }).join('');
+    h += '<div class="nx-tta-day"><div class="nx-tta-day-h">' + dn + '</div><div class="nx-tta-day-b" style="height:' + H + 'px">' + blocks + '</div></div>';
   });
-  h += '</tbody></table>';
+  h += '</div>';
   // 时间未定课程单列（#16）
   if (undet.length) {
     h += '<div style="margin-top:10px;font-size:11px;color:var(--nx-faint)">时间未定 / 无固定时段（' + undet.length + ' 门，不含在上方网格中）</div>' +
@@ -393,13 +464,17 @@ NX.renderPreviewTT = function (courses, label) {
   const cr = courses.reduce((s, c) => s + (c.credits || 0), 0);
   h += '<div class="nx-st ok" style="margin-top:6px">' + courses.length + '门课 · ' + cr + '学分' + (manualEvents.length ? ' · 自定义占用' + manualEvents.length + '项' : '') + '</div>';
   el.innerHTML = h;
-  el.querySelectorAll('.nx-tt-rm').forEach(btn => {
-    btn.onclick = () => btn.dataset.manualId
-      ? NX.removeManualEvent(btn.dataset.manualId)
-      : handlePreviewRemove(btn.dataset.code, btn.dataset.seq);
+  el.querySelectorAll('.nx-tta-x').forEach(x => {
+    x.onclick = ev => {
+      ev.stopPropagation();
+      const b = x.closest('.nx-tta-b');
+      if (!b) return;
+      if (b.dataset.manualId) NX.removeManualEvent(b.dataset.manualId);
+      else handlePreviewRemove(b.dataset.code, b.dataset.seq);
+    };
   });
-  el.querySelectorAll('.nx-tt-jump').forEach(line => {
-    line.onclick = () => NX.jumpToCourse(line.dataset.code, line.dataset.seq);
+  el.querySelectorAll('.nx-tta-b.nx-tt-jump').forEach(bEl => {
+    bEl.onclick = () => NX.jumpToCourse(bEl.dataset.code, bEl.dataset.seq);
   });
   el.querySelectorAll('.nx-tt-undet').forEach(chip => {
     chip.onclick = () => handlePreviewRemove(chip.dataset.code, chip.dataset.seq);

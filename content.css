@@ -482,6 +482,19 @@
 .nx-manual-chip { border: 0; border-radius: 999px; padding: 4px 10px; background: rgba(139,92,246,.12); color: #7c3aed; font-size: 11px; cursor: pointer; }
 .nx-manual-chip:hover { background: rgba(139,92,246,.2); }
 .nx-tt-text { display: block; font-size: 10px; line-height: 1.3; word-break: break-all; }
+/* ── 课表预览时间轴（xk-1.5.1：钟点轴 + 重叠簇分道 + 外校课块）── */
+.nx-tta { display: flex; gap: 4px; overflow-x: auto; }
+.nx-tta-axis { position: relative; width: 36px; flex-shrink: 0; }
+.nx-tta-hl { position: absolute; right: 2px; transform: translateY(-4px); font-size: 9px; color: var(--nx-faint); }
+.nx-tta-day { flex: 1; min-width: 64px; }
+.nx-tta-day-h { text-align: center; font-size: 10px; color: var(--nx-ink-soft); padding-bottom: 2px; }
+.nx-tta-day-b { position: relative; border-radius: 6px; background: repeating-linear-gradient(to bottom, rgba(127,127,127,.14) 0 1px, transparent 1px 21.6px); }
+.nx-tta-b { position: absolute; border-radius: 5px; padding: 2px 4px; font-size: 10px; line-height: 1.25; overflow: hidden; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.nx-tta-l { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; }
+.nx-tta-origin { font-size: 9px; padding: 0 4px; border-radius: 3px; color: #fff; flex-shrink: 0; }
+.nx-tta-tag { font-size: 9px; color: var(--nx-ink-soft); }
+.nx-tta-x { position: absolute; top: 1px; right: 2px; font-size: 9px; opacity: 0; cursor: pointer; }
+.nx-tta-b:hover .nx-tta-x { opacity: .7; }
 .nx-tt-line { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 3px; }
 .nx-tt-line:last-child { margin-bottom: 0; }
 .nx-tt-prob { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 9px; font-weight: 700; line-height: 1.4; }

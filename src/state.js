@@ -27,6 +27,63 @@ NX.parseTimeSlots = function (timeStr) {
   return slots;
 };
 
+// ── 外校课（北大/北外）时间与来源（OneTHU Courses.tsx 移植，xk-1.5.1）──
+/** 外校钟点解析 v2（北大/北外官方时间描述全格式实证）：
+ *  支持周X/星期X、复合日「周二、四」「星期二/星期日」、多段「、;；」分隔、
+ *  破折号—–-通吃、全角括号、课级/段级「单周」「双周」、周段「(1-16周)」。
+ *  返回钟点块 [{day,begin,end,tag}]（begin/end 为分钟）。 */
+NX.clockRangesOf = function (note, time) {
+  const raw = (note || '') + ' ' + (time || '');
+  if (!raw.trim()) return [];
+  // 归一化：星期→周、全角括号→半角、破折号→-、分号→;
+  const s = raw.replace(/星期/g, '周').replace(/（/g, '(').replace(/）/g, ')')
+    .replace(/[—–]/g, '-').replace(/；/g, ';').replace(/[{}]/g, '(').replace(/」/g, ')');
+  const dayChar = '一二三四五六日天';
+  const dayIdx = { '一': 1, '二': 2, '三': 3, '四': 4, '五': 5, '六': 6, '日': 7, '天': 7 };
+  const parityOf = t => (/单周/.test(t) ? '单周' : /双周/.test(t) ? '双周' : '');
+  const out = [];
+  let globalParity = '';
+  for (const seg of s.split(';')) {
+    const re = /((?:周?[一二三四五六日天][、\/,]?)+)\s*(\d{1,2}):(\d{2})\s*-\s*(\d{1,2}):(\d{2})/g;
+    let m;
+    let segHit = false;
+    while ((m = re.exec(seg)) !== null) {
+      const days = [...m[1]].filter(ch => dayChar.includes(ch)).map(ch => dayIdx[ch]);
+      const begin = Number(m[2]) * 60 + Number(m[3]);
+      const end = Number(m[4]) * 60 + Number(m[5]);
+      // 周段：时间后紧邻的 (N-M周)
+      const after = seg.slice(m.index + m[0].length, m.index + m[0].length + 12);
+      const wk = /\((\d+-\d+周?)\)/.exec(after)?.[1] ?? '';
+      const parity = parityOf(seg.slice(m.index));
+      for (const day of days) {
+        if (day >= 1 && end > begin) {
+          const bits = [parity, wk].filter(Boolean);
+          out.push({ day, begin, end, tag: bits.join('·') });
+          segHit = true;
+        }
+      }
+    }
+    if (!segHit) {
+      const p = parityOf(seg);
+      if (p) globalParity = p; // 「;单周」独立尾段 → 管全部段
+    }
+  }
+  if (globalParity) for (const r of out) {
+    if (!r.tag.includes('周') || /\d+-\d+/.test(r.tag)) {
+      r.tag = [globalParity, ...r.tag.split('·').filter(t => !/^(单周|双周)$/.test(t))].filter(Boolean).join('·');
+    }
+  }
+  return out;
+};
+
+/** 外校课程标注：课号前缀 PK=北大本科、GPK=北大研究生（2026 秋 38 门）、
+ *  BW=北外（形如 BW3w0007，含小写 w——HAR 实证，19 列与本校对齐） */
+NX.originOf = function (code) {
+  code = String(code || '');
+  return code.startsWith('GPK') ? '北大研' : code.startsWith('PK') ? '北大' : code.startsWith('BW') ? '北外' : '';
+};
+NX.ORIGIN_COLORS = { '北大': '#c0392b', '北大研': '#c0392b', '北外': '#1f4e79' };
+
 NX.detectConflicts = function (courses) {
   const slotMap = {};
   const conflicts = [];
