@@ -776,14 +776,14 @@ NX.fetchCandidateCourses = async function () {
       });
     }
     console.log(NX.TAG, 'candidate courses:', candidates.length);
-    // 「队列功能未开放」等拦截兜底（OneTHU getQueueStatus 同款）：dlSearch 零行
-    // 且页面带提示信息 → 从一级课表（kbSearch）脚本块里挖候选课（p_id=课号 +
-    // 「候选：课名」+ 格子 id a{节}_{天}）。课表也没有就安静空着不报错。
-    if (!candidates.length && html.includes('提示信息')) {
+    // dlSearch 零行 → 一级课表（kbSearch）兜底（OneTHU getQueueStatus 语义：
+    // 「队列功能未开放」提示页/任何零行场景——用户语义：官网课表能看到排队课
+    // 就从课表爬；课表也没有就安静空着不报错）
+    if (!candidates.length) {
       try {
         const kb = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=kbSearch&p_xnxq=' + SEM);
         const kbCand = NX.parseTimetableCandidates(kb);
-        console.log(NX.TAG, 'queue closed → kbSearch candidates:', kbCand.length);
+        console.log(NX.TAG, 'dlSearch empty → kbSearch candidates:', kbCand.length);
         if (kbCand.length) return kbCand;
       } catch (e) { console.warn(NX.TAG, 'kbSearch fallback:', e); }
     }

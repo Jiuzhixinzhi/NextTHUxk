@@ -438,7 +438,8 @@ NX.renderPreviewTT = function (courses, label) {
       const bc = b.color || NX.pvColorOf(b.label);
       const bg = b.color ? (b.probBgColor || bc + '22') : bc + '22';
       const originHtml = b.origin ? '<span class="nx-tta-origin" style="background:' + (NX.ORIGIN_COLORS[b.origin] || '#666') + '">' + b.origin + '</span>' : '';
-      const tagHtml = b.tag ? '<span class="nx-tta-tag">' + esc(b.tag) + '</span>' : '';
+      // 时间段取代大节号/clock 标记（用户定稿：日程上直接可读起止钟点）
+      const tagHtml = '<span class="nx-tta-tag">' + hm(b.begin) + '-' + hm(b.end) + '</span>';
       const probHtml = b.probLabel ? '<span class="nx-tt-prob" style="background:' + b.probBgColor + ';color:' + b.color + '">' + b.probLabel + '</span>' : '';
       return '<div class="nx-tta-b' + (b.manual ? ' nx-tt-manual' : ' nx-tt-jump') + '" style="top:' + top + 'px;height:' + hgt + 'px;left:calc(' + (ln.lane * 100 / ln.lanes) + '% + 1px);width:calc(' + (100 / ln.lanes) + '% - 2px);background:' + bg + ';border-left:3px solid ' + bc + '"' +
         (b.manual ? ' data-manual-id="' + esc(b.id) + '"' : ' data-code="' + esc(b.code) + '" data-seq="' + esc(b.seq) + '"') +
@@ -934,7 +935,9 @@ NX.filterCourses = function () {
       }
     }
   }
-  if (q) list = list.filter(c => lc(c.name).includes(q) || c.code.includes(q) || lc(c.teacher).includes(q));
+  // 本地 chip（已选/队列）不吃搜索框（OneTHU listRows 语义：这两 chip 恒全量，
+  // 跳转残留的课号/关键词绝不能把队列视图清空）
+  if (q && !localChip) list = list.filter(c => lc(c.name).includes(q) || c.code.includes(q) || lc(c.teacher).includes(q));
   if (f === 'available') list = list.filter(c => c.available);
   else if (f === 'required') list = list.filter(c => c.attr === '必修');
   else if (f === 'elective') list = list.filter(c => c.attr === '限选');
