@@ -11,7 +11,7 @@ NX.TAG = '[NextTHUxk]';
 NX.SP = 'nextthuxk_';
 NX.DATA_VER = 6;
 NX.CUR_VER = '1.5.1';
-NX.BUILD = '45987e7';   // 构建标记：面板+启动日志可见，防「页面刷新了但扩展没刷新」的旧构建疑案
+NX.BUILD = '433451';   // 构建标记：面板+启动日志可见，防「页面刷新了但扩展没刷新」的旧构建疑案
 NX.DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 NX.ZY_LIMITS = {
   bx: [[1,1],[2,2],[3,Infinity]], // 必修：1志愿1门, 2志愿2门, 3志愿无限
@@ -100,7 +100,14 @@ NX.decodeBest = function (buf, url) {
 };
 
 NX.fetchPage = async function (url, opts = {}) {
-  const resp = await fetch(url, { credentials: 'include', ...opts });
+  // 15s 超时（AbortController）：无超时则单请求挂起会卡死一切等待它的链路
+  // （已选时间回填卡「查询中」实录）
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 15000);
+  let resp;
+  try {
+    resp = await fetch(url, { credentials: 'include', ...opts, signal: ctl.signal });
+  } finally { clearTimeout(timer); }
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const buf = await resp.arrayBuffer();
   const ct = (resp.headers.get('content-type') || '').toLowerCase();
@@ -113,7 +120,12 @@ NX.fetchPage = async function (url, opts = {}) {
 // 由调用方按解析结果挑——kbSearch 的「候选：」正则只在正确解码下命中，
 // 天然判别器；行数同则替换符少者胜，再同则教务默认 GBK。
 NX.fetchPageDual = async function (url, opts = {}) {
-  const resp = await fetch(url, { credentials: 'include', ...opts });
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 15000);
+  let resp;
+  try {
+    resp = await fetch(url, { credentials: 'include', ...opts, signal: ctl.signal });
+  } finally { clearTimeout(timer); }
   if (!resp.ok) throw new Error('HTTP ' + resp.status);
   const buf = await resp.arrayBuffer();
   return { gbk: new TextDecoder('gbk').decode(buf), utf8: new TextDecoder('utf-8').decode(buf) };

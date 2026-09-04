@@ -1351,6 +1351,9 @@ NX.mergeServerRows = function (rows) {
         if (!ex2.xkTextNote && (r.note || r.xkTextNote)) ex2.xkTextNote = r.note || r.xkTextNote;
       }
     }
+    // 池内容版本（join 预览缓存键用）：新增或回填都让 getPreviewCourses 的
+    // join 缓存失效——join 合成的是新对象，不改它原行引用可见性
+    if (added || filled) state.poolVersion = (state.poolVersion || 0) + 1;
     // 暂存项同步（加暂存时 note 还没到——搜索/回填后落上，课表预览立即可用）
     for (const st of (state.stageCart || [])) {
       if (st.code === r.code && (String(st.seq || '0') === String(r.seq || '0') || !parses(st))) {

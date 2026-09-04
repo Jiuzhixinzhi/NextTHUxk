@@ -241,16 +241,43 @@ NX.backfillSelTimes = async function () {
   } catch (e) { console.warn(NX.TAG, '回填后预览重渲:', e); }
 };
 
+// OneTHU buildRows join（xklogic.ts catByCode.get(s.code) 原样移植）：
+// 已选/候补/暂存行时间解析不出 → 当场按课号借池行（同课号任意班次）的
+// note/time 合成预览行。每次渲染现算，不依赖回填时序——池里有目录行
+// （用户浏览/搜索带回来的）预览立即能用。
+NX.previewJoinRows = function (rows) {
+  const catByCode = new Map();   // 课号 → 有 note/可解析时间的池行（首个优先）
+  const fallbackByCode = new Map();
+  for (const c of NX.state.allCourses) {
+    if (NX.parseTimeSlots(c.time || '').length > 0 || NX.clockRangesOf(c.note || c.xkTextNote || '', c.time || '').length > 0) {
+      if (!catByCode.has(c.code)) catByCode.set(c.code, c);
+    } else if ((c.note || c.xkTextNote) && !fallbackByCode.has(c.code)) {
+      fallbackByCode.set(c.code, c);
+    }
+  }
+  return rows.map(s => {
+    if (NX.parseTimeSlots(s.time || '').length > 0 || NX.clockRangesOf(s.note || s.xkTextNote || '', s.time || '').length > 0) return s;
+    const c0 = catByCode.get(s.code) || fallbackByCode.get(s.code);
+    if (!c0) return s;
+    return Object.assign({}, s, {
+      time: NX.parseTimeSlots(s.time || '').length ? s.time : (c0.time || s.time || ''),
+      note: c0.note || s.note || '',
+      xkTextNote: c0.xkTextNote || s.xkTextNote || '',
+    });
+  });
+};
+
 NX.getPreviewCourses = function () {
   const { allCourses, stageCart, savedDrafts, previewMode, previewDraftIdx } = NX.state;
   if (previewMode === 'selected') {
     // OneTHU Courses.tsx 语义：已选视图含候补课（琥珀块 lane 分道共处）——
-    // 候选只属于已选视图；版本号带上候选数（队列同步回刷不再吃掉候选块）
-    const v = (NX.state.selVersion || 0) + '|' + (NX.state.candidateCourses || []).length;
-    if (NX._selCacheV !== v) { NX._selCache = allCourses.filter(c => c.selected).concat(NX.state.candidateCourses || []); NX._selCacheV = v; }
+    // 候选只属于已选视图；版本号带上候选数（队列同步回刷不再吃掉候选块）。
+    // 行经 previewJoinRows 与目录行 join（外校课时间在目录行说明列）
+    const v = (NX.state.selVersion || 0) + '|' + (NX.state.candidateCourses || []).length + '|' + (NX.state.poolVersion || 0);
+    if (NX._selCacheV !== v) { NX._selCache = NX.previewJoinRows(allCourses.filter(c => c.selected).concat(NX.state.candidateCourses || [])); NX._selCacheV = v; }
     return NX._selCache;
   }
-  if (previewMode === 'stage') return stageCart;
+  if (previewMode === 'stage') return NX.previewJoinRows(stageCart);
   if (previewMode === 'draft' && previewDraftIdx >= 0 && savedDrafts[previewDraftIdx]) return savedDrafts[previewDraftIdx].courses;
   return [];
 };
