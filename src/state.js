@@ -401,14 +401,20 @@ NX.refreshSelected = async function () {
   allCourses.forEach(c => {
     c.isCandidate = candKeys.has(c.code + '_' + (c.seq || '0'));
   });
-  // 课余量/排队同步（池内按需，提交选课后余量必变）
+  // 课余量/排队同步（池内按需，提交选课后余量必变）；非队列阶段走志愿统计
   try {
     const qResult = await NX.fetchQueueData(allCourses);
     state.queueDataMap = qResult.map;
-    allCourses.forEach(c => {
-      const q = state.queueDataMap[c.code + '_' + (c.seq || '0')];
-      if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
-    });
+    state.isQueuePhase = qResult.phase || state.candidateCourses.length > 0;
+    if (state.isQueuePhase) {
+      allCourses.forEach(c => {
+        const q = state.queueDataMap[c.code + '_' + (c.seq || '0')];
+        if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
+      });
+    } else {
+      const vol = await NX.fetchVolunteer(allCourses);
+      NX.applyVolunteer(allCourses, vol);
+    }
   } catch (e) { /* 保持现有余量数据 */ }
   filterCourses();
   renderPreviewTT(

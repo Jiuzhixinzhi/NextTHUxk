@@ -287,50 +287,66 @@ NX.fetchCourseCatalog = async function () {
   return all;
 };
 
-NX.fetchVolunteer = async function () {
-  const { state, fetchPage, parseVolFromHtml, parseVolSportsFromHtml, pagedFetch } = NX;
+// ─── 志愿统计（池内按需，v1.5.1 重写）──────────────────────────
+// 旧版 tbzySearchBR/Ty 全库硬爬 ≤220 页（用户定稿：任何数据不整库预爬）。
+// OneTHU dev 的 getXkVolunteer 同为死码（volMap 只清空不填充）。
+// 新版：池内课程逐门按课号单查（教务全站检索组件同构，tbzySearch 系
+// 表单与 kkxxSearch 同款 p_kch 课号参数；体育课另查 tbzySearchTy）。
+// 1 课 1-2 请求、4 并发 30ms 错峰、失败容忍（0 行/HTTP 错 = 该课无数据，
+// 概率显示「无数据」，绝不回退硬爬）。非队列阶段（预选/志愿期）才有意义；
+// 队列阶段概率走排队/余量模型（queueDataMap），跳过志愿同步。
+NX.fetchVolunteer = async function (courses) {
+  const { state } = NX;
   if (!state.isZhjwxk) return {};
   const { SEM, BASE } = state;
-  try {
-    const mkUrl = m => p => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM + '&page=' + p + '&_t=' + Date.now();
-    const mkFirst = m => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM;
-    const parseVol = parseFn => html => {
-      const batch = parseFn(html);
-      const arr = Object.values(batch);
-      return { items: arr, hasData: arr.length > 0 };
-    };
-    const grab = async (m, parseFn, maxPages) => {
-      let fh = '';
-      try { fh = await fetchPage(mkFirst(m)); }
-      catch (e) { console.warn(NX.TAG, m, 'first page:', e); return []; }
-      const pg = NX.parsePagerInfo(fh);
-      // v1.3.13：并发高速（同 catalog）+ 缺页补抓（v1.3.5 速度回退，保留 v1.3.6 补全）
-      const items = await pagedFetch({
-        firstHtml: fh,
-        fetchPage: p => fetchPage(mkUrl(m)(p)),
-        parse: parseVol(parseFn),
-        maxPages, concurrency: 5, throttle: 30,
-        dedupe: v => v.code + '_' + v.seq,
-        expectPages: pg.pages, label: m,
-      });
-      return items;
-    };
-    const volItems = await grab('tbzySearchBR', parseVolFromHtml, 200);
-    const allMap = {};
-    volItems.forEach(v => { allMap[v.code + '_' + v.seq] = v; });
-    console.log(NX.TAG, 'volunteer data:', Object.keys(allMap).length, 'courses');
+  const map = {};
+  const todo = (courses || []).filter(c => c && c.code && !c.isCandidate);
+  if (!todo.length) return map;
+  let fetched = 0;
+  await NX.runPool(todo, 4, async c => {
+    await new Promise(r => setTimeout(r, 30));   // 微错峰
+    const key = c.code + '_' + String(c.seq || '0');
     try {
-      const sportsItems = await grab('tbzySearchTy', parseVolSportsFromHtml, 20);
-      const sportsMap = {};
-      sportsItems.forEach(v => { sportsMap[v.code + '_' + v.seq] = v; });
-      for (const [key, val] of Object.entries(sportsMap)) {
-        if (allMap[key]) Object.assign(allMap[key], val);
-        else allMap[key] = val;
+      const br = BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchBR&p_xnxq=' + SEM + '&p_kch=' + encodeURIComponent(c.code) + '&_t=' + Date.now();
+      const dual = await NX.fetchPageDual(br);
+      const html = dual.gbk.includes('trr1') || dual.gbk.includes('trr2') ? dual.gbk : dual.utf8;
+      const batch = NX.parseVolFromHtml(html) || {};
+      for (const k in batch) { map[k] = batch[k]; fetched++; }
+      // 体育课：志愿独立级联，另查体育统计
+      const isSports = c.typeCode === 'ty' || (c.typeLabel || '') === '体育' || (c.department || '').includes('体育');
+      if (isSports) {
+        try {
+          const ty = BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchTy&p_xnxq=' + SEM + '&p_kch=' + encodeURIComponent(c.code) + '&_t=' + Date.now();
+          const tyDual = await NX.fetchPageDual(ty);
+          const tyHtml = tyDual.gbk.includes('trr1') || tyDual.gbk.includes('trr2') ? tyDual.gbk : tyDual.utf8;
+          const tyBatch = NX.parseVolSportsFromHtml(tyHtml) || {};
+          for (const k in tyBatch) {
+            map[k] = Object.assign({ capacity: 0, applied: 0, volRequired: '', volElective: '', volOptional: '' }, map[k], tyBatch[k]);
+          }
+          fetched++;
+        } catch (e) { /* 体育统计失败容忍（OneTHU 同款） */ }
       }
-      console.log(NX.TAG, 'sports volunteer data:', Object.keys(sportsMap).length, 'courses');
-    } catch (e) { console.warn(NX.TAG, 'sports volunteer fetch:', e); }
-    return allMap;
-  } catch (e) { console.warn(NX.TAG, 'volunteer fetch:', e); return {}; }
+    } catch (e) { /* 单课失败容忍：该课无志愿数据 */ }
+  });
+  console.log(NX.TAG, 'volunteer (pool-sync):', fetched, 'entries for', todo.length, 'courses');
+  return map;
+};
+
+// 志愿数据合并进池行（卡片概率/暂存概率网格用；mergeStaticData 同款字段）
+NX.applyVolunteer = function (courses, volData) {
+  const byCode = {};
+  for (const v of Object.values(volData || {})) if (!byCode[v.code]) byCode[v.code] = v;
+  (courses || []).forEach(c => {
+    const v = (c.seq && volData[c.code + '_' + c.seq]) || byCode[c.code];
+    if (v) {
+      c.volRequired = v.volRequired; c.volElective = v.volElective; c.volOptional = v.volOptional;
+      c.volSports = v.volSports || '';
+      c.volCapacity = v.capacity || c.capacity; c.volApplied = v.applied || 0;
+    } else {
+      c.volRequired = ''; c.volElective = ''; c.volOptional = ''; c.volSports = '';
+    }
+  });
+  return courses;
 };
 
 // ─── Course Selection/Drop API ────────────────────────────────

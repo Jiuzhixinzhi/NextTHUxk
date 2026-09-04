@@ -294,11 +294,26 @@ NX.launch = async function launch() {
       const qResult = await NX.fetchQueueData(pool).catch(e => { console.warn(TAG, 'queue:', e); return { map: {}, phase: false }; });
       state.queueDataMap = qResult.map;
       state.isQueuePhase = qResult.phase || state.candidateCourses.length > 0;
-      // 池行余量合并（卡片 余X/Y 徽章、可选筛选、概率网格用），完成后回刷
-      pool.forEach(c => {
-        const q = state.queueDataMap[c.code + '_' + (c.seq || '0')];
-        if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
-      });
+      if (state.isQueuePhase) {
+        // 队列阶段：池行余量合并（卡片 余X/Y 徽章、可选筛选、概率网格用）
+        pool.forEach(c => {
+          const q = state.queueDataMap[c.code + '_' + (c.seq || '0')];
+          if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
+        });
+      } else {
+        // 非队列阶段（预选/志愿期）：池内按需志愿统计 → 概率网格数据源
+        // （OneTHU dev 的 getXkVolunteer 是死码——这里真接上；池内逐门单查，
+        // 绝不整库硬爬）
+        try {
+          const vol = await NX.fetchVolunteer(pool);
+          NX.applyVolunteer(pool, vol);
+        } catch (e) { console.warn(TAG, 'volunteer:', e); }
+      }
+      const qBtn = state.$('nextthuxk-phase-tag');
+      if (qBtn) {
+        if (state.isQueuePhase) { qBtn.style.display = 'inline'; qBtn.textContent = '课余量模式'; }
+        else qBtn.style.display = 'none';
+      }
       NX.filterCourses();
       NX.renderPreviewTT(NX.getPreviewCourses(), (state.$('nextthuxk-preview-info') || {}).textContent || '当前已选');
       NX.renderQueueSection();
