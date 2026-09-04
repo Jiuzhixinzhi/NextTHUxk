@@ -360,8 +360,16 @@ NX.backfillStageRows = function () {
         try {
           let rows = (await NX.serverSearch({ kch: s.code }).catch(() => ({}))).rows || [];
           if (!rows.length && s.name) rows = (await NX.serverSearch({ kcm: s.name }).catch(() => ({}))).rows || [];
-          const hit = rows.find(r => r.code === s.code);
-          if (hit) NX.mergeServerRows([hit]);
+          // 必须抓暂存课序号的那一行（航空体育（男）有 3 个课序，抓错行=志愿
+          // 多段不盲配=永远无数据，用户点一下搜索把对号行带进来才绿）
+          const hit = rows.find(r => r.code === s.code && String(r.seq || '0') === String(s.seq || '0'))
+            || rows.find(r => r.code === s.code && NX.normSeq(r.seq) === NX.normSeq(s.seq))
+            || rows.find(r => r.code === s.code);
+          if (hit) {
+            NX.mergeServerRows([hit]);
+            const same = state.allCourses.filter(x => x.code === s.code);
+            if (state.volMap) NX.applyVolunteer(same, state.volMap);   // volMap 已到就立即套（不等下次渲染）
+          }
         } catch (e) { console.warn(TAG, 'stage 行补拉:', s.code, e); }
       }));
     }
