@@ -969,7 +969,7 @@ NX.filterCourses = function () {
   // 恒全量的只有已选/队列（OneTHU listRows 语义：跳转残留的课号/关键词
   // 绝不能把队列视图清空）；必修/限选/体育池内 q 过滤照常（v1.5.0 同款）
   const noQChip = f === 'selected' || f === 'queue';
-  if (q && !noQChip) list = list.filter(c => lc(c.name).includes(q) || c.code.includes(q) || lc(c.teacher).includes(q));
+  if (q && !noQChip) list = list.filter(c => lc(c.name).includes(q) || c.code.toLowerCase().includes(q) || lc(c.teacher).includes(q));
   if (f === 'available') list = list.filter(c => c.available);
   else if (f === 'required') list = list.filter(c => c.attr === '必修' || c.typeLabel === '必修');
   else if (f === 'elective') list = list.filter(c => c.attr === '限选' || c.typeLabel === '限选');

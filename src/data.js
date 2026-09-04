@@ -1145,6 +1145,82 @@ NX.fetchCategoryAttrs = async function () {
   return out;
 };
 
+
+// ─── 外校课号页签检索兜底（用户四十二报「为什么搜不到」根修）──────
+// 根因：kkxxSearch 开课信息索引不命中 PK/GPK/BW 前缀课号（教务 web UI 是在
+// 任选页签的检索表单里搜到的——存档 任选_files/xkBks.vxkBksXkbBs.html 表单
+// 实锤：p_kch/p_kcm/p_rxklxm 输入 + doQuery() POST m=rxSearch）。本兜底照
+// 该表单原样：GET 带 p_kch 直查，无网格则取 token POST 重试；任选→限选→
+// 必修逐页签试。行结构（限选_files 存档 gridData 14 列）：
+//   [1]attr [3]课名 [4]课号 [5]课序 [6]时间 [7]教师 [8]学分
+//   [0]radio value='SEM;课号;课序;'（课序权威源）
+NX.parseTabGrid = function (html, attr) {
+  const out = [];
+  for (const seg of html.match(/gridData\w*\s*=\s*\[[\s\S]*?\];/g) || []) {
+    const rows = seg.match(/\[\s*"(?:[^"\\]|\\.)*"(?:\s*,\s*"(?:[^"\\]|\\.)*")+\s*\]/g) || [];
+    for (const row of rows) {
+      const cells = [];
+      const cre = /"((?:[^"\\]|\\.)*)"/g;
+      let cm;
+      while ((cm = cre.exec(row)) !== null) cells.push(cm[1]);
+      if (cells.length < 9) continue;
+      const name = (cells[3] || '').replace(/<[^>]+>/g, '').trim();
+      const code = (cells[4] || '').trim();
+      if (!code || !name || !/\d/.test(code)) continue;
+      let seq = (cells[5] || '').trim();
+      // radio id 权威课序：'SEM;课号;课序;'
+      const rid = (cells[0] || '').match(/value='([^']*);([^']*);([^']*);'/);
+      if (rid && rid[2] === code && rid[3]) seq = rid[3];
+      out.push({
+        code, seq: seq || '0', name,
+        attr: (cells[1] || '').replace(/<[^>]+>/g, '').trim() || attr || '',
+        time: cells[6] || '', teacher: cells[7] || '',
+        credits: parseFloat(cells[8]) || 0,
+        capacity: 0, remaining: 0, available: true,   // 页签行无余量列——未知≠已满，按需补拉会填
+        selected: false, queue: '', group: '', note: '', xkTextNote: '',
+        partial: true,   // OneTHU 同款标记：元数据未由全量目录补全
+      });
+    }
+  }
+  return out;
+};
+
+NX.tabSearchByKch = async function (kch) {
+  const { state, fetchPage } = NX;
+  const { SEM, BASE } = state;
+  if (!state.isZhjwxk && !state.isWebvpn) return [];
+  const tabs = [
+    { m: 'rxSearch', flag: 'rx', attr: '任选' },
+    { m: 'xxSearch', flag: 'xx', attr: '限选' },
+    { m: 'bxSearch', flag: 'bx', attr: '必修' },
+  ];
+  for (const tab of tabs) {
+    try {
+      let fh = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=' + tab.m + '&p_xnxq=' + SEM
+        + '&tokenPriFlag=' + tab.flag + '&p_kch=' + encodeURIComponent(kch) + '&_t=' + Date.now());
+      if (NX.isXkDeadHtml(fh)) continue;
+      if (!/gridData\w*\s*=/.test(fh)) {
+        // GET 无网格（会话上下文/参数被忽略）→ 按存档 doQuery() 原样 POST
+        const token = (fh.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';
+        if (!token) continue;
+        const resp = await fetch(BASE + '/xkBks.vxkBksXkbBs.do', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: new URLSearchParams({ m: tab.m, page: '', token, p_xnxq: SEM, tokenPriFlag: tab.flag, p_kch: kch, p_kcm: '', p_rxklxm: '' }),
+        });
+        if (!resp.ok) continue;
+        fh = new TextDecoder('gbk').decode(await resp.arrayBuffer());
+      }
+      const rows = NX.parseTabGrid(fh, tab.attr);
+      if (rows.length) {
+        console.log(NX.TAG, '外校课号页签检索命中:', kch, tab.attr, rows.length + ' 行');
+        return rows;
+      }
+    } catch (e) { console.warn(NX.TAG, 'tabSearch ' + tab.m + ':', e); }
+  }
+  return [];
+};
+
 NX.backfillCandidateMeta = async function (candidates) {
   const todo = (candidates || []).filter(c => c && c.code && !c.credits);
   if (!todo.length) return;
@@ -1269,6 +1345,14 @@ NX.serverSearchStorm = async function (opts) {
   const exactCode = !o.kcm && !!(o.kch || '').trim();   // OneTHU 语义：kch 非空即精确（含 PK/BW 外校课号）
   const first = await serverSearch({ ...o, page: 1 });
   let rows = first.rows || [];
+  // 外校课号兜底：kkxxSearch 索引不含 BW/PK/GPK 前缀课号 → 一级课表页签
+  // 检索表单（任选→限选→必修）原样重搜（教务 web UI 同款路径，实测可搜）
+  if (!rows.length && exactCode && !/^\d+$/.test((o.kch || '').trim())) {
+    const tabRows = await NX.tabSearchByKch((o.kch || '').trim());
+    if (tabRows.length) {
+      return { rows: tabRows, page: 1, hasMore: false, totalPages: 1, totalRows: tabRows.length, pageKind: 'ok', viaTab: true };
+    }
+  }
   const tp = first.totalPages || 0;
   // 风暴护栏（OneTHU 原码语义）：总页数 ≤25 → 全量；>25 → 只探 5 页（深分页
   // 大多是宽泛词）；tp 解析失败保守探 25 页。forceAll=「加载全部」按钮 →
