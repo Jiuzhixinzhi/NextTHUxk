@@ -79,8 +79,6 @@ const HTML = `
         <span id="nextthuxk-cache-info" style="font-size:11px;color:var(--nx-ink-soft)"></span>
         <button id="nextthuxk-sem" class="nx-ghost-btn" title="点击修改学期"></button>
         <button id="nextthuxk-grade" class="nx-ghost-btn" title="点击修改年级"></button>
-        <button id="nextthuxk-refresh" class="nx-ghost-btn">刷新数据</button>
-        <button id="nextthuxk-refresh-queue" class="nx-ghost-btn" style="display:none">刷新队列</button>
         <button id="nextthuxk-check-update" class="nx-ghost-btn">检查更新</button>
         <button class="nx-exit" id="nextthuxk-exit">返回原系统</button>
       </div>
@@ -102,7 +100,6 @@ const HTML = `
             <button class="nx-chip" data-f="queue">我的队列</button>
             <button class="nx-chip" data-f="plan">培养方案</button>
           </div>
-          <div id="nx-type-src" class="nx-zy-select" style="margin-top:6px;font-size:12px;color:#86868b;cursor:pointer" title="必修/限选分类 tab + 一级课表（点击重新拉取）">类型源: 读取中…</div>
           <div style="display:flex;gap:6px;margin-top:6px">
             <select id="nx-filter-conflict" class="nx-zy-select" style="flex:1"><option value="">不限制冲突</option><option value="noconflict">仅无冲突</option><option value="conflict">仅冲突</option></select>
             <select id="nx-filter-credits" class="nx-zy-select" style="flex:1"><option value="">全部学分</option><option value="1">1学分</option><option value="2">2学分</option><option value="3">3学分</option><option value="4">4学分</option><option value="5+">5+学分</option></select>
@@ -253,27 +250,6 @@ NX.launch = async function launch() {
       await store.set('grade', 0);
       state.GRADE = 0;
     }
-    // 类型源徽标点击重试（分类 tab 空/失败时用户自愈入口）
-    {
-      const badge = document.getElementById('nx-type-src');
-      if (badge) badge.addEventListener('click', async () => {
-        badge.textContent = '类型源: 重新拉取中…';
-        try {
-          const cat = await NX.fetchCategoryAttrs();
-          NX.state.levelMap = Object.assign({}, NX.state.levelMap, cat);
-          NX.applyLevelMap(NX.state.allCourses);
-          if (NX.state._searchRows && NX.state._searchRows.length) NX.applyLevelMap(NX.state._searchRows);
-          NX.filterCourses();
-          const sr2 = (NX.state._searchRows || []);
-          const wa2 = sr2.filter(r => r.attr).length;
-          badge.textContent = '类型源: 分类 ' + Object.keys(cat).length + ' · 当前行 ' + wa2 + '/' + sr2.length + ' 有属性（已刷新）';
-          console.log('[NextTHUxk] 重试后样例键:', Object.keys(cat).slice(0, 6).join(' , '), '| 首行:', sr2[0] ? (sr2[0].code + '_' + sr2[0].seq + ' → ' + (sr2[0].attr || '空')) : '无');
-        } catch (e) {
-          badge.textContent = '类型源: 拉取失败（' + (e && e.message || e) + '）';
-        }
-      });
-    }
-
     // ── 随时查询模式（xk-1.5.1，OneTHU dev 同款架构）────────────────
     // 启动只拉核心四路（已选/课余量/候补/培养方案缓存），课程列表一律
     // 搜索时服务器随时查——绝不整库预爬（原版 320 页目录 + 220 页志愿
@@ -295,17 +271,7 @@ NX.launch = async function launch() {
       NX.fetchCategoryAttrs().catch(e => { console.warn(TAG, 'category attrs:', e); return {}; }),
     ]);
     state.levelMap = Object.assign({}, levelMap, catAttrs);   // 分类页属性优先
-    // 类型源徽标：用户十四报两轮「看不到变化」——数据到没到必须肉眼可见
-    {
-      const badge = document.getElementById('nx-type-src');
-      const nCat = Object.keys(catAttrs || {}).length;
-      const nLv = Object.keys(levelMap || {}).length;
-      // 探针：当前渲染行有几门带属性（端到端测管线；0 = 键错位/未应用）
-      const sr = state._searchRows || [];
-      const withAttr = sr.filter(r => r.attr).length;
-      if (badge) badge.textContent = '类型源: 分类 ' + nCat + ' · 课表 ' + nLv + ' · 当前行 ' + withAttr + '/' + sr.length + ' 有属性' + ((nCat + nLv) ? '' : '（空！点击重试）');
-      if (nCat) console.log(TAG, 'category 全部键（' + nCat + '）:', Object.keys(catAttrs).join(' , '));
-    }
+    if (Object.keys(catAttrs || {}).length) console.log(TAG, 'category attrs:', Object.keys(catAttrs).length, '键');
     // 竞态修复：启动窗口内已渲染的搜索行也补上属性/志愿（此前只补池行）
     if (state._searchRows && state._searchRows.length) {
       NX.applyLevelMap(state._searchRows);
@@ -399,12 +365,8 @@ NX.finishLaunch = function (sd, selCount, volTs, volRefreshed) {
   const { fmtTime } = NX;
   const $ = state.$;
   const cacheEl = $('nextthuxk-cache-info');
-  if (cacheEl) {
-    cacheEl.innerHTML = (state.isQueuePhase
-      ? '课余量池内同步 ' + Object.keys(state.queueDataMap).length + ' 门 · 候补 ' + state.candidateCourses.length + ' 门 · 随时查询'
-      : '随时查询模式 · 已选 ' + selCount + ' 门 · 候补 ' + state.candidateCourses.length + ' 门（不再整库预爬）')
-      + ' · 构建 ' + (NX.BUILD || '?');
-  }
+  if (cacheEl) NX.renderCacheInfo(selCount);
+  NX.startVolAutoSync();   // 志愿/余量定时自动同步（按钮已删，顶栏提示下次时间）
   store.get('config').then(cfg => {
     if (!cfg) return;
     if (cfg.api) $('nextthuxk-api').value = cfg.api;
@@ -421,8 +383,6 @@ NX.finishLaunch = function (sd, selCount, volTs, volRefreshed) {
     if (state.isQueuePhase) { phaseTag.style.display = 'inline'; phaseTag.textContent = '课余量模式'; }
     else { phaseTag.style.display = 'none'; }
   }
-  const qRefreshBtn = $('nextthuxk-refresh-queue');
-  if (qRefreshBtn) qRefreshBtn.style.display = (state.isQueuePhase || state.candidateCourses.length) ? 'inline-block' : 'none';
   // ─── THU选课社区评价：SWR 加载索引 → 匹配挂载徽章（fail-soft）───
   if (NX.tbEnsureIndex) {
     NX.tbEnsureIndex().then(ok => {
@@ -434,16 +394,33 @@ NX.finishLaunch = function (sd, selCount, volTs, volRefreshed) {
   }
 };
 
-// ─── Event Bindings ───────────────────────────────────────────
-$('nextthuxk-launch').onclick = NX.launch;
-$('nextthuxk-exit').onclick = () => toggle(false);
-$('nextthuxk-refresh').onclick = async () => {
-  await store.set('staticData', null);
-  NX.launch();
+// ─── 顶栏缓存信息（含下次志愿同步时间提示）─────────────────────
+NX.renderCacheInfo = function (selCount) {
+  const cacheEl = state.$('nextthuxk-cache-info');
+  if (!cacheEl) return;
+  const next = state._nextVolSyncAt ? ' · 志愿/余量自动同步，下次 ' + NX.fmtTime(new Date(state._nextVolSyncAt)) : '';
+  cacheEl.innerHTML = (state.isQueuePhase
+    ? '课余量池内同步 ' + Object.keys(state.queueDataMap).length + ' 门 · 候补 ' + state.candidateCourses.length + ' 门 · 随时查询'
+    : '随时查询模式 · 已选 ' + (selCount || state.allCourses.filter(c => c.selected).length) + ' 门 · 候补 ' + state.candidateCourses.length + ' 门') + next;
 };
-$('nextthuxk-refresh-queue').onclick = async () => {
-  const btn = $('nextthuxk-refresh-queue');
-  if (btn) { btn.textContent = '刷新中…'; btn.disabled = true; }
+
+// 志愿/余量定时自动同步（用户：按钮删了，提醒下次刷新时间即可——数据本来就是实时爬的）
+NX.VOL_SYNC_MS = 5 * 60 * 1000;
+NX.startVolAutoSync = function () {
+  if (state._volSyncStarted) return;
+  state._volSyncStarted = true;
+  const tick = async () => {
+    try { await NX.syncQueueAndVol(); } catch (e) { console.warn(TAG, '志愿自动同步:', e); }
+    state._nextVolSyncAt = Date.now() + NX.VOL_SYNC_MS;
+    NX.renderCacheInfo();
+    state._volSyncT = setTimeout(tick, NX.VOL_SYNC_MS);
+  };
+  state._nextVolSyncAt = Date.now() + NX.VOL_SYNC_MS;
+  NX.renderCacheInfo();
+  state._volSyncT = setTimeout(tick, NX.VOL_SYNC_MS);
+};
+
+NX.syncQueueAndVol = async function () {
   const qResult = await NX.fetchQueueData(state.allCourses);
   state.queueDataMap = qResult.map;
   state.isQueuePhase = qResult.phase;   // OneTHU getXkQueueData 语义：xkqkSearch gridData 有无（预选阶段候补非空不代表排队阶段——旧 || 候选兜底把预选也判成排队，志愿同步永远不跑）
@@ -465,8 +442,7 @@ $('nextthuxk-refresh-queue').onclick = async () => {
   filterCourses();
   NX.renderQueueSection();
   renderPreviewTT(NX.getPreviewCourses(), '当前已选');
-  if (btn) { btn.textContent = '刷新队列'; btn.disabled = false; }
-  showXkResult({ ok: true, msg: '队列数据已刷新 · ' + Object.keys(state.queueDataMap).length + '门课余量 · ' + state.candidateCourses.length + '门我的队列' });
+  NX.renderCacheInfo();
 };
 $('nextthuxk-search').oninput = NX.debounce(function () {
   try { if (NX.suggestUpdate) NX.suggestUpdate(); } catch (e) {}
