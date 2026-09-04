@@ -16,7 +16,7 @@ const { browser: _browser, TAG, DATA_VER, store, state, baseFlag,
   renderPlanView, refreshSelected, showXkResult, volNeedsRefresh,
   checkUpdate } = NX;
 
-console.log(TAG, 'loading on', location.href);
+console.log(TAG, 'v' + (NX.CUR_VER || '?') + ' 构建 ' + (NX.BUILD || '?') + ' loading on', location.href);
 
 // ─── Init Config State ────────────────────────────────────────
 state.SEM = (location.href.match(/p_xnxq=([^&]+)/) || ['', ''])[1];
@@ -74,7 +74,7 @@ const HTML = `
     </div>
   </div>
     <div class="nx-header">
-      <div class="nx-logo">NextTHUxk<span class="nx-logo-sub">下一代选课</span> <span id="nextthuxk-phase-tag" style="display:none;font-size:11px;background:rgba(47,107,255,.1);color:var(--nx-accent);padding:2px 8px;border-radius:4px;margin-left:6px"></span></div>
+      <div class="nx-logo">NextTHUxk<span class="nx-logo-sub">下一代选课</span><span id="nx-build-tag" style="font-size:9px;color:rgba(255,255,255,.35);margin-left:8px;letter-spacing:.5px">${NX.BUILD || ''}</span> <span id="nextthuxk-phase-tag" style="display:none;font-size:11px;background:rgba(47,107,255,.1);color:var(--nx-accent);padding:2px 8px;border-radius:4px;margin-left:6px"></span></div>
       <div style="display:flex;gap:8px;align-items:center">
         <span id="nextthuxk-cache-info" style="font-size:11px;color:var(--nx-ink-soft)"></span>
         <button id="nextthuxk-sem" class="nx-ghost-btn" title="点击修改学期"></button>
@@ -399,9 +399,10 @@ NX.finishLaunch = function (sd, selCount, volTs, volRefreshed) {
   const $ = state.$;
   const cacheEl = $('nextthuxk-cache-info');
   if (cacheEl) {
-    cacheEl.innerHTML = state.isQueuePhase
+    cacheEl.innerHTML = (state.isQueuePhase
       ? '课余量池内同步 ' + Object.keys(state.queueDataMap).length + ' 门 · 候补 ' + state.candidateCourses.length + ' 门 · 随时查询'
-      : '随时查询模式 · 已选 ' + selCount + ' 门 · 候补 ' + state.candidateCourses.length + ' 门（不再整库预爬）';
+      : '随时查询模式 · 已选 ' + selCount + ' 门 · 候补 ' + state.candidateCourses.length + ' 门（不再整库预爬）')
+      + ' · 构建 ' + (NX.BUILD || '?');
   }
   store.get('config').then(cfg => {
     if (!cfg) return;
