@@ -145,7 +145,7 @@ NX.courseFlag = function (course) {
   const a = (course.attr || '').trim();
   if (a === '限选') return 'xx';
   if (a === '任选') return 'rx';
-  if (a === '体育') return 'ty';
+  if (a === '体育' && !NX.NOT_SPORTS_NAME.test(course.name || '')) return 'ty';   // 排除表课的体育 attr 是分类页混列误标（航空体育→按任选）
   if (a === '必修') return 'bx';
   return 'rx';
 };
@@ -158,10 +158,13 @@ NX.courseFlag = function (course) {
 NX.NOT_SPORTS_NAME = /航空体育|书院专项体育|体育(概论|管理|课程与教学论|科技前沿)/;
 NX.isSportsCourse = function (course) {
   if (!course) return false;
+  // 排除表最优先（用户三十六报「航空体育不算体育！」）：分类页/Ty 页把这些课
+  // 标成体育属性混列（二十三报实锤：容量>0 三志愿全 0，没人走体育通道），
+  // attr 误标时排除表必须仍然生效
+  if (NX.NOT_SPORTS_NAME.test(course.name || '')) return false;
   if ((course.attr || '') === '体育' || course.typeLabel === '体育' || course.typeCode === 'ty') return true;
   const dept = course.department || '';
   if (!dept.includes('体育') && !dept.includes('体武')) return false;   // 名字带体育但院系不是体育部的不算（如「体育社会学」在社科学院）
-  if (NX.NOT_SPORTS_NAME.test(course.name || '')) return false;
   return true;   // 体育部常规体育课（体育(N)、游泳、篮球、跆拳道…）
 };
 
@@ -182,7 +185,7 @@ NX.typeCodeToFlag = function (typeCode) {
 };
 
 NX.zyTypeOf = function (course) {
-  if (course.typeLabel === '体育' || course.typeCode === 'ty') return 'ty';
+  if ((course.typeLabel === '体育' || course.typeCode === 'ty') && !NX.NOT_SPORTS_NAME.test(course.name || '')) return 'ty';
   return { '006': 'bx', '008': 'xx', '007': 'rx' }[course.typeCode] || 'bx';
 };
 
