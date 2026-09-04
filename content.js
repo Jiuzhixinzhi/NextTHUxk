@@ -293,7 +293,7 @@ NX.launch = async function launch() {
     (async () => {
       const qResult = await NX.fetchQueueData(pool).catch(e => { console.warn(TAG, 'queue:', e); return { map: {}, phase: false }; });
       state.queueDataMap = qResult.map;
-      state.isQueuePhase = qResult.phase || state.candidateCourses.length > 0;
+      state.isQueuePhase = qResult.phase;   // OneTHU getXkQueueData 语义：xkqkSearch gridData 有无（预选阶段候补非空不代表排队阶段——旧 || 候选兜底把预选也判成排队，志愿同步永远不跑）
       if (state.isQueuePhase) {
         // 队列阶段：池行余量合并（卡片 余X/Y 徽章、可选筛选、概率网格用）
         pool.forEach(c => {
@@ -399,7 +399,7 @@ $('nextthuxk-refresh-queue').onclick = async () => {
   if (btn) { btn.textContent = '刷新中…'; btn.disabled = true; }
   const qResult = await NX.fetchQueueData(state.allCourses);
   state.queueDataMap = qResult.map;
-  state.isQueuePhase = qResult.phase || state.candidateCourses.length > 0;
+  state.isQueuePhase = qResult.phase;   // OneTHU getXkQueueData 语义：xkqkSearch gridData 有无（预选阶段候补非空不代表排队阶段——旧 || 候选兜底把预选也判成排队，志愿同步永远不跑）
   state.candidateCourses = await NX.fetchCandidateCourses();
   if (state.candidateCourses.length) await NX.backfillCandidateMeta(state.candidateCourses).catch(e => console.warn(TAG, 'cand meta:', e));
   const candKeys = new Set(state.candidateCourses.map(c => c.code + '_' + String(c.seq || '0')));

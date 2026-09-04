@@ -405,7 +405,7 @@ NX.refreshSelected = async function () {
   try {
     const qResult = await NX.fetchQueueData(allCourses);
     state.queueDataMap = qResult.map;
-    state.isQueuePhase = qResult.phase || state.candidateCourses.length > 0;
+    state.isQueuePhase = qResult.phase;   // 同 content.js：纯 xkqkSearch 探针
     if (state.isQueuePhase) {
       allCourses.forEach(c => {
         const q = state.queueDataMap[c.code + '_' + (c.seq || '0')];

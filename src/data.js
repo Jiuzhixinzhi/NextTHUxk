@@ -299,36 +299,88 @@ NX.fetchVolunteer = async function (courses) {
   const { state } = NX;
   if (!state.isZhjwxk) return {};
   const { SEM, BASE } = state;
+  const cacheKey = 'vol_' + SEM;
+  const cacheTTL = 30 * 60 * 1000;   // 志愿统计随填报动态变，30 分钟即够预览
+
+  // ① 缓存（同学期 30 分钟内不重复爬——OneTHU/v1.5.0 语义：一次爬全会话内复用）
+  try {
+    const cached = await NX.store.get(cacheKey);
+    if (cached && cached.map && Date.now() - (cached.ts || 0) < cacheTTL) {
+      console.log(NX.TAG, 'volunteer (cached):', Object.keys(cached.map).length, 'entries');
+      return cached.map;
+    }
+  } catch (e) { /* 缓存读失败当无缓存 */ }
+
   const map = {};
+
+  // ② 快路：池内逐门 p_kch 单查（教务检索组件同构的猜测路径；命中即省全量爬）
   const todo = (courses || []).filter(c => c && c.code && !c.isCandidate);
-  if (!todo.length) return map;
   let fetched = 0;
-  await NX.runPool(todo, 4, async c => {
-    await new Promise(r => setTimeout(r, 30));   // 微错峰
-    const key = c.code + '_' + String(c.seq || '0');
-    try {
-      const br = BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchBR&p_xnxq=' + SEM + '&p_kch=' + encodeURIComponent(c.code) + '&_t=' + Date.now();
-      const dual = await NX.fetchPageDual(br);
-      const html = dual.gbk.includes('trr1') || dual.gbk.includes('trr2') ? dual.gbk : dual.utf8;
-      const batch = NX.parseVolFromHtml(html) || {};
-      for (const k in batch) { map[k] = batch[k]; fetched++; }
-      // 体育课：志愿独立级联，另查体育统计
-      const isSports = c.typeCode === 'ty' || (c.typeLabel || '') === '体育' || (c.department || '').includes('体育');
-      if (isSports) {
-        try {
-          const ty = BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchTy&p_xnxq=' + SEM + '&p_kch=' + encodeURIComponent(c.code) + '&_t=' + Date.now();
-          const tyDual = await NX.fetchPageDual(ty);
-          const tyHtml = tyDual.gbk.includes('trr1') || tyDual.gbk.includes('trr2') ? tyDual.gbk : tyDual.utf8;
-          const tyBatch = NX.parseVolSportsFromHtml(tyHtml) || {};
-          for (const k in tyBatch) {
-            map[k] = Object.assign({ capacity: 0, applied: 0, volRequired: '', volElective: '', volOptional: '' }, map[k], tyBatch[k]);
-          }
-          fetched++;
-        } catch (e) { /* 体育统计失败容忍（OneTHU 同款） */ }
-      }
-    } catch (e) { /* 单课失败容忍：该课无志愿数据 */ }
-  });
-  console.log(NX.TAG, 'volunteer (pool-sync):', fetched, 'entries for', todo.length, 'courses');
+  if (todo.length) {
+    await NX.runPool(todo, 4, async c => {
+      await new Promise(r => setTimeout(r, 30));   // 微错峰
+      try {
+        const br = BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchBR&p_xnxq=' + SEM + '&p_kch=' + encodeURIComponent(c.code) + '&_t=' + Date.now();
+        const dual = await NX.fetchPageDual(br);
+        const html = dual.gbk.includes('trr1') || dual.gbk.includes('trr2') ? dual.gbk : dual.utf8;
+        const batch = NX.parseVolFromHtml(html) || {};
+        for (const k in batch) { map[k] = batch[k]; fetched++; }
+        const isSports = c.typeCode === 'ty' || (c.typeLabel || '') === '体育' || (c.department || '').includes('体育');
+        if (isSports) {
+          try {
+            const ty = BASE + '/xkBks.xkBksZytjb.do?m=tbzySearchTy&p_xnxq=' + SEM + '&p_kch=' + encodeURIComponent(c.code) + '&_t=' + Date.now();
+            const tyDual = await NX.fetchPageDual(ty);
+            const tyHtml = tyDual.gbk.includes('trr1') || tyDual.gbk.includes('trr2') ? tyDual.gbk : tyDual.utf8;
+            const tyBatch = NX.parseVolSportsFromHtml(tyHtml) || {};
+            for (const k in tyBatch) {
+              map[k] = Object.assign({ capacity: 0, applied: 0, volRequired: '', volElective: '', volOptional: '' }, map[k], tyBatch[k]);
+            }
+          } catch (e) { /* 体育统计失败容忍 */ }
+        }
+      } catch (e) { /* 单课失败容忍 */ }
+    });
+    console.log(NX.TAG, 'volunteer (pool-sync):', fetched, 'entries for', todo.length, 'courses');
+  }
+  if (fetched > 0) {
+    try { await NX.store.set(cacheKey, { ts: Date.now(), map }); } catch (e) {}
+    return map;
+  }
+
+  // ③ 兜底：OneTHU getXkVolunteer 原样分页爬（用户实锤「这网页和我们之前
+  // 弄的一模一样」——tbzySearchBR ≤200 页 + tbzySearchTy ≤20 页，5 并发
+  // 30ms 节流；快路 p_kch 服务端不认时走这里。阶段门控保证只在非队列
+  // 阶段（预选/志愿期）触发，且为后台非阻塞任务）。
+  const mkUrl = m => p => BASE + '/xkBks.xkBksZytjb.do?m=' + m + '&p_xnxq=' + SEM + (p > 0 ? '&page=' + p : '') + '&_t=' + Date.now();
+  const grab = async (m, parseFn, maxPages) => {
+    let fh = '';
+    try { fh = await NX.fetchPage(mkUrl(m)(0)); }
+    catch (e) { console.warn(NX.TAG, m, 'first page:', e); return []; }
+    const pg = NX.parsePagerInfo(fh);
+    const items = await NX.pagedFetch({
+      firstHtml: fh,
+      fetchPage: mkUrl(m),
+      parse: html => { const b = parseFn(html); const arr = Object.values(b); return { items: arr, hasData: arr.length > 0 }; },
+      maxPages, concurrency: 5, throttle: 30,
+      dedupe: v => v.code + '_' + v.seq,
+      expectPages: pg.pages, label: m,
+    });
+    return items;
+  };
+  try {
+    const volItems = await grab('tbzySearchBR', NX.parseVolFromHtml, 200);
+    volItems.forEach(v => { map[v.code + '_' + v.seq] = v; });
+  } catch (e) { console.warn(NX.TAG, 'volunteer crawl BR:', e); }
+  try {
+    const sportsItems = await grab('tbzySearchTy', NX.parseVolSportsFromHtml, 20);
+    sportsItems.forEach(v => {
+      map[v.code + '_' + v.seq] = Object.assign(
+        { capacity: 0, applied: 0, volRequired: '', volElective: '', volOptional: '' },
+        map[v.code + '_' + v.seq], v
+      );
+    });
+  } catch (e) { console.warn(NX.TAG, 'sports volunteer fetch:', e); }
+  console.log(NX.TAG, 'volunteer (crawl):', Object.keys(map).length, 'entries');
+  try { await NX.store.set(cacheKey, { ts: Date.now(), map }); } catch (e) {}
   return map;
 };
 
@@ -600,37 +652,7 @@ NX.fallbackSelectedFromLevelTable = async function () {
   return out;
 };
 
-NX.fetchLevelTable = async function () {
-  const { state, fetchPage } = NX;
-  if (!state.isZhjwxk) return {};
-  const { SEM, BASE } = state;
-  try {
-    const url = BASE + '/xkBks.vxkBksXkbBs.do?p_xnxq=' + SEM + '&pathContent=' + encodeURIComponent('一级课表');
-    const html = await fetchPage(url);
-    const doc = new DOMParser().parseFromString(html, 'text/html');
-    const rows = doc.querySelectorAll('tr.trr2');
-    const map = {};
-    rows.forEach(row => {
-      const rawCells = [...row.querySelectorAll('td')].map(td => td.textContent.trim().replace(/\s+/g, ' '));
-      let code = '', seq = '', attr = '';
-      for (let i = 0; i < rawCells.length; i++) {
-        if (/^\d{8}$/.test(rawCells[i]) && !code) {
-          code = rawCells[i]; seq = rawCells[i + 1] || '0';
-          attr = rawCells[i + 2] || '';
-          if (!/^(必修|限选|任选)$/.test(attr)) attr = '';
-        }
-      }
-      if (!code) return;
-      const isSports = !attr;
-      const typeLabel = isSports ? '体育' : attr;
-      const typeCode = isSports ? 'ty' : attr === '必修' ? '006' : attr === '限选' ? '008' : attr === '任选' ? '007' : '';
-      map[code + '_' + seq] = { typeCode, typeLabel, attr };
-    });
-    console.log(NX.TAG, 'level table:', Object.keys(map).length, 'courses');
-    return map;
-  } catch (e) { console.warn(NX.TAG, 'level table:', e); return {}; }
-};
-
+// （此位置曾有 encodeURIComponent 旧版 fetchLevelTable 死副本，已删——真实实现在下方 applyLevelMap 区块）
 NX.fetchCourseDetail = async function (teacherId, code) {
   const { state, fetchPage } = NX;
   if (!state.isZhjwxk) return null;
