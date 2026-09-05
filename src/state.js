@@ -644,6 +644,18 @@ NX.deleteDraft = function (idx) {
   store.set('drafts', state.savedDrafts);
 };
 
+NX.renameDraft = function (idx) {
+  const { state, store, renderDrafts, renderPreviewTT } = NX;
+  const draft = state.savedDrafts[idx];
+  if (!draft) return;
+  const name = (prompt('重命名草稿：', draft.name) || '').trim();
+  if (!name || name === draft.name) return;
+  draft.name = name;
+  renderDrafts();
+  store.set('drafts', state.savedDrafts);
+  if (state.previewMode === 'draft' && state.previewDraftIdx === idx) renderPreviewTT(draft.courses, '草稿「' + name + '」预览');
+};
+
 NX.exportDraft = function (draft) {
   const { showXkResult } = NX;
   const data = {

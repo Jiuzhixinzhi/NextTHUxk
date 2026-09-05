@@ -650,7 +650,7 @@ NX.draftCourseProbHtml = function (c) {
 };
 
 NX.renderDrafts = function () {
-  const { esc, state, store, baseFlag, allowedFlags, renderPreviewTT, promoteDraft, deleteDraft, exportDraft } = NX;
+  const { esc, state, store, baseFlag, allowedFlags, renderPreviewTT, promoteDraft, deleteDraft, exportDraft, renameDraft } = NX;
   const { savedDrafts, allCourses } = state;
   const $ = state.$;
   const el = $('nextthuxk-drafts');
@@ -682,7 +682,7 @@ NX.renderDrafts = function () {
       courseList += '</div>';
     }
     const expIcon = exp ? '▼' : '▶';
-    return '<div class="nx-draft-card"><div class="nx-draft-head"><span class="nx-draft-name" style="cursor:pointer" data-toggle="' + di + '">' + expIcon + ' ' + esc(d.name) + '</span><span class="nx-draft-info">' + d.courses.length + '门 · ' + cr + '学分 · ' + (dt.getMonth() + 1) + '/' + dt.getDate() + '</span></div><div class="nx-draft-acts"><button class="nx-draft-view" data-idx="' + di + '">预览 & 修改</button><button class="nx-draft-go" data-idx="' + di + '">提交选课</button><button class="nx-draft-export" data-idx="' + di + '">导出</button><button class="nx-draft-del" data-idx="' + di + '">删除</button></div>' + courseList + '</div>';
+    return '<div class="nx-draft-card"><div class="nx-draft-head"><span class="nx-draft-name" style="cursor:pointer" data-toggle="' + di + '">' + expIcon + ' ' + esc(d.name) + '</span><span class="nx-draft-info">' + d.courses.length + '门 · ' + cr + '学分 · ' + (dt.getMonth() + 1) + '/' + dt.getDate() + '</span></div><div class="nx-draft-acts"><button class="nx-draft-view" data-idx="' + di + '">预览 & 修改</button><button class="nx-draft-go" data-idx="' + di + '">提交选课</button><button class="nx-draft-export" data-idx="' + di + '">导出</button><button class="nx-draft-rename" data-idx="' + di + '">重命名</button><button class="nx-draft-del" data-idx="' + di + '">删除</button></div>' + courseList + '</div>';
   }).join('');
   el.querySelectorAll('[data-toggle]').forEach(span => {
     span.onclick = () => {
@@ -748,6 +748,9 @@ NX.renderDrafts = function () {
       const d = savedDrafts[parseInt(btn.dataset.idx)];
       if (d) exportDraft(d);
     };
+  });
+  el.querySelectorAll('.nx-draft-rename').forEach(btn => {
+    btn.onclick = () => renameDraft(parseInt(btn.dataset.idx));
   });
 };
 
