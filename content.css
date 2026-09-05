@@ -605,6 +605,7 @@
 .nx-draft-acts { display: flex; gap: 6px; }
 .nx-draft-acts button { padding: 3px 10px; border-radius: var(--nx-radius); font-size: 10px; cursor: pointer; font-family: var(--nx-font); font-weight: 600; border: none; transition: opacity .15s; }
 .nx-draft-view { background: rgba(47,107,255,.1); color: var(--nx-accent); }
+.nx-draft-sim { background: rgba(47,107,255,.1); color: var(--nx-accent); }
 .nx-draft-go { background: linear-gradient(135deg, var(--nx-green), var(--nx-green)); color: #fff; }
 .nx-draft-del { background: rgba(238,77,77,.1); color: var(--nx-red); }
 .nx-draft-acts button:hover { opacity: .8; }
@@ -773,3 +774,83 @@
 .nx-sg-star.lv-bad { color: #d64545; }
 .nx-sg-star + .nx-sg-cnt { display: none; }
 .nx-sg-norev { grid-area: right; justify-self: end; align-self: center; font-size: 10px; color: var(--nx-faint); opacity: .7; }
+
+/* 学分中签模拟弹窗 */
+.nx-sim-modes { display: flex; gap: 6px; margin-bottom: 8px; }
+.nx-sim-mode {
+  padding: 4px 12px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(255,255,255,.5);
+  box-shadow: var(--nx-glass-edge), 0 2px 12px rgba(28,39,64,.08);
+  font-size: 11px; font-weight: 500; cursor: pointer;
+  font-family: var(--nx-font); color: var(--nx-ink);
+  transition: all .15s;
+}
+.nx-sim-mode.on { background: var(--nx-accent); color: #fff; box-shadow: 0 4px 14px rgba(47,107,255,.35); }
+.nx-sim-note { font-size: 11px; color: var(--nx-ink-soft); margin-bottom: 8px; }
+.nx-sim-list { margin-bottom: 12px; }
+.nx-sim-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 12px;
+  border-bottom: 1px solid var(--nx-line);
+}
+.nx-sim-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; color: var(--nx-ink); }
+.nx-sim-cred { font-size: 11px; color: var(--nx-ink-soft); flex-shrink: 0; }
+.nx-sim-tag {
+  font-size: 10px; color: var(--nx-accent); background: rgba(47,107,255,.1);
+  padding: 1px 8px; border-radius: 8px; flex-shrink: 0;
+}
+.nx-sim-prob {
+  width: 62px; padding: 3px 6px; font-size: 11px; font-family: inherit;
+  border: 1px solid rgba(0,0,0,.12); border-radius: 6px; background: #fff;
+  text-align: center; flex-shrink: 0;
+}
+.nx-sim-prob:focus { border-color: var(--nx-accent); outline: none; }
+.nx-sim-prob:disabled { background: rgba(0,0,0,.045); color: #9aa1ac; cursor: not-allowed; }
+.nx-sim-prob[placeholder]:invalid, .nx-sim-prob:placeholder-shown { border-style: dashed; border-color: rgba(238,77,77,.4); }
+.nx-sim-dirty {
+  flex-shrink: 0;
+  font-size: 9px; font-weight: 700; color: #ff9f1a;
+  background: rgba(255,159,26,.15);
+  padding: 1px 5px; border-radius: 8px;
+}
+.nx-sim-stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 14px 0; }
+.nx-sim-stat {
+  background: var(--nx-glass);
+  border: 1px solid var(--nx-line);
+  border-radius: var(--nx-radius);
+  padding: 10px 6px;
+  text-align: center;
+}
+.nx-sim-stat-v { font-size: 17px; font-weight: 700; color: var(--nx-ink); line-height: 1.4; }
+.nx-sim-stat-k { font-size: 10px; color: var(--nx-ink-soft); margin-top: 2px; }
+.nx-sim-histo {
+  display: flex; align-items: flex-end; gap: 2px;
+  height: 150px; padding-top: 14px;
+  border-top: 1px solid var(--nx-line);
+  overflow-x: auto;
+}
+.nx-sim-bar-col {
+  flex: 1 0 auto; min-width: 22px;
+  display: flex; flex-direction: column; align-items: center; justify-content: flex-end;
+  height: 100%;
+}
+.nx-sim-bar-val { font-size: 9px; color: var(--nx-ink-soft); margin-bottom: 2px; white-space: nowrap; }
+.nx-sim-bar { width: 70%; max-width: 34px; background: linear-gradient(180deg, #5b8bff, var(--nx-accent)); border-radius: 3px 3px 0 0; }
+.nx-sim-bar-x { font-size: 9px; color: var(--nx-faint); margin-top: 3px; }
+.nx-sim-table-wrap { max-height: 220px; overflow-y: auto; margin-top: 12px; }
+.nx-sim-table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.nx-sim-table th {
+  position: sticky; top: 0;
+  background: var(--nx-glass-strong);
+  font-size: 10px; color: var(--nx-ink-soft); font-weight: 600;
+  text-align: left; padding: 6px 8px;
+  border-bottom: 1px solid var(--nx-line);
+}
+.nx-sim-table td { padding: 5px 8px; border-bottom: 1px solid var(--nx-line); color: var(--nx-ink); }
+.nx-sim-td-c { font-weight: 700; }
+.nx-sim-foot { margin-top: 10px; font-size: 10px; color: var(--nx-faint); }

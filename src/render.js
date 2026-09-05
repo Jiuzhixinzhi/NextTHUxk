@@ -682,7 +682,7 @@ NX.renderDrafts = function () {
       courseList += '</div>';
     }
     const expIcon = exp ? '▼' : '▶';
-    return '<div class="nx-draft-card"><div class="nx-draft-head"><span class="nx-draft-name" style="cursor:pointer" data-toggle="' + di + '">' + expIcon + ' ' + esc(d.name) + '</span><span class="nx-draft-info">' + d.courses.length + '门 · ' + cr + '学分 · ' + (dt.getMonth() + 1) + '/' + dt.getDate() + '</span></div><div class="nx-draft-acts"><button class="nx-draft-view" data-idx="' + di + '">预览 & 修改</button><button class="nx-draft-go" data-idx="' + di + '">提交选课</button><button class="nx-draft-export" data-idx="' + di + '">导出</button><button class="nx-draft-rename" data-idx="' + di + '">重命名</button><button class="nx-draft-del" data-idx="' + di + '">删除</button></div>' + courseList + '</div>';
+    return '<div class="nx-draft-card"><div class="nx-draft-head"><span class="nx-draft-name" style="cursor:pointer" data-toggle="' + di + '">' + expIcon + ' ' + esc(d.name) + '</span><span class="nx-draft-info">' + d.courses.length + '门 · ' + cr + '学分 · ' + (dt.getMonth() + 1) + '/' + dt.getDate() + '</span></div><div class="nx-draft-acts"><button class="nx-draft-sim" data-idx="' + di + '">学分模拟</button><button class="nx-draft-view" data-idx="' + di + '">预览 & 修改</button><button class="nx-draft-go" data-idx="' + di + '">提交选课</button><button class="nx-draft-export" data-idx="' + di + '">导出</button><button class="nx-draft-rename" data-idx="' + di + '">重命名</button><button class="nx-draft-del" data-idx="' + di + '">删除</button></div>' + courseList + '</div>';
   }).join('');
   el.querySelectorAll('[data-toggle]').forEach(span => {
     span.onclick = () => {
@@ -730,6 +730,12 @@ NX.renderDrafts = function () {
       const idx = parseInt(btn.dataset.idx);
       const d = savedDrafts[idx];
       if (d) { state.previewDraftIdx = idx; renderPreviewTT(d.courses, '草稿「' + d.name + '」预览'); }
+    };
+  });
+  el.querySelectorAll('.nx-draft-sim').forEach(btn => {
+    btn.onclick = () => {
+      const d = savedDrafts[parseInt(btn.dataset.idx)];
+      if (d && d.courses.length) NX.showCreditSimModal(d.courses, '草稿「' + d.name + '」 · 学分中签模拟');
     };
   });
   el.querySelectorAll('.nx-draft-go').forEach(btn => {
@@ -784,6 +790,135 @@ NX.showCourseModal = async function (code, teacherId) {
     }
   }
   body.innerHTML = html || '<div class="nx-modal-loading">暂无信息</div>';
+};
+
+// ─── 学分中签模拟弹窗 ─────────────────────────────────────────
+
+NX.showCreditSimModal = function (courses, title) {
+  const { esc, state, creditSimItems } = NX;
+  const $ = state.$;
+  const mask = $('nextthuxk-modal');
+  const t = $('nextthuxk-modal-title');
+  const body = $('nextthuxk-modal-body');
+  mask.classList.add('show');
+  t.textContent = title || '学分中签模拟';
+  const items = creditSimItems(courses);
+  NX._creditSimItems = items;
+  NX._creditSimMode = 'live';
+  if (!items.length) {
+    body.innerHTML = '<div class="nx-modal-loading">没有可模拟的课程</div>';
+    return;
+  }
+  const rowsHtml = items.map((it, i) =>
+    '<div class="nx-sim-row">' +
+      '<span class="nx-sim-name" title="' + esc(it.name) + '">' + esc(it.name) + '</span>' +
+      '<span class="nx-sim-cred">' + it.credits + '学分</span>' +
+      (it.flag && it.zy ? '<span class="nx-sim-tag">' + esc(NX.flagName(it.flag)) + ' · ' + it.zy + '志愿</span>' : '') +
+      '<input type="number" min="0" max="100" step="1" class="nx-sim-prob" data-idx="' + i + '" value="' + (it.prob === null ? '' : Math.round(it.prob * 100)) + '" placeholder="0-100" disabled>' +
+      '<span class="nx-sim-dirty" data-idx="' + i + '" title="已手动覆盖" style="display:none">改</span>' +
+    '</div>'
+  ).join('');
+  body.innerHTML =
+    '<div class="nx-sim-modes"><button class="nx-sim-mode on" data-mode="live">实时取值</button><button class="nx-sim-mode" data-mode="override">手动覆盖</button></div>' +
+    '<div class="nx-sim-note">每门课中签概率（实时取值随所选身份/志愿；切「手动覆盖」可修改，留空 = 暂不计入）</div>' +
+    '<div class="nx-sim-list">' + rowsHtml + '</div>' +
+    '<div class="nx-sim-stats" id="nextthuxk-sim-stats"></div>' +
+    '<div class="nx-sim-histo" id="nextthuxk-sim-histo"></div>' +
+    '<div class="nx-sim-table-wrap"><table class="nx-sim-table"><thead><tr><th>总学分</th><th>概率</th><th>至少拿到 (≥)</th></tr></thead><tbody id="nextthuxk-sim-table"></tbody></table></div>' +
+    '<div class="nx-sim-foot">假设各课中签相互独立（志愿级联已计入单课概率）</div>';
+  body.querySelectorAll('.nx-sim-modes .nx-sim-mode').forEach(b => {
+    b.onclick = () => NX.setCreditSimMode(b.dataset.mode);
+  });
+  body.querySelectorAll('.nx-sim-prob').forEach(inp => {
+    inp.onchange = NX.renderCreditSimResult;
+  });
+  NX.renderCreditSimResult();
+};
+
+NX.setCreditSimMode = function (mode) {
+  NX._creditSimMode = mode === 'override' ? 'override' : 'live';
+  const body = NX.state.$('nextthuxk-modal-body');
+  if (!body) return;
+  body.querySelectorAll('.nx-sim-modes .nx-sim-mode').forEach(b => b.classList.toggle('on', b.dataset.mode === NX._creditSimMode));
+  body.querySelectorAll('.nx-sim-prob').forEach(inp => { inp.disabled = NX._creditSimMode === 'live'; });
+  NX.renderCreditSimResult();
+};
+
+NX.renderCreditSimResult = function () {
+  const { state, creditDist } = NX;
+  const body = state.$('nextthuxk-modal-body');
+  if (!body || !NX._creditSimItems) return;
+  const mode = NX._creditSimMode === 'override' ? 'override' : 'live';
+  const items = NX._creditSimItems;
+  // 输入框当前有效值（与模式无关，供覆盖态判定兜底）
+  const effectiveOf = (i) => {
+    const inp = body.querySelector('.nx-sim-prob[data-idx="' + i + '"]');
+    const v = inp ? parseFloat(inp.value) : NaN;
+    return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) / 100 : null;
+  };
+  // 「改」判定：输入框当前值 ≠ 实时值（含无数据课被填值、有值课被清空）
+  const isDirty = (it, i) => {
+    const cur = effectiveOf(i);
+    if (it.liveProb === null) return cur !== null;
+    return cur === null || Math.abs(cur - it.liveProb) > 1e-9;
+  };
+  let anyFilled = false;
+  items.forEach((it, i) => {
+    if (mode === 'override') it.prob = effectiveOf(i);
+    else it.prob = it.liveProb;
+    if (it.prob !== null) anyFilled = true;
+  });
+  items.forEach((it, i) => {
+    const badge = body.querySelector('.nx-sim-dirty[data-idx="' + i + '"]');
+    if (badge) badge.style.display = isDirty(it, i) ? '' : 'none';
+  });
+  const stats = body.querySelector('#nextthuxk-sim-stats');
+  const histo = body.querySelector('#nextthuxk-sim-histo');
+  const tbody = body.querySelector('#nextthuxk-sim-table');
+  if (!stats || !histo || !tbody) return;
+  const oldTarget = state.$('nextthuxk-sim-target');
+  const hadTarget = oldTarget ? parseFloat(oldTarget.value) : NaN;
+  const hint = mode === 'live' ? '实时数据尚未就绪（无志愿统计 / 课余量阶段已满排队）——可切「手动覆盖」填写' : '请为至少一门课填写概率（默认已自动取值）';
+  if (!anyFilled) {
+    stats.innerHTML = '<div class="nx-st">' + hint + '</div>';
+    histo.innerHTML = '';
+    tbody.innerHTML = '';
+    return;
+  }
+  const dist = creditDist(items);
+  if (!dist.points.length) {
+    stats.innerHTML = '<div class="nx-st">' + hint + '</div>';
+    histo.innerHTML = '';
+    tbody.innerHTML = '';
+    return;
+  }
+  const target = Number.isFinite(hadTarget) ? hadTarget : Math.round(dist.expected);
+  const atLeast = dist.points.reduce((acc, pt) => acc + (pt.credits >= target ? pt.prob : 0), 0);
+  const skipN = items.filter(it => it.prob === null).length;
+  const dirtyN = items.filter((it, i) => isDirty(it, i)).length;
+  const pct = p => Math.round(p * 100 * 100) / 100;
+  stats.innerHTML =
+    '<div style="font-size:10px;color:var(--nx-faint);margin-bottom:8px">分布来源：' + (mode === 'live' ? '实时取值' : '手动覆盖 ' + (dirtyN ? '（' + dirtyN + ' 门已覆盖）' : '（无改动）')) + '</div>' +
+    '<div class="nx-sim-stat"><div class="nx-sim-stat-v">' + dist.expected.toFixed(2) + '</div><div class="nx-sim-stat-k">期望学分</div></div>' +
+    '<div class="nx-sim-stat"><div class="nx-sim-stat-v">' + dist.mode + '</div><div class="nx-sim-stat-k">最可能学分</div></div>' +
+    '<div class="nx-sim-stat"><div class="nx-sim-stat-v">' + pct(atLeast) + '%</div><div class="nx-sim-stat-k">≥ <input type="number" id="nextthuxk-sim-target" min="0" step="1" value="' + target + '" style="width:46px;padding:1px 4px;border:1px solid rgba(0,0,0,.12);border-radius:5px;font-size:10px;text-align:center"> 学分</div></div>' +
+    '<div class="nx-sim-stat"><div class="nx-sim-stat-v" style="font-size:11px;margin-top:6px">' + items.length + ' 门' + (skipN ? '（<span style="color:#ee4d4d">' + skipN + ' 门未计入</span>）' : '') + '</div><div class="nx-sim-stat-k">参与统计</div></div>';
+  const tInp = state.$('nextthuxk-sim-target');
+  if (tInp) tInp.onchange = NX.renderCreditSimResult;
+  const maxP = Math.max.apply(null, dist.points.map(pt => pt.prob));
+  histo.innerHTML = dist.points.map(pt =>
+    '<div class="nx-sim-bar-col" title="' + pt.credits + ' 学分 · ' + pct(pt.prob) + '%">' +
+      '<div class="nx-sim-bar-val">' + pct(pt.prob) + '%</div>' +
+      '<div class="nx-sim-bar" style="height:' + Math.max(3, Math.round(pt.prob / maxP * 92)) + 'px"></div>' +
+      '<div class="nx-sim-bar-x">' + pt.credits + '</div>' +
+    '</div>'
+  ).join('');
+  let atLeastAcc = 1;
+  tbody.innerHTML = dist.points.map(pt => {
+    const atLeastP = atLeastAcc;
+    atLeastAcc -= pt.prob;
+    return '<tr><td class="nx-sim-td-c">' + pt.credits + '</td><td>' + pct(pt.prob) + '%</td><td>' + pct(Math.max(0, atLeastP)) + '%</td></tr>';
+  }).join('');
 };
 
 // ─── Plan Coverage ────────────────────────────────────────────
