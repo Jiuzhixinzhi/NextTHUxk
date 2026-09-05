@@ -258,6 +258,9 @@ NX.launch = async function launch() {
     // 搜索时服务器随时查——绝不整库预爬（原版 320 页目录 + 220 页志愿
     // ≈ 500+ 请求已删）。staticData 只存培养方案（DATA_VER=6 起旧缓存清空）。
     state.planData = sd?.plan || [];
+    // ── 志愿统计窗口缓存水合（用户 9/5 报建议）：检查点窗口内跨会话复用，
+    // 重进界面零后端请求、概率秒出（上游只 8/12/16/20 发布，窗口内不变）
+    await NX.volCacheHydrate().catch(e => console.warn(TAG, 'vol cache hydrate:', e));
     listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;正在读取已选/队列…</div>';
     console.log(TAG, 'on-demand mode: fetching selected + candidates + plan');
     // 候选不再 phase 门控（OneTHU getQueueStatus 语义：独立拉取，dlSearch 拿不到
@@ -320,7 +323,14 @@ NX.launch = async function launch() {
         try {
           const vol = await NX.fetchVolunteer(pool);
           state.volMap = Object.assign({}, state.volMap, vol);   // 全局持久：搜索/跳转新行可取
-          NX.applyVolunteer(pool, vol);
+          // 全量重放不套增量（审查发现）：缓存命中时 vol 可为空 delta，
+          // applyVolunteer 的 else 分支会无条件清空——套 delta 会把水合进
+          // 来的池行志愿数据全部抹掉（同窗口二次启动「首屏无概率」复现）；
+          // state.volMap 恒为 superset，套它才安全
+          NX.applyVolunteer(pool, state.volMap);
+          // 竞态修复（用户 9/5 报主因 2）：搜索行先到、本块后完成时行对象
+          // 没被写——首屏卡片停在「无数据」除非再搜一次，这里立即补套
+          if (state._searchRows && state._searchRows.length) NX.applyVolunteer(state._searchRows, state.volMap);
         } catch (e) { console.warn(TAG, 'volunteer:', e); }
       }
       const qBtn = state.$('nextthuxk-phase-tag');
@@ -474,6 +484,53 @@ NX.nextVolCheckpoint = function (now) {
   t.setHours(NX.VOL_CHECKPOINTS[0], 0, 0, 0);
   return t;
 };
+/** 当前检查点窗口起点：最近一个 ≤ now 的检查点（今天检查点都未到则取昨日
+ *  20:00）。与 volNeedsRefresh 的 lastUpdate 判定同源——缓存键即窗口。 */
+NX.volWindowStart = function (now) {
+  const d = new Date(now == null ? Date.now() : now);
+  for (let i = NX.VOL_CHECKPOINTS.length - 1; i >= 0; i--) {
+    const t = new Date(d);
+    t.setHours(NX.VOL_CHECKPOINTS[i], 0, 0, 0);
+    if (d >= t) return t;
+  }
+  const t = new Date(d);
+  t.setDate(t.getDate() - 1);
+  t.setHours(NX.VOL_CHECKPOINTS[NX.VOL_CHECKPOINTS.length - 1], 0, 0, 0);
+  return t;
+};
+// 志愿缓存水合（用户 9/5 报建议「同一周期采集缓存」）：同学期 + 同检查点
+// 窗口 → volMap/_volDepts 直接还原：首屏概率秒出、重进界面零后端请求。
+// 窗口翻转（跨整点）后旧数据不可信，放弃缓存等自然重拉。队列阶段无志愿
+// 数据，水合只为随后可能误判为预选时的兜底——无副作用。
+NX.volCacheHydrate = async function () {
+  const c = await NX.store.get('volCache');
+  if (!c || !c.map || !c.depts) return;
+  if (c.sem !== state.SEM) return;   // 学期变了不信任（课可能对不上）
+  if (c.windowStart !== NX.volWindowStart().getTime()) return;   // 窗口已翻，数据过期
+  state.volMap = Object.assign({}, state.volMap, c.map);
+  state._volDepts = Object.assign({}, state._volDepts, c.depts);
+  console.log(TAG, 'vol cache hydrated:', Object.keys(c.map).length, 'rows,', Object.keys(c.depts).length, 'depts（窗口', NX.fmtTime(c.windowStart), '）');
+};
+// 志愿缓存写回（防抖 2s 防连续写存储）：fetchVolunteer/自愈/整点同步后调用；
+// 窗口起点在调用时刻捕获（防抖期间跨整点也不会把旧窗口数据标成新窗口）。
+// 已知轻微时序：抓取本身跨整点时（如 15:59 发起、16:00 后完成）数据仍按
+// 旧窗口纳入，但 depts 时间戳也指旧窗口——下次 volNeedsRefresh 会重拉这些
+// 院系，新鲜度自行兜底，无需处理。
+// storage 配额写失败有告警（NX.store 语义），缓存不可用也只是回退到重拉。
+NX.volCachePersist = function () {
+  clearTimeout(state._volCacheT);
+  const win = NX.volWindowStart().getTime();
+  state._volCacheT = setTimeout(async () => {
+    try {
+      await NX.store.set('volCache', {
+        sem: state.SEM,
+        windowStart: win,
+        map: state.volMap || {},
+        depts: state._volDepts || {},
+      });
+    } catch (e) { console.warn(TAG, 'volCache persist:', e); }
+  }, 2000);
+};
 NX.startVolAutoSync = function () {
   if (state._volSyncStarted) return;
   state._volSyncStarted = true;
@@ -529,6 +586,26 @@ NX.syncQueueAndVol = async function () {
   try { NX.renderStageCart(); } catch (e) {}   // 暂存条余量/概率随队列同步刷新
   NX.renderQueueSection();
   renderPreviewTT(NX.getPreviewCourses(), '当前已选');
+  // 非队列阶段：志愿统计按检查点窗口同步（整点回调时窗口刚翻转 → 全部院系
+  // 自动 stale → 自然全量重拉；与 launch/按需补拉靠 inflight 去重不重复请求）。
+  // 后台执行不阻塞本回调（fire-and-forget，避免大院系抓取卡住队列数据上屏），
+  // 完成后再回渲——顶栏「志愿按检查点同步」至此名实相符
+  if (!state.isQueuePhase) {
+    (async () => {
+      try {
+        const volTargets = state.allCourses.concat(state._searchRows || []);
+        const vol = await NX.fetchVolunteer(volTargets) || {};
+        if (Object.keys(vol).length) {
+          state.volMap = Object.assign({}, state.volMap, vol);
+          NX.applyVolunteer(volTargets, state.volMap);
+          // 已选课表网格也要重渲（审查发现）：本块在 renderPreviewTT 之后才
+          // 跑，不刷则「当前已选」格子停在同步前的旧概率——顶栏「志愿按
+          // 检查点同步」对课表没动作
+          try { filterCourses(); NX.renderStageCart(); renderPreviewTT(NX.getPreviewCourses(), '当前已选'); } catch (e) {}
+        }
+      } catch (e) { console.warn(TAG, 'volunteer sync:', e); }
+    })();
+  }
   NX.renderCacheInfo();
 };
 $('nextthuxk-search').oninput = NX.debounce(function () {
