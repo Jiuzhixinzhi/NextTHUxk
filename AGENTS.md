@@ -20,7 +20,7 @@ config（定义 NX/常量/存储/网络）→ gbk（GBK 编码表）→ data（�
 
 1. **版本字段**：发版时同步 `manifest.json` version、`NX.CUR_VER`、`NX.BUILD`（src/config.js:13-14）；存储结构变更递增 `NX.DATA_VER`（不匹配即整体清缓存）；严重缺陷版本加入 `NX.DANGEROUS_VERS`
 2. **GBK 双向契约**：中文查询参数必须经 `NX.gbkPercentEncode`（gbk.js）编码（p_kcm / p_zjjsxm / pathContent，UTF-8 直发 0 行）；响应解码用 `decodeBest` / `fetchPageDual`+`pickDecoded`，不得假定单编码
-3. **风暴护栏**（data.js `serverSearchStorm`）：精确课号只探 1 页；≤25 页全量，>25 只探 5 页；5 并发 + 30ms×槽位错峰——严禁加深深页探测（历史教训：25 连发打满代理 token）
+3. **风暴护栏**（data.js `serverSearchStorm`）：精确课号只探 1 页；≤25 页全量，>25 只探 5 页；5 并发 + 30ms×槽位错峰；定向志愿补拉 `p_kch` 限 4 门/次（本批优先、池内旧行分批补）——严禁加深深页探测（历史教训：25 连发打满代理 token）
 4. **一次性 token 链**：排队二段提交必须从第一段响应 HTML 提取新 token（旧 token 已消耗）；缺新 token 显式报错，不得复用
 5. **不假成功**：选/退/调提交后必须轮询已选/候补列表确认（pollUntil）；拒绝判定走 `REJECT_RE` 字典；唯一例外 `changeVolunteer`（固定 1000ms）
 6. **reviews.js 铁律**：全程 fail-soft；点评正文只实时拉取不本地囤积；保留「THU选课社区」署名与 CC BY-NC 4.0 声明
