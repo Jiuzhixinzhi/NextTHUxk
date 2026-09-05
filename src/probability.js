@@ -15,9 +15,31 @@ NX.fmtVol = function (v) {
   return s;
 };
 
+// 占用对（已报/容量）：课余量行最优先（容量-余量 = 实时已选，与卡片
+// 「已满/余0」标签永远一致——用户实锤「已满却显示 0/80 竞争宽松」）；
+// 无余量数据才退志愿统计（volApplied/volCapacity），最后退裸容量。
+NX.occupancyOf = function (c) {
+  const cap = Number(c.capacity) || 0;
+  const rem = c.remaining;
+  // 预选：报名人数/容量才是竞争信号（课余量在预选没人正式选上 → 恒
+  // 0/N「宽松」假象，用户实锤「必 51 却显示 0/100 竞争宽松」）；
+  // 补选/排队阶段（isQueuePhase）：课余量=实时已选，与「已满/余0」
+  // 标签一致，优先（大学物理 80/80 修法维持）。
+  if (!NX.state || !NX.state.isQueuePhase) {
+    if (Number(c.volCapacity) > 0 && c.volApplied != null) {
+      return { applied: Number(c.volApplied) || 0, cap: Number(c.volCapacity) };
+    }
+  }
+  if (cap > 0 && rem !== undefined && rem !== null && rem !== '' && Number(rem) >= 0) {
+    return { applied: Math.max(0, cap - Number(rem)), cap };
+  }
+  return { applied: Number(c.volApplied) || 0, cap: Number(c.volCapacity) || cap || 0 };
+};
+
 NX.volColor = function (course) {
-  const cap = course.volCapacity || course.capacity || 0;
-  const applied = course.volApplied || 0;
+  const occ = NX.occupancyOf(course);
+  const cap = occ.cap;
+  const applied = occ.applied;
   if (!cap || cap === 0) return { level: 'unknown', color: '#9aa1ac', bg: 'rgba(154,161,172,.08)', pct: 0 };
   const ratio = applied / cap;
   if (ratio <= 0.8) return { level: 'easy', color: '#07c160', bg: 'rgba(7,193,96,.1)', pct: Math.min(ratio * 100, 100) };
@@ -27,12 +49,24 @@ NX.volColor = function (course) {
 
 NX.parseVolArr = function (s) {
   if (!s) return null;
-  const priMatch = String(s).match(/^\((\d+)\)/);
+  const str = String(s);
+  const priMatch = str.match(/^\((\d+)\)/);
   const pri = priMatch ? parseInt(priMatch[1]) : 0;
-  const cleaned = String(s).replace(/^\(\d+\)/, '');
-  const nums = cleaned.match(/\d+/g);
-  if (!nums || nums.length < 3) return null;
-  const arr = nums.slice(0, 3).map(n => parseInt(n, 10) || 0);
+  const cleaned = str.replace(/^\(\d+\)/, '').trim();
+  const nums = cleaned ? cleaned.match(/\d+/g) : null;
+  if (!nums || !nums.length) {
+    // 纯优先志愿「(N)」：无分级数据，仅优先人数
+    return pri > 0 ? Object.assign([0, 0, 0], { priority: pri }) : null;
+  }
+  // 志愿串 = 当前阶段开放志愿级的密集列表（从高到低）：
+  //   3 个 = 一/二/三志愿（旧全阶段「(1)2，4，5」）
+  //   1 个 = 仅第三志愿（新生预选：只开放第三志愿+优先志愿「(1)2」/「2」）
+  // 缺的高志愿位补 0（该阶段没人能填）。绝不再因数量 <3 整串判 null
+  // （旧版就是这里把新生预选的志愿数据全吃了）。
+  const vals = nums.map(n => parseInt(n, 10) || 0);
+  const arr = [0, 0, 0];
+  const base = 3 - Math.min(3, vals.length);
+  for (let i = 0; i < Math.min(3, vals.length); i++) arr[base + i] = vals[i];
   arr.priority = pri;
   return arr;
 };
@@ -98,7 +132,9 @@ NX.probResult = function (rem, applicants) {
   }
   const remShown = Math.max(0, Math.round(rem));
   const applicantsShown = Math.max(0, Math.round(applicants));
-  if (rem <= 0) return { prob: 0, label: '0%', percentLabel: '0%', ratioLabel: remShown + '/' + applicantsShown, color: '#ee4d4d' };
+  // 比例标签 = 人数/名额（「2/5」=2人抢5位；用户实锤：与占用条 已选/容量
+  // 同向。旧版 剩余/人数「5/2」在卡片上和上面的 2/5 并排，读起来像搞反了）
+  if (rem <= 0) return { prob: 0, label: '0%', percentLabel: '0%', ratioLabel: applicantsShown + '/' + remShown, color: '#ee4d4d' };
   const prob = applicants === 0 ? 1 : Math.min(1, rem / applicants);
   if (!Number.isFinite(prob)) return { prob: -1, label: '无数据', percentLabel: '无数据', ratioLabel: '无数据', color: '#9aa1ac' };
   let color;
@@ -106,7 +142,7 @@ NX.probResult = function (rem, applicants) {
   else if (prob >= 0.5) color = '#ff9f1a';
   else color = '#ee4d4d';
   const percentLabel = Math.round(prob * 100) + '%';
-  const ratioLabel = remShown + '/' + applicantsShown;
+  const ratioLabel = applicantsShown + '/' + remShown;   // 人数/名额，见上
   return { prob, label: percentLabel, percentLabel, ratioLabel, color };
 };
 
@@ -142,7 +178,11 @@ NX.currentProbLine = function (course, flag, zy) {
 };
 
 NX.fullProbGrid = function (courseOrAc, bf) {
-  const aFlags = NX.allowedFlags(bf);
+  // 显示侧全开（用户十六报拍板）：志愿统计本就是全校公开数据（教务志愿
+  // 查询页人人可看）——必修/限选/任选 三行永远全显，非池内课也能看别
+  // 人的竞争；体育课走体育志愿单行。提交身份下拉仍是池子语义（教务
+  // 不收池外必修），只是纯展示不再收窄。
+  const aFlags = NX.isSportsCourse(courseOrAc) ? ['ty'] : ['bx', 'xx', 'rx'];
   const rows = [];
   for (const f of aFlags) {
     const cells = [];

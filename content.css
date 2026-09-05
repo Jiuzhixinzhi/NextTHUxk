@@ -1,3 +1,32 @@
+/* OneTHU 字标（照 OneTHU global.css .brand-logo 三字体混排：等线括号+衬线 One+粗黑 THU） */
+.othu-logo {
+  display: inline-grid;
+  grid-template-columns: auto auto auto auto auto;
+  line-height: 1;
+  text-align: center;
+}
+.othu-logo .lp {
+  font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  font-weight: 400;
+  transform: scaleY(1.06);
+}
+.othu-logo .word {
+  grid-column: 2 / 5;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: Georgia, "Playfair Display", "Times New Roman", serif;
+  font-weight: 500;
+  font-size: 1.14em;
+  letter-spacing: -.035em;
+  line-height: 1;
+}
+.othu-logo .word i { font-style: normal; display: block; }
+.othu-logo .tu {
+  font-family: Inter, "SF Pro Display", "Helvetica Neue", system-ui, -apple-system, sans-serif;
+  font-weight: 800;
+  letter-spacing: -.01em;
+}
 /* ═══════════════════════════════════════════════════════════════
    NextTHUxk — 全部样式（v1.3.16 液态玻璃 · Liquid Glass）
    设计语言：亮白底 + 靛蓝强调 + 衬线 Serif + 磨砂玻璃层 + 细分割线
@@ -67,6 +96,9 @@
   bottom: 28px;
   right: 28px;
   pointer-events: all;
+  display: flex;
+  align-items: center;
+  gap: 7px;
   padding: 10px 20px;
   border-radius: 999px;
   background: rgba(255,255,255,.3);
@@ -101,26 +133,8 @@
   opacity: 0;
   transition: transform .5s cubic-bezier(.16,1,.3,1), opacity .4s ease;
 }
-/* 玻璃下的环境光晕：让磨砂层透出色彩层次 */
-#nextthuxk-dashboard.active::before,
-#nextthuxk-dashboard.active::after {
-  content: '';
-  position: absolute;
-  border-radius: 50%;
-  filter: blur(120px);
-  pointer-events: none;
-  z-index: 0;
-}
-#nextthuxk-dashboard.active::before {
-  width: 45vw; height: 45vw;
-  left: -10vw; top: -12vw;
-  background: rgba(47,107,255,.2);
-}
-#nextthuxk-dashboard.active::after {
-  width: 40vw; height: 40vw;
-  right: -8vw; bottom: -10vw;
-  background: rgba(64,210,255,.16);
-}
+/* （xk-1.5.1）移除 dashboard 的靛蓝/青 blur 光晕伪元素——用户指令：玻璃风保留，
+   背景蓝色渐变删除。磨砂层保持纯玻璃质感，不再垫彩色光斑。 */
 #nextthuxk-dashboard.active {
   transform: translateY(0);
   opacity: 1;
@@ -138,13 +152,13 @@
   flex-shrink: 0;
 }
 .nx-logo {
-  font-family: var(--nx-font-serif);
-  font-size: 17px;
+  font-family: -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Noto Sans SC", sans-serif;
+  font-size: 16px;
   font-weight: 700;
+  letter-spacing: .06em;
   color: var(--nx-ink);
-  letter-spacing: .05em;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 8px;
 }
 .nx-logo-sub {
@@ -500,6 +514,19 @@
 .nx-manual-chip { border: 0; border-radius: 999px; padding: 4px 10px; background: rgba(139,92,246,.12); color: #7c3aed; font-size: 11px; cursor: pointer; }
 .nx-manual-chip:hover { background: rgba(139,92,246,.2); }
 .nx-tt-text { display: block; font-size: 10px; line-height: 1.3; word-break: break-all; }
+/* ── 课表预览时间轴（xk-1.5.1：钟点轴 + 重叠簇分道 + 外校课块）── */
+.nx-tta { display: flex; gap: 4px; overflow-x: auto; }
+.nx-tta-axis { position: relative; width: 36px; flex-shrink: 0; }
+.nx-tta-hl { position: absolute; right: 2px; transform: translateY(-4px); font-size: 9px; color: var(--nx-faint); }
+.nx-tta-day { flex: 1; min-width: 64px; }
+.nx-tta-day-h { text-align: center; font-size: 10px; color: var(--nx-ink-soft); padding-bottom: 2px; }
+.nx-tta-day-b { position: relative; border-radius: 6px; background: repeating-linear-gradient(to bottom, rgba(127,127,127,.14) 0 1px, transparent 1px 21.6px); }
+.nx-tta-b { position: absolute; border-radius: 5px; padding: 2px 4px; font-size: 10px; line-height: 1.25; overflow: hidden; cursor: pointer; box-shadow: 0 1px 4px rgba(0,0,0,.08); }
+.nx-tta-l { display: flex; flex-wrap: wrap; gap: 2px; align-items: center; }
+.nx-tta-origin { font-size: 9px; padding: 0 4px; border-radius: 3px; color: #fff; flex-shrink: 0; }
+.nx-tta-tag { font-size: 9px; color: var(--nx-ink-soft); }
+.nx-tta-x { position: absolute; top: 1px; right: 2px; font-size: 9px; opacity: 0; cursor: pointer; }
+.nx-tta-b:hover .nx-tta-x { opacity: .7; }
 .nx-tt-line { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-bottom: 3px; }
 .nx-tt-line:last-child { margin-bottom: 0; }
 .nx-tt-prob { display: inline-block; padding: 1px 6px; border-radius: 999px; font-size: 9px; font-weight: 700; line-height: 1.4; }

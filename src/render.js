@@ -3,6 +3,31 @@
 // ═══════════════════════════════════════════════════════════════
 var NX = NX || {};
 
+// ─── 课表预览时间轴常量（OneTHU Courses.tsx 同款，xk-1.5.1）────────
+// 大节→钟点映射（清华第1-14节标准时段）；预览轴 08:00-21:45，0.72px/分钟。
+const PV_BEGIN = ['', '08:00', '08:50', '09:50', '10:40', '11:30', '13:30', '14:20', '15:20', '16:10', '17:05', '17:55', '19:20', '20:10', '21:00'];
+const PV_END = ['', '08:45', '09:35', '10:35', '11:25', '12:15', '14:15', '15:05', '16:05', '16:55', '17:50', '18:40', '20:05', '20:55', '21:45'];
+NX.pvToMin = hm => { const p = String(hm).split(':'); return Number(p[0]) * 60 + Number(p[1] || 0); };
+NX.SLOT_RANGE = [
+  [NX.pvToMin(PV_BEGIN[1]), NX.pvToMin(PV_END[2])],
+  [NX.pvToMin(PV_BEGIN[3]), NX.pvToMin(PV_END[5])],
+  [NX.pvToMin(PV_BEGIN[6]), NX.pvToMin(PV_END[7])],
+  [NX.pvToMin(PV_BEGIN[8]), NX.pvToMin(PV_END[9])],
+  [NX.pvToMin(PV_BEGIN[10]), NX.pvToMin(PV_END[11])],
+  [NX.pvToMin(PV_BEGIN[12]), NX.pvToMin(PV_END[14])],
+];
+NX.PV_PX_PER_MIN = 0.72;
+NX.PV_AXIS_BEGIN = 8 * 60;
+NX.PV_AXIS_END = NX.pvToMin(PV_END[14]);
+/** 课块配色（无概率色时按课名稳定取色，同 OneTHU 正式课表） */
+const PV_PALETTE = ['#6d7ff0', '#3d8bfd', '#1fa487', '#e07a4f', '#b463d6', '#2f9edb', '#c9971f', '#4caf6e', '#d45c8a', '#7a63e8'];
+NX.pvColorOf = function (name) {
+  let h = 0;
+  const s = String(name || '');
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return PV_PALETTE[h % PV_PALETTE.length] || '#6d7ff0';
+};
+
 // ─── THUbook 评分徽章（有数据才出现；按分数段分色便于扫读）──
 // ≥4.5 神课绿 · 4.0~4.4 优质靛蓝 · 3.0~3.9 一般琥珀 · <3.0 避课红
 NX.tbBadgeHtml = function (c) {
@@ -23,6 +48,8 @@ NX.courseCardHtml = function (c, ctx) {
   const { queueDataMap, isQueuePhase } = state;
   const stageSet = ctx.stageSet;
     const tags = [];
+    const _org = NX.originOf(c.code);
+    if (_org) tags.push('<span class="nx-tag" style="color:#fff;background:' + (NX.ORIGIN_COLORS[_org] || '#666') + ';border:none">' + _org + '</span>');
     if (c.available) tags.push('<span class="nx-tag nx-tag-ok">可选</span>');
     else tags.push('<span class="nx-tag nx-tag-no">已满</span>');
     if (c.selected) tags.push('<span class="nx-tag nx-tag-sel">已选</span>');
@@ -44,15 +71,16 @@ NX.courseCardHtml = function (c, ctx) {
     }
     const volHtml = volParts.length ? '<div class="nx-vol">' + volParts.join('') + '</div>' : '';
     const defFlag = baseFlag(c);
-    const volApplied = c.volApplied || 0;
-    const volCap = c.volCapacity || c.capacity || 0;
+    const occ = NX.occupancyOf(c);   // 已满(余0)绝不显示 0/N 竞争宽松（用户实锤）
+    const volApplied = occ.applied;
+    const volCap = occ.cap;
     const compLabel = vc.level === 'easy' ? '竞争宽松' : vc.level === 'medium' ? '竞争适中' : vc.level === 'hard' ? '竞争激烈' : '';
     const compHtml = volCap > 0 ? '<div class="nx-comp"><div class="nx-comp-bar" style="width:' + vc.pct + '%;background:' + vc.color + '"></div><span class="nx-comp-txt" style="color:' + vc.color + '">' + volApplied + '/' + volCap + ' · ' + compLabel + '</span></div>' : '';
     const currentFlag = c.selected ? typeCodeToFlag(c.typeCode) : defFlag;
     const currentZy = c.selected ? (c.zy || 3) : 3;
     const currentProbHtml = currentProbLine(c, currentFlag, currentZy);
     const probHtml = fullProbGrid(c, defFlag);
-    const qKey = c.code + '_' + (c.seq || '0');
+    const qKey = c.code + '_' + NX.normSeq(c.seq);
     const qd = queueDataMap[qKey];
     const cand = ctx.candMap.get(qKey);
     let queueInfoHtml = '';
@@ -299,20 +327,24 @@ NX.renderPreviewTT = function (courses, label) {
   if (label && label.startsWith('草稿「')) state.previewMode = 'draft';
   const manualEvents = state.manualEvents || [];
   if (!courses.length && !manualEvents.length) { el.innerHTML = '<div class="nx-st">暂无课程</div>'; return; }
-  const tt = {};
+  const raw = [];
   const undet = [];   // 时间未定/无固定时段课程（#16）：不进网格，单列在表格下方
   courses.concat(manualEvents).forEach((c, ci) => {
     const lbl = c.teacher ? c.name + '(' + c.teacher + ')' : c.name;
     let cellColor = '', probLabel = '', probBgColor = '';
+    const qKey = c.code + '_' + NX.normSeq(c.seq);
+    const qd = queueDataMap[qKey];
+    const cand = candidateCourses.find(cc => cc.code === c.code && String(cc.seq) === String(c.seq || '0'));
     if (c.manual) {
       cellColor = '#8b5cf6'; probLabel = '自定义'; probBgColor = 'rgba(139,92,246,.14)';
+    } else if (c.isCandidate && cand && cand.myPos) {
+      // 候选提示不 gate 在 isQueuePhase（预选阶段候补课同样要看见位次；
+      // kbSearch 兜底候选无位次 → 下方「候选中」分支）
+      cellColor = '#ff9f1a'; probLabel = '排队第' + cand.myPos + '/' + cand.queueTotal + '人'; probBgColor = 'rgba(255,159,26,.14)';
+    } else if (c.isCandidate) {
+      cellColor = '#ff9f1a'; probLabel = '候选中'; probBgColor = 'rgba(255,159,26,.14)';
     } else if (isQueuePhase) {
-      const qKey = c.code + '_' + (c.seq || '0');
-      const qd = queueDataMap[qKey];
-      const cand = candidateCourses.find(cc => cc.code === c.code && String(cc.seq) === String(c.seq || '0'));
-      if (c.isCandidate && cand) {
-        cellColor = '#ff9f1a'; probLabel = '排队第' + cand.myPos + '/' + cand.queueTotal + '人'; probBgColor = 'rgba(255,159,26,.14)';
-      } else if (state.previewMode === 'selected') {
+      if (state.previewMode === 'selected') {
         probLabel = '已选'; cellColor = '#07c160'; probBgColor = 'rgba(7,193,96,.14)';
       } else if (qd) {
         if (qd.qRemaining > 0) { cellColor = '#07c160'; probLabel = '余' + qd.qRemaining; probBgColor = 'rgba(7,193,96,.14)'; }
@@ -327,56 +359,115 @@ NX.renderPreviewTT = function (courses, label) {
       const ac = NX.getCourse(c.code, c.seq);
       if (ac) { const p = calcProb(ac, c.flag, c.zy); if (p.prob >= 0) { cellColor = p.color; probLabel = p.percentLabel || p.label; probBgColor = probBg(p.color); } }
     }
-    const slots = parseTimeSlots(c.time);
-    if (!slots.length) {
+    // 课块：清华课按大节→钟点；外校课（PK/GPK/BW）time 无槽位，
+    // 从 note 解析「周X HH:MM-HH:MM」（钟点解析 v2，含复合日/单双周/周段）
+    const mk = (day, begin, end, tag) => ({
+      key: (c.code || 'm') + '_' + (c.seq || '0') + '_' + tag, day, begin, end,
+      label: lbl, color: cellColor, probLabel, probBgColor,
+      manual: !!c.manual, id: c.id, code: c.code, seq: c.seq || '0',
+      origin: NX.originOf(c.code), tag,
+    });
+    let n = 0;
+    const _dayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    const _slotNames = ['1-2节', '3-4节', '5-6节', '7-8节', '9-10节', '11-12节'];
+    parseTimeSlots(c.time).forEach(({ day, slot }) => {
+      // 插件 parseTimeSlots 返回标签（周一/1-2节），OneTHU 返回数字——此处换算
+      const dNum = _dayNames.indexOf(day) + 1;
+      const sNum = _slotNames.indexOf(slot) + 1;
+      const r = NX.SLOT_RANGE[sNum - 1];
+      if (!dNum || !r) return;
+      raw.push(mk(dNum, r[0], r[1], '' + sNum));
+      n += 1;
+    });
+    if (!n && c.manual && c.begin && c.end && c.day && NX.pvToMin(c.begin) < NX.pvToMin(c.end)) {
+      raw.push(mk(c.day, NX.pvToMin(c.begin), NX.pvToMin(c.end), 'clock'));
+      n += 1;
+    }
+    if (!n) {
+      NX.clockRangesOf(c.note || c.xkTextNote || '', c.time).forEach(cr => {
+        raw.push(Object.assign(mk(cr.day, cr.begin, cr.end, 'c' + cr.begin), { tag: cr.tag }));
+        n += 1;
+      });
+    }
+    if (!n) {
       // 时间未定/无固定时段（如二级选课阶段才定时间的实验课）→ 单列展示
       undet.push({ lbl, ci, code: c.code, seq: c.seq || '0', credits: c.credits || 0, zy: c.zy || 0, manual: !!c.manual, id: c.id });
+      console.log(NX.TAG, '时间未定 ' + c.code + '_' + (c.seq || '0') + ' time=[' + (c.time || '') + '] note=[' + ((c.note || c.xkTextNote) || '') + ']');
     }
-    slots.forEach(({ day, slot }) => {
-      if (!tt[day]) tt[day] = {};
-      const entry = { label: lbl, ci, code: c.code, seq: c.seq || '0', color: cellColor, probLabel, probBgColor, manual: !!c.manual, id: c.id };
-      if (tt[day][slot]) {
-        const old = tt[day][slot];
-        const existing = old.conflict ? old.items : [old];
-        // Same course (code+seq) in same slot? Skip — split time range, not a conflict
-        if (existing.some(e => e.code === entry.code && e.seq === entry.seq)) return;
-        const labels = existing.concat(entry);
-        tt[day][slot] = { label: labels.map(e => e.label).join(' / '), conflict: true, items: labels };
-      } else tt[day][slot] = entry;
-    });
+    // 未定课存在 → 防抖触发已选时间回填（launch 时可能查询失败/数据未就绪，
+    // 这里给每门课第二次机会；tried 计数两试封顶，不会循环）
+    if (undet.some(u => !u.manual) && NX.backfillSelTimes && !NX._undetBfT) {
+      NX._undetBfT = setTimeout(() => { NX._undetBfT = null; NX.backfillSelTimes().catch(e => console.warn(NX.TAG, '已选时间回填失败:', e)); }, 800);
+    }
   });
-  const days = ['周一','周二','周三','周四','周五','周六','周日'];
-  const sls = ['1-2节','3-4节','5-6节','7-8节','9-10节','11-12节'];
-  let h = '<table class="nx-tt"><thead><tr><th></th>';
-  days.forEach(d => h += '<th>' + d + '</th>');
-  h += '</tr></thead><tbody>';
-  sls.forEach(slot => {
-    h += '<tr><th>' + slot + '</th>';
-    days.forEach(day => {
-      const val = tt[day]?.[slot];
-      if (val) {
-        const isC = val.conflict;
-        const items = isC ? val.items : [val];
-        const btns = items.map(it => '<span class="nx-tt-rm" data-code="' + esc(it.code) + '" data-seq="' + esc(it.seq) + '"' + (it.manual ? ' data-manual-id="' + esc(it.id) + '"' : '') + ' title="移除 ' + esc(it.label) + '">✕</span>').join('');
-        const linesHtml = items.map(it => {
-          const probHtml = it.probLabel ? '<span class="nx-tt-prob" style="background:' + it.probBgColor + ';color:' + it.color + '">' + it.probLabel + '</span>' : '';
-            return '<div class="nx-tt-line' + (it.manual ? ' nx-tt-manual' : ' nx-tt-jump') + '"' + (it.manual ? '' : ' data-code="' + esc(it.code) + '" data-seq="' + esc(it.seq) + '" title="在左侧课程列表中查看"') + '><span class="nx-tt-text">' + esc(it.label) + '</span>' + probHtml + '</div>';
-        }).join('');
-        let cellClass = isC ? 'nx-c' : 'nx-s';
-        let cellStyle = '';
-        if (!isC && val.color) {
-          const alpha = val.color === '#07c160' ? '.1' : val.color === '#ff9f1a' ? '.1' : '.1';
-          cellStyle = 'background:' + val.color + (val.color.startsWith('rgba') ? '' : alpha) + ';color:' + val.color;
-        }
-        h += '<td class="' + cellClass + '" ' + (cellStyle ? 'style="' + cellStyle + '"' : '') + '><div class="nx-tt-cell">' + linesHtml + btns + '</div></td>';
-      } else h += '<td></td>';
-    });
-    h += '</tr>';
+  // 同日重叠分道（OneTHU d822563 重叠簇制）：簇 = 首尾相接/重叠的块序列，
+  // 簇内独立分道，lanes = 本簇深度；孤立块满宽。绝不用全日总道数劈半天。
+  const lanesOf = new Map();
+  for (let day = 1; day <= 7; day++) {
+    const list = raw.filter(b => b.day === day).sort((a, b) => a.begin - b.begin || a.end - b.end);
+    let cluster = [];
+    let clusterEnd = -1;
+    const flush = () => {
+      const ends = [];
+      for (const b of cluster) {
+        let lane = ends.findIndex(le => le <= b.begin);
+        if (lane === -1) { lane = ends.length; ends.push(b.end); }
+        else ends[lane] = b.end;
+        lanesOf.set(b.key, { lane, lanes: ends.length });
+      }
+      for (const b of cluster) {
+        const e = lanesOf.get(b.key);
+        if (e) lanesOf.set(b.key, { lane: e.lane, lanes: ends.length });
+      }
+      cluster = [];
+      clusterEnd = -1;
+    };
+    for (const b of list) {
+      if (cluster.length && b.begin >= clusterEnd) flush();
+      cluster.push(b);
+      clusterEnd = Math.max(clusterEnd, b.end);
+    }
+    flush();
+  }
+  // 时间轴渲染：钟点轴（08:00-21:45 起步）+ 7 日列 + 绝对定位课块
+  // 自由时间轴：占用可越出默认轴（早自习/晚自习），轴随块伸缩（30 分钟对齐）
+  const PX = NX.PV_PX_PER_MIN;
+  let A0 = NX.PV_AXIS_BEGIN, A1 = NX.PV_AXIS_END;
+  for (const b of raw) { A0 = Math.min(A0, b.begin); A1 = Math.max(A1, b.end); }
+  A0 = Math.floor(A0 / 30) * 30; A1 = Math.ceil(A1 / 30) * 30;
+  const H = Math.round((A1 - A0) * PX);
+  const hm = m => String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
+  let axisLines = '';
+  for (let m = A0; m <= A1; m += 60) axisLines += '<span class="nx-tta-hl" style="top:' + Math.round((m - A0) * PX) + 'px">' + hm(m) + '</span>';
+  let h = '<div class="nx-tta"><div class="nx-tta-axis" style="height:' + H + 'px">' + axisLines + '</div>';
+  const days = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+  days.forEach((dn, di) => {
+    const blocks = raw.filter(b => b.day === di + 1).map(b => {
+      const ln = lanesOf.get(b.key) || { lane: 0, lanes: 1 };
+      const top = Math.round((b.begin - A0) * PX);
+      const hgt = Math.max(14, Math.round((b.end - b.begin) * PX) - 2);
+      const bc = b.color || NX.pvColorOf(b.label);
+      const bg = b.color ? (b.probBgColor || bc + '22') : bc + '22';
+      const originHtml = b.origin ? '<span class="nx-tta-origin" style="background:' + (NX.ORIGIN_COLORS[b.origin] || '#666') + '">' + b.origin + '</span>' : '';
+      // 时间段取代大节号/clock 标记（用户定稿：日程上直接可读起止钟点）
+      const tagHtml = '<span class="nx-tta-tag">' + hm(b.begin) + '-' + hm(b.end) + '</span>';
+      const probHtml = b.probLabel ? '<span class="nx-tt-prob" style="background:' + b.probBgColor + ';color:' + b.color + '">' + b.probLabel + '</span>' : '';
+      return '<div class="nx-tta-b' + (b.manual ? ' nx-tt-manual' : ' nx-tt-jump') + '" style="top:' + top + 'px;height:' + hgt + 'px;left:calc(' + (ln.lane * 100 / ln.lanes) + '% + 1px);width:calc(' + (100 / ln.lanes) + '% - 2px);background:' + bg + ';border-left:3px solid ' + bc + '"' +
+        (b.manual ? ' data-manual-id="' + esc(b.id) + '"' : ' data-code="' + esc(b.code) + '" data-seq="' + esc(b.seq) + '"') +
+        ' title="' + esc(b.label + (b.tag ? ' · ' + b.tag : '')) + '">' +
+        '<div class="nx-tta-l">' + originHtml + esc(b.label) + probHtml + tagHtml + '</div>' +
+        '<span class="nx-tta-x" title="移除">✕</span></div>';
+    }).join('');
+    h += '<div class="nx-tta-day"><div class="nx-tta-day-h">' + dn + '</div><div class="nx-tta-day-b" style="height:' + H + 'px">' + blocks + '</div></div>';
   });
-  h += '</tbody></table>';
+  h += '</div>';
   // 时间未定课程单列（#16）
   if (undet.length) {
-    h += '<div style="margin-top:10px;font-size:11px;color:var(--nx-faint)">时间未定 / 无固定时段（' + undet.length + ' 门，不含在上方网格中）</div>' +
+    const bf = (NX.state && NX.state._bfStatus) || {};
+    const bfLine = undet.filter(u => !u.manual).map(u => bf[u.code] || '').filter(Boolean).join('，');
+    h += '<div style="margin-top:10px;font-size:11px;color:var(--nx-faint)">时间未定 / 无固定时段（' + undet.length + ' 门，不含在上方网格中）' +
+      '<button type="button" id="nx-undet-retry" style="margin-left:8px;background:rgba(47,107,255,.12);border:none;color:var(--nx-accent);border-radius:4px;padding:1px 8px;cursor:pointer;font-size:10px">重试解析</button>' +
+      (bfLine ? '<span style="margin-left:8px;color:var(--nx-ink-soft)">回填：' + esc(bfLine) + '</span>' : '') + '</div>' +
       '<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">' +
       undet.map(u => '<span class="nx-tt-undet" data-code="' + esc(u.code) + '" data-seq="' + esc(u.seq) + '" title="点击移除">' +
         esc(u.lbl) + ' · ' + u.credits + '学分' + (u.zy ? ' · 第' + u.zy + '志愿' : '') + ' <i>✕</i></span>').join('') +
@@ -386,21 +477,37 @@ NX.renderPreviewTT = function (courses, label) {
     h += '<div class="nx-manual-list"><span class="nx-manual-list-label">自定义占用</span>' +
       manualEvents.map(e => {
         const slots = parseTimeSlots(e.time || '');
-        const when = slots.map(s => s.day + ' ' + s.slot).join('、');
+        const when = (e.begin && e.end)
+          ? '周' + '一二三四五六日'[(Number(e.day) || 1) - 1] + ' ' + e.begin + '-' + e.end
+          : slots.map(s => s.day + ' ' + s.slot).join('、');
         return '<button type="button" class="nx-manual-chip" data-id="' + esc(e.id) + '" title="删除此占用">' + esc(e.name) + (when ? ' · ' + esc(when) : '') + '　✕</button>';
       }).join('') + '</div>';
   }
   const cr = courses.reduce((s, c) => s + (c.credits || 0), 0);
   h += '<div class="nx-st ok" style="margin-top:6px">' + courses.length + '门课 · ' + cr + '学分' + (manualEvents.length ? ' · 自定义占用' + manualEvents.length + '项' : '') + '</div>';
   el.innerHTML = h;
-  el.querySelectorAll('.nx-tt-rm').forEach(btn => {
-    btn.onclick = () => btn.dataset.manualId
-      ? NX.removeManualEvent(btn.dataset.manualId)
-      : handlePreviewRemove(btn.dataset.code, btn.dataset.seq);
+  el.querySelectorAll('.nx-tta-x').forEach(x => {
+    x.onclick = ev => {
+      ev.stopPropagation();
+      const b = x.closest('.nx-tta-b');
+      if (!b) return;
+      if (b.dataset.manualId) NX.removeManualEvent(b.dataset.manualId);
+      else handlePreviewRemove(b.dataset.code, b.dataset.seq);
+    };
   });
-  el.querySelectorAll('.nx-tt-jump').forEach(line => {
-    line.onclick = () => NX.jumpToCourse(line.dataset.code, line.dataset.seq);
+  el.querySelectorAll('.nx-tta-b.nx-tt-jump').forEach(bEl => {
+    bEl.onclick = () => NX.jumpToCourse(bEl.dataset.code, bEl.dataset.seq);
   });
+  const retryBtn = el.querySelector('#nx-undet-retry');
+  if (retryBtn) retryBtn.onclick = () => {
+    retryBtn.textContent = '查询中…';
+    const st = NX.state;
+    const tried = st._selTried || (st._selTried = new Map());
+    undet.filter(u => !u.manual).forEach(u => tried.set(u.code + '_' + (u.seq || '0'), 0));   // 清计数重试
+    st._bfScanP = null;   // 浏览扫描缓存作废重扫
+    st._selBfLogged = false;
+    if (NX.backfillSelTimes) NX.backfillSelTimes().catch(e => console.warn(NX.TAG, '已选时间回填失败:', e));
+  };
   el.querySelectorAll('.nx-tt-undet').forEach(chip => {
     chip.onclick = () => handlePreviewRemove(chip.dataset.code, chip.dataset.seq);
   });
@@ -411,13 +518,15 @@ NX.renderPreviewTT = function (courses, label) {
 
 // 从课表预览定位到左侧课程列表。重置会隐藏目标课程的筛选条件，
 // 用课程号搜索后精确滚动到对应课序号。
+// 跳转语义（OneTHU jumpTo 定稿）：课号注入搜索栏并保持（无自动清词），
+// 重置筛选 → 服务端按课号精确搜索 → 结果渲染后高亮目标卡片 1.8s。
+// 随时查询版：不再依赖本地 courseMap（核心池只有已选/候补）。
 NX.jumpToCourse = function (code, seq) {
   const { state } = NX;
   const $ = state.$;
-  const course = NX.getCourse(code, seq);
   const search = $('nextthuxk-search');
   const list = $('nextthuxk-list');
-  if (!course || !search || !list) return;
+  if (!search || !list || !code) return;
 
   state.activeGroup = null;
   state.shadow.querySelectorAll('.nx-chip').forEach(chip => {
@@ -432,32 +541,25 @@ NX.jumpToCourse = function (code, seq) {
   const note = $('nx-filter-xknote');
   if (note) note.value = '';
 
-  search.value = course.code;
+  search.value = code;
+  state._jumpCode = code;
+  state._jumpSeq = seq || '0';
+  state._serverSig = null;   // 强制发新服务端查询（课号 → kch 精确）
   NX.filterCourses();
+  NX.scheduleServerSearch(true);   // 跳转立即查（不等防抖）
   list.scrollTop = 0;
-
-  requestAnimationFrame(() => {
-    const target = [...list.querySelectorAll('.nx-card')].find(card =>
-      card.dataset.code === String(code) &&
-      String(card.dataset.seq || '0') === String(seq || '0')
-    );
-    if (!target) return;
-    target.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    target.classList.add('nx-jump-target');
-    setTimeout(() => target.classList.remove('nx-jump-target'), 1800);
-    search.focus({ preventScroll: true });
-  });
 };
 
 // ─── Stage Cart Rendering ─────────────────────────────────────
 
 NX.stageProbHtml = function (c) {
   const { state, fullProbGrid, baseFlag, getCourse } = NX;
-  const { isQueuePhase, queueDataMap } = state;
-  const ac = getCourse(c.code, c.seq);
+  const { isQueuePhase, queueDataMap, allCourses } = state;
+  // 课序精确 → 课号兜底（暂存/课余量/kkxx 两套课序号对不上时概率不该消失）
+  const ac = getCourse(c.code, c.seq) || allCourses.find(x => x.code === c.code);
   if (!ac) return '';
   if (isQueuePhase) {
-    const qKey = c.code + '_' + (c.seq || '0');
+    const qKey = c.code + '_' + NX.normSeq(c.seq);
     const qd = queueDataMap[qKey];
     if (qd) {
       const rc = qd.qRemaining > 0 ? '#07c160' : '#ee4d4d';
@@ -485,12 +587,16 @@ NX.renderStageCart = function () {
     const prob = NX.stageProbHtml(c);
     return '<div class="nx-stage-item" style="flex-direction:column;align-items:stretch;gap:2px">' +
       '<div style="display:flex;align-items:center;gap:4px">' +
-      '<span class="nx-stage-name" style="min-width:80px">' + esc(c.name) + (c.teacher ? ' <span style="color:#9aa1ac;font-weight:400">' + esc(c.teacher) + '</span>' : '') + '</span>' +
+      '<span class="nx-stage-name nx-jumpable" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" title="点击按课号搜索此课程" style="min-width:80px;cursor:pointer">' + esc(c.name) + (c.teacher ? ' <span style="color:#9aa1ac;font-weight:400">' + esc(c.teacher) + '</span>' : '') + '</span>' +
       '<span class="nx-stage-info">' + c.credits + '学分</span>' +
       '<select class="nx-stage-flag-sel" data-idx="' + i + '" style="padding:2px 4px;border-radius:6px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer">' + flOpts + '</select>' +
       '<select class="nx-stage-zy-sel" data-idx="' + i + '" style="padding:2px 4px;border-radius:6px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer">' + zyOpts + '</select>' +
       '<button class="nx-stage-rm" data-idx="' + i + '">✕</button></div>' + prob + '</div>';
   }).join('');
+  // 暂存课名点击 → 课号注入搜索栏并按课号精确搜索（OneTHU jumpTo 语义）
+  el.querySelectorAll('.nx-jumpable').forEach(item => {
+    item.onclick = ev => { ev.stopPropagation(); NX.jumpToCourse(item.dataset.code, item.dataset.seq); };
+  });
   el.querySelectorAll('.nx-stage-flag-sel').forEach(sel => {
     sel.onchange = () => {
       const i = parseInt(sel.dataset.idx);
@@ -531,7 +637,7 @@ NX.draftCourseProbHtml = function (c) {
   const ac = getCourse(c.code, c.seq);
   if (!ac) return '';
   if (isQueuePhase) {
-    const qKey = c.code + '_' + (c.seq || '0');
+    const qKey = c.code + '_' + NX.normSeq(c.seq);
     const qd = queueDataMap[qKey];
     if (qd) {
       const rc = qd.qRemaining > 0 ? '#07c160' : '#ee4d4d';
@@ -566,7 +672,7 @@ NX.renderDrafts = function () {
         const zyOpts = [1, 2, 3].map(z => '<option value="' + z + '"' + (c.zy === z ? ' selected' : '') + '>' + z + '志愿</option>').join('');
         const prob = NX.draftCourseProbHtml(c);
         courseList += '<div style="display:flex;align-items:center;gap:4px;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(0,0,0,.03)">' +
-          '<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#1f2329">' + esc(c.name) + '</span>' +
+          '<span class="nx-jumpable" data-code="' + esc(c.code) + '" data-seq="' + esc(c.seq || '0') + '" title="点击按课号搜索此课程" style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:#1f2329;cursor:pointer">' + esc(c.name) + '</span>' +
           '<span style="font-size:10px;color:#9aa1ac">' + c.credits + '学分</span>' +
           '<select class="nx-draft-flag" data-di="' + di + '" data-ci="' + ci + '" style="padding:1px 3px;border-radius:5px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer">' + flOpts + '</select>' +
           '<select class="nx-draft-zy" data-di="' + di + '" data-ci="' + ci + '" style="padding:1px 3px;border-radius:5px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer">' + zyOpts + '</select>' +
@@ -584,6 +690,10 @@ NX.renderDrafts = function () {
       state.expandedDraft = expandedDraft === idx ? -1 : idx;
       NX.renderDrafts();
     };
+  });
+  // 草稿课名点击 → 课号注入搜索栏并按课号精确搜索（OneTHU jumpTo 语义）
+  el.querySelectorAll('.nx-jumpable').forEach(item => {
+    item.onclick = ev => { ev.stopPropagation(); NX.jumpToCourse(item.dataset.code, item.dataset.seq); };
   });
   el.querySelectorAll('.nx-draft-flag').forEach(sel => {
     sel.onchange = () => {
@@ -745,11 +855,15 @@ NX.renderPlanView = function (searchQuery) {
       const statusHtml = p.covered
         ? '<span style="color:#07c160;font-size:11px;white-space:nowrap">' + esc(p.coveredBy || '已满足') + '</span>'
         : '<span style="color:#ee4d4d;font-size:11px">未满足</span>';
-      html += '<div class="nx-stage-item" style="background:' + bg + ';gap:8px"><span style="font-size:12px">' + icon + '</span><span class="nx-stage-name">' + esc(p.name) + ' <span style="color:#9aa1ac;font-size:10px">' + p.code + '</span></span><span class="nx-stage-info">' + p.credits + '学分</span>' + statusHtml + '</div>';
+      html += '<div class="nx-stage-item nx-jumpable" style="background:' + bg + ';gap:8px;cursor:pointer" data-code="' + esc(p.code) + '" title="点击按课号搜索此课程"><span style="font-size:12px">' + icon + '</span><span class="nx-stage-name">' + esc(p.name) + ' <span style="color:#9aa1ac;font-size:10px">' + p.code + '</span></span><span class="nx-stage-info">' + p.credits + '学分</span>' + statusHtml + '</div>';
     });
     html += '</div>';
   }
   el.innerHTML = html;
+  // 条目点击 → 课号注入搜索栏并按课号精确搜索（OneTHU jumpTo 语义）
+  el.querySelectorAll('.nx-jumpable').forEach(item => {
+    item.onclick = () => NX.jumpToCourse(item.dataset.code, '0');
+  });
 };
 
 NX.renderPlan = function (plan) {
@@ -762,44 +876,104 @@ NX.renderPlan = function (plan) {
   el.innerHTML = Object.entries(groups).map(([name, items]) => {
     const cr = items.reduce((s, c) => s + c.credits, 0);
     const cov = items.filter(c => c.covered).reduce((s, c) => s + c.credits, 0);
-    return '<div class="nx-plan-card" data-g="' + esc(name) + '"><div class="nx-plan-num">' + cov + '<small style="font-size:12px;font-weight:400;color:#9aa1ac">/' + cr + '学分</small></div><div class="nx-plan-lbl">' + esc(name) + ' (' + items.length + '门)</div></div>';
+    return '<div class="nx-plan-card" data-g="' + esc(name) + '" title="点击在培养方案视图查看本组"><div class="nx-plan-num">' + cov + '<small style="font-size:12px;font-weight:400;color:#9aa1ac">/' + cr + '学分</small></div><div class="nx-plan-lbl">' + esc(name) + ' (' + items.length + '门)</div></div>';
   }).join('');
   const detail = $('nextthuxk-plan-detail');
   const total = coverage.reduce((s, c) => s + c.credits, 0);
   const totalCov = coverage.filter(c => c.covered).reduce((s, c) => s + c.credits, 0);
   if (detail) detail.textContent = '共 ' + coverage.length + ' 门，' + totalCov + '/' + total + ' 学分已覆盖';
+  // 右栏卡片点击 → 切培养方案视图（OneTHU 同款修复：此前点击静默无效）
+  el.querySelectorAll('.nx-plan-card').forEach(card => {
+    card.onclick = () => {
+      const planChip = state.shadow.querySelector('.nx-chip[data-f="plan"]');
+      if (planChip) planChip.click();
+    };
+  });
 };
 
 // ─── Filters ──────────────────────────────────────────────────
 
+// ─── 列表过滤 v2（xk-1.5.1 随时查询，OneTHU dev 同款架构）──────────
+// 启动绝不整库预爬（原版 320 页目录 + 220 页志愿 ≈ 500+ 请求已删）：
+// 搜索一律服务器 kkxxSearch 随时查（GBK+风暴护栏）；已选/我的队列走本地
+// 核心池；浏览模式（空关键词）一页一请求翻页，绝不连发。
 NX.filterCourses = function () {
-  const { state, renderCourses, renderPlanView, lc } = NX;
+  const { state, renderCourses, renderPlanView, lc, esc } = NX;
   const $ = state.$;
   const { allCourses, candidateCourses, activeGroup } = state;
-  const q = $('nextthuxk-search').value.toLowerCase();   // 用户输入不入缓存（中间态多），课程字段才走 lc
+  const rawQ = $('nextthuxk-search').value;
+  const q = rawQ.toLowerCase();   // 用户输入不入缓存（中间态多），课程字段才走 lc
   NX.updateSearchClear();
   const f = state.shadow.querySelector('.nx-chip.on')?.dataset.f || 'all';
   if (f === 'plan') { renderPlanView(q); return; }
-  let list = allCourses;
-  if (q) list = list.filter(c => lc(c.name).includes(q) || c.code.includes(q) || lc(c.teacher).includes(q));
+
+  // —— 服务端条件指纹：这些变化 = 换一次服务器查询（OneTHU newSearch 语义）。
+  //    注意 f（chip）不入指纹：必修/限选/体育/可选/已选/队列全是本地过滤
+  //    （教务无对应参数），chip 切换即时生效不重查（v1.5.0 语义）。
+  //    conflict/credits/reviews/sort/xknote 同样只本地细化。
+  const serverSig = JSON.stringify([
+    rawQ.trim(), state.SEM, state._browsePage || 1,
+    $('nx-filter-tongshi')?.value || '', $('nx-filter-feature')?.value || '',
+    $('nx-filter-grade-filter')?.value || '', $('nx-filter-bksrem')?.value || '',
+    $('nx-filter-yjsrem')?.value || '', $('nx-filter-day')?.value || '',
+    $('nx-filter-period')?.value || '',
+  ]);
+  const sigChanged = serverSig !== state._serverSig;
+  state._serverSig = serverSig;
+  // 必修/限选/体育也是本地池过滤（用户二十二报：v1.5.0 语义——chip 过滤
+  // 课程池而非当前搜索行；搜索行是浏览快照，attr 覆盖稀疏，滤完必空）
+  const localChip = f === 'selected' || f === 'queue' || f === 'required' || f === 'elective' || f === 'sports';
+
+  let list;
+  if (localChip) {
+    list = allCourses;
+    if (f === 'selected') {
+      const seen = new Set();
+      const candKeys = new Set(candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
+      list = list.filter(c => {
+        if (!c.selected && !c.isCandidate && !candKeys.has(c.code + '_' + (c.seq || '0'))) return false;
+        const k = c.code + '_' + (c.seq || '0');
+        if (seen.has(k)) return false;
+        seen.add(k); return true;
+      });
+    } else if (f === 'queue') {
+      const qKeys = new Set(candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
+      list = list.filter(c => qKeys.has(c.code + '_' + (c.seq || '0')));
+    }
+    // required/elective/sports：list 已是全池，走下面统一 chip 过滤
+  } else {
+    // —— 服务器随时查询路径：条件变了 → 调度查询 + 查询中提示（旧条件结果作废）
+    if (sigChanged) {
+      state._searchRows = null;
+      state._uiPage = 1;   // 新查询回第 1 页（OneTHU searchRunId 同款）
+      NX.scheduleServerSearch();
+      const listEl = $('nextthuxk-list');
+      if (listEl) {
+        listEl.innerHTML = '<div class="nx-empty"><span class="nx-spin"></span>&ensp;正在查询教务（服务器精确匹配 · 随时查询模式）…</div>';
+        return;
+      }
+    }
+    list = state._searchRows || [];
+    // 查询异常显式上屏（不再静默空白）：unknown 页 / 网络失败带原因 + 重试
+    if (!list.length && state._searchError) {
+      const listEl2 = $('nextthuxk-list');
+      if (listEl2) {
+        listEl2.innerHTML = '<div class="nx-empty nx-st err">' + esc(state._searchError) + '</div>' +
+          '<div style="text-align:center;padding:6px 0 2px"><button type="button" class="nx-stage-btn" id="nx-retry-search">重试</button></div>';
+        const rb = listEl2.querySelector('#nx-retry-search');
+        if (rb) rb.onclick = () => { state._serverSig = null; NX.filterCourses(); NX.scheduleServerSearch(true); };
+        return;
+      }
+    }
+  }
+  // 恒全量的只有已选/队列（OneTHU listRows 语义：跳转残留的课号/关键词
+  // 绝不能把队列视图清空）；必修/限选/体育池内 q 过滤照常（v1.5.0 同款）
+  const noQChip = f === 'selected' || f === 'queue';
+  if (q && !noQChip) list = list.filter(c => lc(c.name).includes(q) || c.code.toLowerCase().includes(q) || lc(c.teacher).includes(q));
   if (f === 'available') list = list.filter(c => c.available);
-  else if (f === 'selected') {
-    const seen = new Set();
-    const candKeys = new Set(candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
-    list = list.filter(c => {
-      if (!c.selected && !c.isCandidate && !candKeys.has(c.code + '_' + (c.seq || '0'))) return false;
-      const k = c.code + '_' + (c.seq || '0');
-      if (seen.has(k)) return false;
-      seen.add(k); return true;
-    });
-  }
-  else if (f === 'required') list = list.filter(c => c.attr === '必修');
-  else if (f === 'elective') list = list.filter(c => c.attr === '限选');
-  else if (f === 'sports') list = list.filter(c => c.attr === '体育' || (c.department || '').includes('体育') || (c.department || '').includes('体武'));
-  else if (f === 'queue') {
-    const qKeys = new Set(candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
-    list = list.filter(c => qKeys.has(c.code + '_' + (c.seq || '0')));
-  }
+  else if (f === 'required') list = list.filter(c => c.attr === '必修' || c.typeLabel === '必修');
+  else if (f === 'elective') list = list.filter(c => c.attr === '限选' || c.typeLabel === '限选');
+  else if (f === 'sports') list = list.filter(c => NX.isSportsCourse(c));
   if (activeGroup) list = list.filter(c => (c.group || c.attr) === activeGroup);
   const cf = $('nx-filter-credits')?.value;
   if (cf) {
@@ -871,7 +1045,266 @@ NX.filterCourses = function () {
       return 0;
     });
   }
-  renderCourses(list);
+  // —— 分页（OneTHU 教务同款）：浏览模式 = 服务端翻页（一页一请求）；
+  //    搜索模式 = 本地翻页（已加载池在手，翻页零请求），总页数/总数用
+  //    服务端真值，未加载尾部页有不完整提示条 + 加载全部入口。
+  const so = NX.buildSearchOpts();
+  const searchMode = !localChip && !!(so.kch || so.kcm || so.weekday || so.section || so.grade
+    || so.rxklxm || so.kctsm || so.onlyAvailable || so.gradAvail);
+  let show = list;
+  if (searchMode) {
+    // 页码钳到筛选后实际页数（本地筛掉行后第N页可能越界出空页）
+    const totalPages = state._searchTotalPages || Math.max(1, Math.ceil(list.length / NX.PAGE_SIZE));
+    const page = Math.min(Math.max(1, state._uiPage || 1), Math.max(1, Math.ceil(list.length / NX.PAGE_SIZE)));
+    state._uiPage = page;
+    show = list.slice((page - 1) * NX.PAGE_SIZE, page * NX.PAGE_SIZE);
+  }
+  renderCourses(show);
+  NX.renderListFooter({ localChip, searchMode, list, show });
+};
+
+NX.PAGE_SIZE = 20;   // OneTHU 同款每页条数
+
+// 底部分页条 + 搜索结果捕捉（OneTHU 同款）：第N页/共M页（共K条记录）、
+// 上一页/下一页、跳至 GO、数据不完整提示 + 「加载当前关键词全部」。
+NX.renderListFooter = function (o) {
+  const { state } = NX;
+  const $ = state.$;
+  const listEl = $('nextthuxk-list');
+  if (!listEl || o.localChip || !o.list.length) return;
+  // 搜索模式翻到未加载的尾部页（OneTHU 同款提示；服务端总页数 > 本地已加载）
+  if (o.searchMode && !o.show.length) {
+    listEl.innerHTML = '<div class="nx-empty">此页未加载——点下方「加载当前关键词全部」后可查看</div>';
+  }
+  const mkBtn = (label, dis, onclick) => {
+    const b = document.createElement('button');
+    b.className = 'nx-stage-btn';
+    b.textContent = label;
+    b.disabled = !!dis;
+    b.onclick = onclick;
+    return b;
+  };
+  // 数据不完整提示（OneTHU 同款）：宽泛词只探测了前几页 → 显式补齐入口
+  if (o.searchMode && state._searchIncomplete) {
+    const html = '<div class="nx-st" style="display:flex;gap:8px;align-items:center;justify-content:center;flex-wrap:wrap;padding:8px 0 2px;font-size:11px;color:#b8860b">' +
+      '数据不完整：已加载 ' + o.list.length + ' 门' +
+      (state._searchTotalPages > 0 ? '，教务共 ' + state._searchTotalPages + ' 页' : '') +
+      (state._searchTotalRows > 0 ? '（共 ' + state._searchTotalRows + ' 门）' : '') +
+      '<button type="button" class="nx-stage-btn nx-loadall" style="margin-left:6px"' + (state._loadingAll ? ' disabled' : '') + '>' +
+      (state._loadingAll ? '加载中…' : '加载当前关键词全部') + '</button></div>';
+    listEl.insertAdjacentHTML('afterbegin', html);
+    const lb = listEl.querySelector('.nx-loadall');
+    if (lb) lb.onclick = () => NX.loadAllSearch();
+  }
+  const pager = document.createElement('div');
+  pager.style.cssText = 'display:flex;gap:8px;justify-content:center;align-items:center;padding:10px 0 4px;flex-wrap:wrap';
+  const cur = document.createElement('span');
+  cur.style.cssText = 'align-self:center;font-size:11px;color:var(--nx-faint)';
+  const goInput = document.createElement('input');
+  goInput.className = 'nx-inp';
+  goInput.style.cssText = 'width:52px;padding:2px 4px;font-size:11px;text-align:center';
+  goInput.placeholder = '页码';
+  let gotoPage, totalPages, curPage, nextDis;
+  if (o.searchMode) {
+    // 本地筛选（冲突/学分/文字说明/可选 chip/课组）生效时：显示满足全部
+    // 条件的已加载页数+条数（用户三十六报：不再挂关键词 alone 的教务总数）
+    const fNow = state.shadow.querySelector('.nx-chip.on')?.dataset.f || 'all';
+    const clientFiltered = fNow === 'available' || $('nx-filter-conflict')?.value
+      || $('nx-filter-credits')?.value || ($('nx-filter-xknote')?.value || '').trim()
+      || state.activeGroup;
+    if (clientFiltered) {
+      totalPages = Math.max(1, Math.ceil(o.list.length / NX.PAGE_SIZE));
+      curPage = Math.min(Math.max(1, state._uiPage || 1), totalPages);
+      gotoPage = n => { state._uiPage = Math.min(n, totalPages); NX.filterCourses(); };
+      nextDis = curPage >= totalPages;
+      cur.textContent = '第 ' + curPage + ' 页 / 共 ' + totalPages + ' 页（当前条件 ' + o.list.length + ' 条）';
+    } else {
+      totalPages = state._searchTotalPages || Math.max(1, Math.ceil(o.list.length / NX.PAGE_SIZE));
+      curPage = Math.min(Math.max(1, state._uiPage || 1), totalPages);
+      gotoPage = n => { state._uiPage = n; NX.filterCourses(); };
+      nextDis = curPage >= totalPages;
+      cur.textContent = '第 ' + curPage + ' 页 / 共 ' + totalPages + ' 页' +
+        (!state._searchIncomplete ? '（' + (state._searchTotalRows > 0 ? state._searchTotalRows + ' 条记录' : o.list.length + ' 门') + '）' : '');
+    }
+  } else {
+    curPage = state._browsePage || 1;
+    totalPages = state._searchTotalPages || 0;
+    gotoPage = n => NX.browseGoto(n);
+    nextDis = !state._browseHasMore && !(totalPages > curPage);
+    cur.textContent = '第 ' + curPage + ' 页' +
+      (totalPages > 0 ? ' / 共 ' + totalPages + ' 页' : '') +
+      (state._searchTotalRows > 0 ? '（共 ' + state._searchTotalRows + ' 条记录）' : ' · 随时查询');
+  }
+  const doJump = () => {
+    const n = parseInt(goInput.value, 10);
+    goInput.value = '';
+    if (!Number.isFinite(n) || n < 1) return;
+    gotoPage(n);
+  };
+  goInput.onkeydown = e => { if (e.key === 'Enter') { e.preventDefault(); doJump(); } };
+  pager.appendChild(mkBtn('‹ 上一页', curPage <= 1, () => gotoPage(curPage - 1)));
+  pager.appendChild(cur);
+  pager.appendChild(mkBtn('下一页 ›', nextDis, () => gotoPage(curPage + 1)));
+  pager.appendChild(goInput);
+  pager.appendChild(mkBtn('GO', false, doJump));
+  listEl.appendChild(pager);
+};
+
+// 「加载全部」（OneTHU loadAllSearch 同款）：forceAll 全量补齐探测页，
+// 结果沿用当前关键词的服务端真值，页码/条数刷新。
+NX.loadAllSearch = async function () {
+  const state = NX.state;
+  if (state._loadingAll) return;
+  state._loadingAll = true;
+  NX.filterCourses();   // 提示条立即变「加载中…」
+  try {
+    const opts = NX.buildSearchOpts();
+    opts.forceAll = true;
+    const res = await NX.serverSearchStorm(opts);
+    const selKeys = new Set(state.allCourses.filter(c => c.selected).map(c => c.code + '_' + (c.seq || '0')));
+    const candKeys = new Set(state.candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
+    (res.rows || []).forEach(r => {
+      const k = r.code + '_' + (r.seq || '0');
+      r.selected = selKeys.has(k);
+      r.isCandidate = candKeys.has(k);
+    });
+    state._searchRows = res.rows || [];
+    // 同上：补齐页合并进会话池（暂存/详情/选课按钮一致可用）
+    if ((res.rows || []).length && NX.mergeServerRows(res.rows)) NX.rebuildCourseMap();
+    state._searchIncomplete = false;
+    if (res.totalPages) state._searchTotalPages = res.totalPages;
+    if (res.totalRows) state._searchTotalRows = res.totalRows;
+    state._searchError = res.pageKind === 'unknown' ? '教务返回异常页，可能需退出重新登录' : '';
+  } catch (e) {
+    console.warn(NX.TAG, 'load all:', e);
+  }
+  state._loadingAll = false;
+  NX.filterCourses();
+};
+
+// 浏览模式跳页：置页码 → 作废指纹 → 重新走查询管线（一次一页）
+NX.browseGoto = function (page) {
+  const state = NX.state;
+  state._browsePage = Math.max(1, page);
+  state._serverSig = null;
+  NX.filterCourses();
+};
+
+// ─── 服务器随时查询调度（OneTHU 同款：输入 500ms 防抖，回车立即查）────
+// 查询模式（关键词/服务端筛选非空）→ 风暴护栏版多页探测；浏览模式（全空）
+// → 只取当前页 1 个请求。跑动中条件再变 → 收敛后自动补跑。
+// 课号路由（OneTHU Courses.tsx codeLike 规则，支持 PK/GPK/BW 外校课号）：
+// ≥5 位、无中文、含数字、字母数字连字符 → 课号（截「-」前段）；否则课名。
+NX.isCodeLike = function (kw) {
+  kw = String(kw || '').trim();
+  return kw.length >= 5 && !/[\u4e00-\u9fff]/.test(kw) && /\d/.test(kw) && /^[A-Za-z0-9][-A-Za-z0-9]*$/.test(kw);
+};
+NX.buildSearchOpts = function () {
+  const state = NX.state;
+  const $ = state.$;
+  const rawQ = ($('nextthuxk-search').value || '').trim();
+  const f = state.shadow.querySelector('.nx-chip.on')?.dataset.f || 'all';
+  const codeLike = NX.isCodeLike(rawQ);
+  return {
+    // 课号注入搜索栏（OneTHU 定稿：课号保持，无自动清词）
+    kch: codeLike ? rawQ.split(/[-–]/)[0].trim() : '',
+    kcm: codeLike ? '' : rawQ,
+    weekday: $('nx-filter-day')?.value || '',
+    section: $('nx-filter-period')?.value || '',
+    grade: $('nx-filter-grade-filter')?.value || '',
+    rxklxm: $('nx-filter-tongshi')?.value || '',
+    kctsm: $('nx-filter-feature')?.value || '',
+    onlyAvailable: $('nx-filter-bksrem')?.value === '>0' || f === 'available',
+    gradAvail: $('nx-filter-yjsrem')?.value === '>0',
+  };
+};
+NX.runServerSearch = async function () {
+  const state = NX.state;
+  if (state._ssBusy) { state._ssPending = true; return; }
+  state._ssBusy = true;
+  try {
+    for (let guard = 0; guard < 4; guard++) {
+      const ranSig = state._serverSig;
+      const opts = NX.buildSearchOpts();
+      const queryMode = !!(opts.kch || opts.kcm || opts.weekday || opts.section || opts.grade
+        || opts.rxklxm || opts.kctsm || opts.onlyAvailable || opts.gradAvail);
+      if (!queryMode) opts.page = state._browsePage || 1;   // 浏览模式：单页
+      try {
+        let res = queryMode ? await NX.serverSearchStorm(opts) : await NX.serverSearch(opts);
+        // 外校课号 p_kch 搜不到（教务课号索引不含 PK/GPK/BW 前缀课号，用户实测：
+        // 跳转/搜索框输入 BW3w0008 显示无结果）→ 池里有这门课（已选/暂存/跳转
+        // 来源都带课名）→ 自动换课名重搜，卡片/回填链路全恢复
+        if (queryMode && opts.kch && !(res.rows || []).length) {
+          const poolHit = state.allCourses.find(c => c.name && (c.code === opts.kch || c.code.startsWith(opts.kch)));
+          if (poolHit) {
+            console.log(NX.TAG, '课号 0 行 → 课名重搜:', opts.kch, '→', poolHit.name);
+            const res2 = await NX.serverSearchStorm(Object.assign({}, opts, { kch: '', kcm: poolHit.name }));
+            if ((res2.rows || []).length) { res = res2; opts.kcm = poolHit.name; }
+          }
+        }
+        // 搜索结果带核心池标记渲染（选中/候补徽章与按钮状态一致）
+        const selKeys = new Set(state.allCourses.filter(c => c.selected).map(c => c.code + '_' + (c.seq || '0')));
+        const candKeys = new Set(state.candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
+        (res.rows || []).forEach(r => {
+          const k = r.code + '_' + (r.seq || '0');
+          r.selected = selKeys.has(k);
+          r.isCandidate = candKeys.has(k);
+        });
+        state._searchRows = res.rows || [];
+        state._browseHasMore = res.pageKind === 'ok' && (res.rows || []).length > 0;
+        // 搜索结果合并进会话池（暂存/简介/选课按钮即刻可用——否则 addToStage
+        // 的 allCourses.find 落空，搜索卡片点暂存静默无效；code_seq 去重，
+        // 池内已有行跳过，已选/队列 chip 按 selected/isCandidate 过滤不受污染）
+        if ((res.rows || []).length && NX.mergeServerRows(res.rows)) NX.rebuildCourseMap();
+        state._searchTotalPages = res.totalPages || 0;
+        state._searchTotalRows = res.totalRows || 0;
+        // 捕捉不完整（OneTHU 同款）：已加载 < 服务端总数 → 尾部页未探测，
+        // 分页条出「加载全部」补齐入口
+        state._searchIncomplete = queryMode && !!(res.totalRows && (res.rows || []).length < res.totalRows);
+        state._searchError = res.pageKind === 'unknown'
+          ? '教务返回异常页' + (res.htmlHead ? '（' + String(res.htmlHead).slice(0, 80) + '…）' : '') + '，可能需退出重新登录'
+          : (res.pageKind === 'empty' ? '' : '');
+      } catch (e) {
+        console.warn(NX.TAG, 'server search scheduled:', e);
+        state._searchRows = state._searchRows || [];
+        state._browseHasMore = false;
+        state._searchError = '查询失败：' + (e && e.message ? e.message : e);
+      }
+      if (state._serverSig === ranSig) break;   // 条件未再变 → 收敛
+    }
+  } finally {
+    state._ssBusy = false;
+  }
+  if (state._ssPending) { state._ssPending = false; NX.runServerSearch(); return; }
+  NX.filterCourses();   // sig 未变 → 直接渲染新结果（不再触发查询）
+  NX.highlightJumpTarget();
+};
+// 防抖入口（filterCourses 用）；immediate=true 时跳过防抖立即查（回车/跳转用）
+NX.scheduleServerSearch = function (immediate) {
+  clearTimeout(NX._ssTimer);
+  NX._ssTimer = setTimeout(() => { NX._ssTimer = null; NX.runServerSearch(); }, immediate ? 0 : 500);
+};
+
+/** 跳转目标高亮（OneTHU jumpTo 定稿语义：课号注入搜索栏并保持，
+ *  高亮 1.8s 瞬时清除；无自动清词） */
+NX.highlightJumpTarget = function () {
+  const state = NX.state;
+  if (!state._jumpCode) return;
+  const $ = state.$;
+  const code = state._jumpCode, seq = state._jumpSeq || '0';
+  state._jumpCode = null;
+  requestAnimationFrame(() => {
+    const list = $('nextthuxk-list');
+    if (!list) return;
+    const target = [...list.querySelectorAll('.nx-card')].find(card =>
+      card.dataset.code === String(code) &&
+      String(card.dataset.seq || '0') === String(seq));
+    if (target) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      target.classList.add('nx-jump-target');
+      setTimeout(() => target.classList.remove('nx-jump-target'), 1800);
+    }
+  });
 };
 
 NX.updateSearchClear = function () {
