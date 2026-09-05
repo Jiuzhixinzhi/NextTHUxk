@@ -765,30 +765,67 @@ NX.loadDraftToStage = function (idx) {
 };
 
 NX.promoteDraft = async function (draft) {
-  const { state, showXkResult, fetchSelectedCourses, dropCourse, submitCourse, refreshSelected, renderPreviewTT } = NX;
+  const { state, showXkResult, fetchSelectedCourses, dropCourse, submitCourse, refreshSelected, renderPreviewTT, normSeq, typeCodeToFlag } = NX;
   const $ = state.$;
   const toast = $('nextthuxk-toast');
   const prog = (msg) => { if (toast) { toast.className = 'nx-toast'; toast.style.cssText = 'display:block;opacity:1;background:rgba(29,31,36,.82);backdrop-filter:blur(20px) saturate(180%);-webkit-backdrop-filter:blur(20px) saturate(180%);color:#fff'; toast.textContent = msg; } };
+  // 差量对齐（用户: 重合课不重复退改选）：复合键相同且志愿/属性一致才算重合，重合课不退不重选；
+  // 已选侧信息不全（zy=0/typeCode 空，兜底路径）→ 视为不一致退+重选（用户定调）；
+  // 已选行只带内建 typeCode——必修课走限选/任选通道（allowedFlags 合法）时按不一致退+重选（用户定调）
+  const sameAsDraft = (s, c) => !!s.zy && (parseInt(c.zy, 10) || 3) === s.zy
+    && !!s.typeCode && typeCodeToFlag(s.typeCode) === (c.flag || 'bx');
+  if (NX._promoteDraftBusy) { showXkResult({ ok: false, msg: '提交进行中，请稍候…' }); return; }
+  NX._promoteDraftBusy = true;
   try {
+    if (!draft.courses.length) { showXkResult({ ok: false, msg: '草稿「' + draft.name + '」没有课程' }); return; }
     prog('正在获取已选课程…');
     const current = await fetchSelectedCourses();
-    for (let i = 0; i < current.length; i++) {
-      prog('退选 ' + (i + 1) + '/' + current.length + ': ' + current[i].name);
-      await dropCourse(current[i].code, current[i].seq);
+    const curMap = {};
+    current.forEach(s => { curMap[s.code + '_' + normSeq(s.seq)] = s; });
+    const toDrop = current.filter(s => {
+      const c = draft.courses.find(x => x.code === s.code && normSeq(x.seq) === normSeq(s.seq));
+      return !(c && sameAsDraft(s, c));
+    });
+    const toAdd = [];
+    const addedKeys = new Set();   // 草稿同键去重（上游 mergeIntoStage 已去重，仅手工 JSON 导入可造）
+    draft.courses.forEach(c => {
+      const k = c.code + '_' + normSeq(c.seq);
+      if (curMap[k] && sameAsDraft(curMap[k], c)) return;
+      if (addedKeys.has(k)) return;
+      addedKeys.add(k);
+      toAdd.push(c);
+    });
+    const kept = current.length - toDrop.length;
+    if (!toDrop.length && !toAdd.length) { showXkResult({ ok: true, msg: '课表「' + draft.name + '」与当前已选一致，无需提交' }); return; }
+    if (!confirm('确定提交「' + draft.name + '」？\n保留重合 ' + kept + ' 门 · 退选 ' + toDrop.length + ' 门 · 新选 ' + toAdd.length + ' 门。')) return;
+    for (let i = 0; i < toDrop.length; i++) {
+      prog('退选差量 ' + (i + 1) + '/' + toDrop.length + ': ' + toDrop[i].name);
+      const r = await dropCourse(toDrop[i].code, toDrop[i].seq);
+      if (!r.ok) {
+        await refreshSelected();
+        showXkResult({ ok: false, msg: '提交中断：退选「' + toDrop[i].name + '」失败 — ' + (r.msg || '未知错误') + '（此前已退 ' + i + ' 门），请刷新核对后重试' });
+        return;
+      }
       await new Promise(r => setTimeout(r, 1000));
     }
-    for (let i = 0; i < draft.courses.length; i++) {
-      const c = draft.courses[i];
-      prog('选课 ' + (i + 1) + '/' + draft.courses.length + ': ' + c.name);
-      await submitCourse(c.code, c.seq, c.zy || 3, c.flag || 'bx');
+    for (let i = 0; i < toAdd.length; i++) {
+      const c = toAdd[i];
+      prog('新选差量 ' + (i + 1) + '/' + toAdd.length + ': ' + c.name);
+      const r = await submitCourse(c.code, c.seq, c.zy || 3, c.flag || 'bx');
+      if (!r.ok) {
+        await refreshSelected();
+        showXkResult({ ok: false, msg: '提交中断：新选「' + c.name + '」未生效 — ' + (r.msg || '未知错误') + '（此前已选 ' + i + ' 门、已退 ' + toDrop.length + ' 门），请刷新核对后重试' });
+        return;
+      }
       // 排队选课内部已有 1.5s 延时，这里额外等 2s 避免触发验证码
       await new Promise(r => setTimeout(r, 2000));
     }
     await refreshSelected();
-    showXkResult({ ok: true, msg: '课表「' + draft.name + '」已全部提交！' });
+    showXkResult({ ok: true, msg: '课表「' + draft.name + '」已提交：新选 ' + toAdd.length + ' · 退选 ' + toDrop.length + ' · 保留 ' + kept });
     const sel = state.allCourses.filter(c => c.selected);
     renderPreviewTT(sel, '当前已选');
   } catch (e) { showXkResult({ ok: false, msg: '提交出错: ' + e.message }); }
+  finally { NX._promoteDraftBusy = false; }
 };
 
 NX.canAdjustZy = function (code, seq, targetZy) {
