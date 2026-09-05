@@ -428,6 +428,25 @@ NX.deptCodeOf = function (dept) {
   return hit ? NX.DEPT_CODES[hit] : '';
 };
 
+// 课号中段院系码回退（用户 9/5 报核实：8 位课号第 2-4 位 = 开课院系码，
+// 14201092→420、20420124→042、20240013→024、00000042→000；日志 8 组样本
+// 全部吻合）。yxSearchTab 已选行/暂存行无 department 字段——启动志愿抓取的
+// 院系集合全部落空（「depts (无新院系)」实锤：只拉了体育 Ty），这是首屏
+// 概率不点不亮的主因。department 优先，课号仅回退；须在 DEPT_CODES 值域
+// 白名单内（畸形/未知码宁可 miss 也不乱拉），外校 PK/BW 非纯数字课号自然
+// 跳过。
+NX._deptCodeSet = null;
+NX.deptCodeFromCode = function (code) {
+  const s = String(code || '');
+  if (!/^\d{8}$/.test(s)) return '';
+  if (!NX._deptCodeSet) NX._deptCodeSet = new Set(Object.values(NX.DEPT_CODES));
+  return NX._deptCodeSet.has(s.slice(1, 4)) ? s.slice(1, 4) : '';
+};
+NX.deptOfCourse = function (c) {
+  return (c && NX.deptCodeOf(c.department))
+    || ((c && NX.isSportsCourse(c)) ? '' : NX.deptCodeFromCode(c && c.code));
+};
+
 // 定向课号志愿查询（用户二十报：070 分院视图不含心智探秘——开课系
 // 显示社科学院但分院页就是没有它这行；不分院的完整列表里有）。BR 表
 // 单自带 p_kch 课号查询框：POST token+p_kch 即可精确拉该课全部课序的
@@ -467,7 +486,7 @@ NX.fetchVolunteer = async function (courses, opts) {
   const map = {};
   const deptCodes = new Set();
   pool.forEach(c => {
-    const code = NX.deptCodeOf(c.department);
+    const code = NX.deptOfCourse(c);
     // 检查点窗口新鲜度（用户实锤：上游只在 8/12/16/20 发布，窗口内该院系
     // 数据不可能变——已拉过直接跳过，窗口翻转才自动过期；force 覆盖缺行自愈）
     if (code && (force || !done[code] || (NX.volNeedsRefresh ? NX.volNeedsRefresh(done[code]) : true))) deptCodes.add(code);
@@ -573,6 +592,7 @@ NX.applyVolunteer = function (courses, volData) {
   const byCodeAll = {};
   for (const v of Object.values(volData || {})) (byCodeAll[v.code] = byCodeAll[v.code] || []).push(v);
   const norm = s => String(parseInt(s, 10) || 0);
+  let changed = 0;
   (courses || []).forEach(c => {
     const rows = byCodeAll[c.code] || [];
     let v = volData[c.code + '_' + (c.seq || '0')]
@@ -580,13 +600,23 @@ NX.applyVolunteer = function (courses, volData) {
       || rows.find(r => norm(r.seq) === norm(c.seq))
       || (rows.length === 1 ? rows[0] : null);   // 多段不盲配
     if (v) {
+      const eq = c.volRequired === v.volRequired && c.volElective === v.volElective
+        && c.volOptional === v.volOptional && (c.volSports || '') === (v.volSports || '')
+        && c.volCapacity === v.capacity && Number(c.volApplied || 0) === Number(v.applied || 0);
       c.volRequired = v.volRequired; c.volElective = v.volElective; c.volOptional = v.volOptional;
       c.volSports = v.volSports || '';
       c.volCapacity = v.capacity; c.volApplied = v.applied || 0;   // 不回退 c.capacity：缺志愿行=无数据，不是 0/N 宽松
+      if (!eq) changed++;
     } else {
+      const wasEmpty = !(c.volRequired || c.volElective || c.volOptional || c.volSports);
       c.volRequired = ''; c.volElective = ''; c.volOptional = ''; c.volSports = '';
+      if (!wasEmpty) changed++;
     }
   });
+  // 志愿字段实际变更 → poolVersion++（预览 join 缓存键含 poolVersion：
+  // 否则 9/5 报「数据到了预览还是旧副本」——join 合成对象快照了空志愿字段，
+  // 版本不变永远不重新 join）
+  if (changed) NX.state.poolVersion = (NX.state.poolVersion || 0) + 1;
   return courses;
 };
 
@@ -1509,7 +1539,7 @@ NX.mergeServerRows = function (rows) {
   // 窗口新鲜度过滤（上游 8/12/16/20 才发布，窗口内数据不变）。
   if (!state.isQueuePhase) {
     if (state.volMap) NX.applyVolunteer(rows, state.volMap);
-    const newDepts = [...new Set(rows.map(c => NX.deptCodeOf(c.department)).filter(Boolean))]
+    const newDepts = [...new Set(rows.map(c => NX.deptOfCourse(c)).filter(Boolean))]
       .filter(dc => !state._volDepts || !state._volDepts[dc]
         || (NX.volNeedsRefresh ? NX.volNeedsRefresh(state._volDepts[dc]) : true));
     // done 已标但行仍缺（污染页/合法页缺行）也要排程——自愈重拉住在
@@ -1518,8 +1548,11 @@ NX.mergeServerRows = function (rows) {
     // 怎么点都不稳定复现」的一个来源）。
     const retried0 = state._volRetried || (state._volRetried = {});
     const nk0 = r => r.code + '_' + NX.normSeq(r.seq || '0');
-    const needRetry = rows.some(r => r && r.code && NX.deptCodeOf(r.department)
-      && !(state.volMap || {})[nk0(r)] && (retried0[NX.deptCodeOf(r.department)] || 0) < 3);
+    const needRetry = rows.some(r => {
+      if (!(r && r.code)) return false;
+      const dc = NX.deptOfCourse(r);
+      return dc && !(state.volMap || {})[nk0(r)] && (retried0[dc] || 0) < 3;
+    });
     if (newDepts.length || needRetry) {
       // 搜索是离散动作：立即拉（60ms 防抖用户等不到就截图——心智探秘
       // 行社科学院数据 1-3s 后才到，用户十八报看到的全是补拉前状态）
@@ -1549,22 +1582,31 @@ NX._volFetchNow = async function (rows, newDepts) {
       NX.applyVolunteer(targets, state.volMap);
       filterCourses();
       try { NX.renderStageCart(); } catch (e) {}   // 暂存条概率跟志愿数据一起到（一会有一会没的根因）
+      // 右侧课表预览必须跟志愿数据一起刷（用户 9/5 报：预览概率不点不亮——
+      // 本回调此前只刷列表/暂存，课表停在上一次 renderPreviewTT 的旧概率；
+      // syncQueueAndVol 已有同款，缺行/扩展课号路径全走这里）
+      try { NX.renderPreviewTT(NX.getPreviewCourses(), (state.$('nextthuxk-preview-info') || {}).textContent || '当前已选'); } catch (e) {}
       if (NX.volCachePersist) NX.volCachePersist();
     };
     console.log(NX.TAG, 'volunteer 按需补拉院系:', newDepts.join(','));
     const vol = await NX.fetchVolunteer(rows, { onDept: refresh }) || {};
     state.volMap = Object.assign({}, state.volMap, vol);
     // 缺行自愈（用户十九报：070 被启动池的错页标 done，心智探秘
-    // 永远无数据）：本批行里 volMap 仍缺的，对其院系定向强制重拉
-    // （院系与逐课各 3 次/会话预算，防墓碑行死循环；预算内瞬态失败
-    // 可在下次批次重试——旧布尔墓碑一次失败终身拉黑）
+    // 永远无数据）：volMap 仍缺的行对其院系定向强制重拉（院系与逐课各
+    // 3 次/会话预算，防墓碑行死循环；预算内瞬态失败可在下次批次重试——
+    // 旧布尔墓碑一次失败终身拉黑）。检查范围扩全池（本批 rows ∪ allCourses：
+    // 换批次后旧缺行仍能被 p_kch 兜底——用户 9/5 报「来回点仍无效，刷新才亮」）
     const retried = state._volRetried || (state._volRetried = {});
     const nk = r => r.code + '_' + NX.normSeq(r.seq || '0');
-    const missing = (rows || []).filter(r => r && r.code && NX.deptCodeOf(r.department)
-      && !state.volMap[nk(r)] && (retried[NX.deptCodeOf(r.department)] || 0) < 3);
+    const scope = (rows || []).concat((state.allCourses || []).filter(p => !(rows || []).some(r2 => r2 === p)));
+    const missing = scope.filter(r => {
+      if (!(r && r.code)) return false;
+      const dc = NX.deptOfCourse(r);
+      return dc && !state.volMap[nk(r)] && (retried[dc] || 0) < 3;
+    });
     let extra = {};
     if (missing.length) {
-      const mdeps = Array.from(new Set(missing.map(r => NX.deptCodeOf(r.department))));
+      const mdeps = Array.from(new Set(missing.map(r => NX.deptOfCourse(r))));
       mdeps.forEach(d => { retried[d] = (retried[d] || 0) + 1; });
       console.log(NX.TAG, 'volunteer 缺行重拉:', mdeps.join(','));
       try {
@@ -1572,8 +1614,14 @@ NX._volFetchNow = async function (rows, newDepts) {
         state.volMap = Object.assign({}, state.volMap, extra);
       } catch (e2) { console.warn(NX.TAG, 'volunteer 缺行重拉失败', e2); }
       // 分院页都没有（用户二十报：心智探秘在 070 分院视图缺行）
-      // → 逐课 p_kch 定向查询（每课每会话 3 次预算）
-      for (const r of missing) {
+      // → 逐课 p_kch 定向查询（每课每会话 3 次预算）。单次调用限 4 门
+      // （本批 rows 优先、池内旧行排后）：全池横扫 N 门×2 请求/次会连发
+      // 打满（风暴护栏精神，9/5 报日志里 9 门久缺课同日复现）；未轮到的
+      // 旧缺行留在下次批次继续补
+      const rowsSet = new Set((rows || []).filter(Boolean));
+      const kchTargets = missing.filter(r => rowsSet.has(r))
+        .concat(missing.filter(r => !rowsSet.has(r))).slice(0, 4);
+      for (const r of kchTargets) {
         if (state.volMap[nk(r)]) continue;
         if ((retried['k:' + r.code] || 0) >= 3) continue;
         retried['k:' + r.code] = (retried['k:' + r.code] || 0) + 1;
@@ -1591,6 +1639,7 @@ NX._volFetchNow = async function (rows, newDepts) {
     NX.applyVolunteer(targets, state.volMap);
     filterCourses();
     try { NX.renderStageCart(); } catch (e) {}
+    try { NX.renderPreviewTT(NX.getPreviewCourses(), (state.$('nextthuxk-preview-info') || {}).textContent || '当前已选'); } catch (e) {}
     if (NX.volCachePersist) NX.volCachePersist();
   } catch (e) {
     console.warn(NX.TAG, 'volunteer 按需补拉失败:', (newDepts || []).join(','), e);

@@ -272,6 +272,11 @@ NX.pagedFetch = async function (opts) {
             errStreak++;
             if (r === 'EMPTY') empties++; else errs++;
             console.warn(NX.TAG, label, 'page', p, 'failed:', r);
+            // 服务器稳定回答该页无数据 = 已到末页（分页器常多计 1 页）——
+            // 吸收成空页不再算缺页：否则每轮补拉都徒劳重试同一空页
+            // （9/5 报 vol-BR-024 第 5 页 EMPTY 刷屏 + 「STILL MISSING」）。
+            // fetchOne 已内附带重试，此处再空视为终态；ERR 页仍走缺页冷却。
+            if (r === 'EMPTY') absorb(p, []);
             return;
           }
           errStreak = 0;
@@ -292,6 +297,10 @@ NX.pagedFetch = async function (opts) {
       if (still.length) {
         console.warn(NX.TAG, label, 'STILL MISSING after recovery:', still.length, 'pages →', still.slice(0, 20).join(','));
         if (emptyDiag) console.warn(NX.TAG, label, 'empty-page diagnostic:', emptyDiag);
+      } else if (r1.empties > 0 && emptyDiag) {
+        // 全 EMPTY 已按真末页吸收、不再有 STILL MISSING 告警——但空页也可能是
+        // 会话过期/被拦截的空壳页，诊断单独留痕（9/5 报 vol-BR 诊断退化）
+        console.warn(NX.TAG, label, 'empty pages absorbed as terminal:', r1.empties, '- diagnostic:', emptyDiag);
       }
     }
   }
