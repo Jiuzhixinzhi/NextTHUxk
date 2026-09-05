@@ -745,9 +745,7 @@ NX.renderDrafts = function () {
   el.querySelectorAll('.nx-draft-go').forEach(btn => {
     btn.onclick = () => {
       const d = savedDrafts[parseInt(btn.dataset.idx)];
-      if (!d) return;
-      if (!confirm('确定提交「' + d.name + '」？\n将先退选所有已选课程，再选入该草稿中的 ' + d.courses.length + ' 门课程。')) return;
-      promoteDraft(d);
+      if (d) promoteDraft(d);
     };
   });
   el.querySelectorAll('.nx-draft-del').forEach(btn => {
