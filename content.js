@@ -323,7 +323,20 @@ NX.launch = async function launch() {
         // （OneTHU dev 的 getXkVolunteer 是死码——这里真接上；池内逐门单查，
         // 绝不整库硬爬）
         try {
-          const vol = await NX.fetchVolunteer(pool);
+          // onDept：每院系到货即全量重放 + 回渲（同 _volFetchNow.refresh）——
+          // 首屏概率随抓取进度逐组点亮，不等全部院系抓完；applyVolunteer 幂等，
+          // poolVersion 只在字段实际变更时递增，join 缓存不会反复失效
+          const vol = await NX.fetchVolunteer(pool, {
+            onDept: m => {
+              if (!m || !Object.keys(m).length) return;
+              state.volMap = Object.assign({}, state.volMap, m);
+              NX.applyVolunteer(pool, state.volMap);
+              if (state._searchRows && state._searchRows.length) NX.applyVolunteer(state._searchRows, state.volMap);
+              NX.filterCourses();
+              try { NX.renderStageCart(); } catch (e) {}
+              try { NX.renderPreviewTT(NX.getPreviewCourses(), (state.$('nextthuxk-preview-info') || {}).textContent || '当前已选'); } catch (e) {}
+            },
+          });
           state.volMap = Object.assign({}, state.volMap, vol);   // 全局持久：搜索/跳转新行可取
           // 全量重放不套增量（审查发现）：缓存命中时 vol 可为空 delta，
           // applyVolunteer 的 else 分支会无条件清空——套 delta 会把水合进
