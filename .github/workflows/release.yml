@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 版本一致性守卫
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          MANIFEST=$(jq -r .version manifest.json)
+          CURVER=$(grep -oP "NX\.CUR_VER = '\K[^']+" src/config.js)
+          echo "tag=$TAG manifest=$MANIFEST cur=$CURVER"
+          if [ "$TAG" != "$MANIFEST" ] || [ "$TAG" != "$CURVER" ]; then
+            echo "::error::版本不一致: tag=v$TAG manifest=$MANIFEST NX.CUR_VER=$CURVER"
+            exit 1
+          fi
+
+      - name: 打包 zip / xpi
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          zip -r "nextthuxk-$VER.zip" . \
+            -x ".git/*" ".github/*" "docs/*" "*.md" "Preview.png"
+          cp "nextthuxk-$VER.zip" "nextthuxk-$VER.xpi"
+
+      - name: 创建 Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VER="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "nextthuxk-$VER.zip" "nextthuxk-$VER.xpi" \
+            --title "NextTHUxk v$VER" \
+            --generate-notes \
+            --latest
