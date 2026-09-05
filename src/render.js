@@ -1053,9 +1053,18 @@ NX.filterCourses = function () {
     || so.rxklxm || so.kctsm || so.onlyAvailable || so.gradAvail);
   let show = list;
   if (searchMode) {
-    // 页码钳到筛选后实际页数（本地筛掉行后第N页可能越界出空页）
-    const totalPages = state._searchTotalPages || Math.max(1, Math.ceil(list.length / NX.PAGE_SIZE));
-    const page = Math.min(Math.max(1, state._uiPage || 1), Math.max(1, Math.ceil(list.length / NX.PAGE_SIZE)));
+    // 本地筛选生效 → 页码钳到筛选后实际页数（筛掉行后第N页可能越界出空页）；
+    // 无本地筛选 → 钳到服务端总页数（与 renderListFooter 同款判定；数据不完整
+    // 时允许翻到未加载尾部页，show 为空由占位「此页未加载」引导补齐——否则
+    // 「下一页」点击被钳回第 1 页貌似无反应）
+    const fNow = state.shadow.querySelector('.nx-chip.on')?.dataset.f || 'all';
+    const clientFiltered = fNow === 'available' || $('nx-filter-conflict')?.value
+      || $('nx-filter-credits')?.value || ($('nx-filter-xknote')?.value || '').trim()
+      || $('nx-filter-reviews')?.value || state.activeGroup;
+    const totalPages = clientFiltered
+      ? Math.max(1, Math.ceil(list.length / NX.PAGE_SIZE))
+      : (state._searchTotalPages || Math.max(1, Math.ceil(list.length / NX.PAGE_SIZE)));
+    const page = Math.min(Math.max(1, state._uiPage || 1), totalPages);
     state._uiPage = page;
     show = list.slice((page - 1) * NX.PAGE_SIZE, page * NX.PAGE_SIZE);
   }
@@ -1111,7 +1120,7 @@ NX.renderListFooter = function (o) {
     const fNow = state.shadow.querySelector('.nx-chip.on')?.dataset.f || 'all';
     const clientFiltered = fNow === 'available' || $('nx-filter-conflict')?.value
       || $('nx-filter-credits')?.value || ($('nx-filter-xknote')?.value || '').trim()
-      || state.activeGroup;
+      || $('nx-filter-reviews')?.value || state.activeGroup;
     if (clientFiltered) {
       totalPages = Math.max(1, Math.ceil(o.list.length / NX.PAGE_SIZE));
       curPage = Math.min(Math.max(1, state._uiPage || 1), totalPages);
@@ -1171,7 +1180,8 @@ NX.loadAllSearch = async function () {
     state._searchRows = res.rows || [];
     // 同上：补齐页合并进会话池（暂存/详情/选课按钮一致可用）
     if ((res.rows || []).length && NX.mergeServerRows(res.rows)) NX.rebuildCourseMap();
-    state._searchIncomplete = false;
+    // 与 runServerSearch 同款判定：个别页失败仍短 → 保留不完整提示，不得谎报完整
+    state._searchIncomplete = !!(res.totalRows && (res.rows || []).length < res.totalRows);
     if (res.totalPages) state._searchTotalPages = res.totalPages;
     if (res.totalRows) state._searchTotalRows = res.totalRows;
     state._searchError = res.pageKind === 'unknown' ? '教务返回异常页，可能需退出重新登录' : '';

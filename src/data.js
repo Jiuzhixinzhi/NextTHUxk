@@ -1356,9 +1356,11 @@ NX.serverSearchStorm = async function (opts) {
   const tp = first.totalPages || 0;
   // 风暴护栏（OneTHU 原码语义）：总页数 ≤25 → 全量；>25 → 只探 5 页（深分页
   // 大多是宽泛词）；tp 解析失败保守探 25 页。forceAll=「加载全部」按钮 →
-  // 显式全量补齐（用户主动点击，OneTHU loadAllSearch 同款）。
-  // 绝不做课号深页探测（教务返回无过滤首页 + 25 连发打满代理 token 双雷）。
-  const probeTo = exactCode ? 1 : (o.forceAll ? (tp > 0 ? tp : 25) : (tp > 0 ? (tp <= 25 ? tp : 5) : 25));
+  // 显式全量补齐（用户主动点击，OneTHU loadAllSearch 同款），含课号精确搜索：
+  // 课表课时点击栏已探 1 页时 forceAll 必须覆盖 exactCode 单页限制，否则
+  // 「加载当前关键词全部」点后只重取第 1 页。
+  // 绝不做课号深页自动探测（教务返回无过滤首页 + 25 连发打满代理 token 双雷）。
+  const probeTo = (exactCode && !o.forceAll) ? 1 : (o.forceAll ? (tp > 0 ? tp : 25) : (tp > 0 ? (tp <= 25 ? tp : 5) : 25));
   if (probeTo > 1) {
     const merged = {};
     rows.forEach(r => { merged[r.code + '_' + (r.seq || '0')] = r; });
