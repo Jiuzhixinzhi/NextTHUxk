@@ -361,22 +361,22 @@ NX.renderPreviewTT = function (courses, label) {
     }
     // 课块：清华课按大节→钟点；外校课（PK/GPK/BW）time 无槽位，
     // 从 note 解析「周X HH:MM-HH:MM」（钟点解析 v2，含复合日/单双周/周段）
-    const mk = (day, begin, end, tag) => ({
+    const mk = (day, begin, end, tag, when) => ({
       key: (c.code || 'm') + '_' + (c.seq || '0') + '_' + tag, day, begin, end,
-      label: lbl, color: cellColor, probLabel, probBgColor,
+      label: lbl, color: cellColor, probLabel, probBgColor, when,
       manual: !!c.manual, id: c.id, code: c.code, seq: c.seq || '0',
       origin: NX.originOf(c.code), tag,
     });
     let n = 0;
     const _dayNames = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
     const _slotNames = ['1-2节', '3-4节', '5-6节', '7-8节', '9-10节', '11-12节'];
-    parseTimeSlots(c.time).forEach(({ day, slot }) => {
+    parseTimeSlots(c.time).forEach(({ day, slot, week }) => {
       // 插件 parseTimeSlots 返回标签（周一/1-2节），OneTHU 返回数字——此处换算
       const dNum = _dayNames.indexOf(day) + 1;
       const sNum = _slotNames.indexOf(slot) + 1;
       const r = NX.SLOT_RANGE[sNum - 1];
       if (!dNum || !r) return;
-      raw.push(mk(dNum, r[0], r[1], '' + sNum));
+      raw.push(mk(dNum, r[0], r[1], '' + sNum, dNum + '-' + sNum + '(' + (week || '全周') + ')'));
       n += 1;
     });
     if (!n && c.manual && c.begin && c.end && c.day && NX.pvToMin(c.begin) < NX.pvToMin(c.end)) {
@@ -385,7 +385,7 @@ NX.renderPreviewTT = function (courses, label) {
     }
     if (!n) {
       NX.clockRangesOf(c.note || c.xkTextNote || '', c.time).forEach(cr => {
-        raw.push(Object.assign(mk(cr.day, cr.begin, cr.end, 'c' + cr.begin), { tag: cr.tag }));
+        raw.push(mk(cr.day, cr.begin, cr.end, 'c' + cr.begin, cr.tag));
         n += 1;
       });
     }
@@ -454,7 +454,7 @@ NX.renderPreviewTT = function (courses, label) {
       const probHtml = b.probLabel ? '<span class="nx-tt-prob" style="background:' + b.probBgColor + ';color:' + b.color + '">' + b.probLabel + '</span>' : '';
       return '<div class="nx-tta-b' + (b.manual ? ' nx-tt-manual' : ' nx-tt-jump') + '" style="top:' + top + 'px;height:' + hgt + 'px;left:calc(' + (ln.lane * 100 / ln.lanes) + '% + 1px);width:calc(' + (100 / ln.lanes) + '% - 2px);background:' + bg + ';border-left:3px solid ' + bc + '"' +
         (b.manual ? ' data-manual-id="' + esc(b.id) + '"' : ' data-code="' + esc(b.code) + '" data-seq="' + esc(b.seq) + '"') +
-        ' title="' + esc(b.label + (b.tag ? ' · ' + b.tag : '')) + '">' +
+        ' title="' + esc([b.label, (!b.manual && b.seq && b.seq !== '0') ? NX.normSeq(b.seq) : '', b.when || ''].filter(Boolean).join(' · ')) + '">' +
         '<div class="nx-tta-l">' + originHtml + esc(b.label) + probHtml + tagHtml + '</div>' +
         '<span class="nx-tta-x" title="移除">✕</span></div>';
     }).join('');
