@@ -544,6 +544,7 @@ NX.jumpToCourse = function (code, seq) {
   search.value = code;
   state._jumpCode = code;
   state._jumpSeq = seq || '0';
+  state._jumpAutoLoaded = false;   // 本次跳转允许自动补齐一轮（highlightJumpTarget 用）
   state._serverSig = null;   // 强制发新服务端查询（课号 → kch 精确）
   NX.filterCourses();
   NX.scheduleServerSearch(true);   // 跳转立即查（不等防抖）
@@ -1437,19 +1438,51 @@ NX.scheduleServerSearch = function (immediate) {
 };
 
 /** 跳转目标高亮（OneTHU jumpTo 定稿语义：课号注入搜索栏并保持，
- *  高亮 1.8s 瞬时清除；无自动清词） */
-NX.highlightJumpTarget = function () {
+ *  高亮 1.8s 瞬时清除；无自动清词）。
+ *  跳转自动补齐（用户报）：精确课号按风暴护栏只探 1 页 20 行，教务 p_kch 却是
+ *  包含匹配——某课 6 页 112 行时目标常落在未探测页，此前只剩「数据不完整」横幅
+ *  等手动点「加载当前关键词全部」。现改为：目标不在已加载行且教务确有缺页 →
+ *  自动 forceAll 全量补齐（同加载全部按钮），命中后翻到目标所在页并高亮。
+ *  fail-soft：页数 >25（风暴护栏不自动深探）/ 补齐后仍找不到 → 维持横幅 + 手动入口。 */
+NX.highlightJumpTarget = async function () {
   const state = NX.state;
   if (!state._jumpCode) return;
   const $ = state.$;
-  const code = state._jumpCode, seq = state._jumpSeq || '0';
+  const code = state._jumpCode, seq = NX.normSeq(state._jumpSeq || '0');
+  let rows = state._searchRows || [];
+  // 与 filterCourses 同款 q 过滤（课号注入搜索栏 → q=课号）：下标须与渲染切片
+  // 一致（避免 kch 0 行课名兜底时 code 前缀差异把 index 弄偏）；每次调前重建
+  // （loadAllSearch 返回后 _searchRows 整体替换）
+  const findRow = () => {
+    const q = ($('nextthuxk-search').value || '').trim().toLowerCase();
+    const lcq = s => String(s || '').toLowerCase();
+    const src = q ? rows.filter(c => lcq(c.name).includes(q) || lcq(c.code).includes(q) || lcq(c.teacher).includes(q)) : rows;
+    return src.findIndex(r => String(r.code) === String(code) && NX.normSeq(r.seq || '0') === seq);
+  };
+  let idx = findRow();
+  // 目标未落进已探测行且教务确有缺页 → 本次跳转自动补齐一轮（forceAll 覆盖
+  // exactCode 单页限制）；页数 >25 不自动深探（风暴护栏，留手动按钮）
+  if (idx < 0 && state._searchIncomplete && !state._jumpAutoLoaded && !state._loadingAll) {
+    const tp = state._searchTotalPages || 0;
+    if (tp >= 2 && tp <= 25) {
+      state._jumpAutoLoaded = true;
+      console.log(NX.TAG, '跳转目标未落在已探测页，自动补齐全量（共',
+        state._searchTotalRows, '行 /', tp, '页）:', code + '_' + seq);
+      await NX.loadAllSearch();
+      rows = state._searchRows || [];
+      idx = findRow();
+    }
+  }
   state._jumpCode = null;
+  if (idx < 0) return;   // 补齐后仍没有 → fail-soft（不完整横幅/手动入口仍在）
+  state._uiPage = Math.floor(idx / NX.PAGE_SIZE) + 1;
+  NX.filterCourses();   // 翻到目标页渲染（loadAllSearch 尾渲染的是第 1 页，覆盖之）
   requestAnimationFrame(() => {
     const list = $('nextthuxk-list');
     if (!list) return;
     const target = [...list.querySelectorAll('.nx-card')].find(card =>
       card.dataset.code === String(code) &&
-      String(card.dataset.seq || '0') === String(seq));
+      NX.normSeq(card.dataset.seq || '0') === seq);
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'center' });
       target.classList.add('nx-jump-target');
