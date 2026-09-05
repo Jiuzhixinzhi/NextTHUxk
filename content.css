@@ -194,6 +194,51 @@
 }
 .nx-exit:hover { color: var(--nx-red); border-color: var(--nx-red); }
 
+/* 备份菜单（右上角） */
+.nx-backup-wrap { position: relative; display: inline-block; }
+.nx-backup-menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  z-index: 60;
+  min-width: 240px;
+  padding: 10px;
+  border-radius: 14px;
+  background: rgba(255,255,255,.55);
+  backdrop-filter: var(--nx-lg-filter);
+  -webkit-backdrop-filter: var(--nx-lg-filter);
+  box-shadow: var(--nx-glass-edge), 0 16px 48px rgba(28,39,64,.22);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nx-bm-info {
+  font-size: 11px;
+  color: var(--nx-ink-soft);
+  padding: 6px 10px 8px;
+  border-bottom: 1px solid var(--nx-line);
+  margin-bottom: 4px;
+}
+.nx-bm-item {
+  padding: 8px 10px;
+  border: none;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--nx-ink);
+  font-size: 12px;
+  cursor: pointer;
+  text-align: left;
+  transition: background .15s;
+  font-family: var(--nx-font);
+}
+.nx-bm-item:hover { background: rgba(47,107,255,.08); color: var(--nx-accent); }
+.nx-bm-hint {
+  font-size: 10px;
+  color: var(--nx-faint);
+  padding: 4px 10px 2px;
+  line-height: 1.5;
+}
+
 .nx-main { flex: 1; display: flex; overflow: hidden; }
 .nx-left { width: 50%; border-right: 1px solid var(--nx-line); display: flex; flex-direction: column; overflow: hidden; }
 .nx-right { width: 50%; display: flex; flex-direction: column; overflow-y: auto; }

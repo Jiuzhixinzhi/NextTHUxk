@@ -844,3 +844,113 @@ NX.handlePreviewRemove = async function (code, seq) {
     renderPreviewTT(draft.courses, '草稿「' + draft.name + '」预览');
   }
 };
+
+// ─── 备份 Backup（右上角：统一导出/导入 JSON）─────────────────
+NX.backupExport = async function () {
+  const { state, store, showXkResult, CUR_VER } = NX;
+  let manualEvents = state.manualEvents || [];
+  if (!Array.isArray(manualEvents) || manualEvents.length === 0) {
+    try { manualEvents = (await store.get('manualEvents')) || []; } catch (e) {}
+  }
+  if (!state.stageCart.length && !state.savedDrafts.length && !manualEvents.length) {
+    showXkResult({ ok: false, msg: '没有可备份的数据（暂存 / 草稿 / 占用均为空）' });
+    return;
+  }
+  const data = {
+    app: 'NextTHUxk',
+    backupVer: 1,
+    ver: CUR_VER,
+    sem: state.SEM || '',
+    ts: Date.now(),
+    stageCart: state.stageCart,
+    drafts: state.savedDrafts,
+    manualEvents,
+  };
+  const d = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  const fname = 'nextthuxk-backup-' + (data.sem || 'nosem') + '-' + d.getFullYear() + pad(d.getMonth() + 1) + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.json';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data)], { type: 'application/json' }));
+  a.download = fname;
+  a.style.display = 'none';
+  (document.body || document.documentElement).appendChild(a);
+  a.click();
+  setTimeout(() => { a.remove(); URL.revokeObjectURL(a.href); }, 1000);
+  showXkResult({ ok: true, msg: '备份已下载：暂存 ' + state.stageCart.length + ' 门 · 草稿 ' + state.savedDrafts.length + ' 份 · 占用 ' + manualEvents.length + ' 条' });
+};
+
+NX.backupImport = async function (jsonStr) {
+  const { state, store, showXkResult, renderDrafts, filterCourses, invalidatePreview, renderPreviewTT } = NX;
+  const $ = state.$;
+  try {
+    const data = JSON.parse(jsonStr);
+    if (!data || data.app !== 'NextTHUxk' || Number(data.backupVer) !== 1) throw new Error('不是 NextTHUxk 备份文件（app/backupVer 校验失败）');
+    const stageRows = Array.isArray(data.stageCart) ? data.stageCart : [];
+    const draftRows = Array.isArray(data.drafts) ? data.drafts : [];
+    const manualRows = Array.isArray(data.manualEvents) ? data.manualEvents : [];
+    if (!stageRows.length && !draftRows.length && !manualRows.length) throw new Error('备份文件中没有可导入的数据');
+    if (data.sem && state.SEM && data.sem !== state.SEM) {
+      if (!confirm('备份文件学期为 ' + data.sem + '，当前为 ' + state.SEM + '。仍要导入吗？')) return;
+    }
+    // 1) 暂存：按课班去重合入（mergeIntoStage 同款语义，含持久化/回渲/志愿预留）
+    const r1 = mergeIntoStage(stageRows);
+    // 2) 草稿：同名替换内容、异名追加；满 5 份时 prompt 编号替换（askReplaceDraft 同款交互）
+    let dAdd = 0, dRep = 0, dSkip = 0;
+    for (let i = 0; i < draftRows.length; i++) {
+      const dd = draftRows[i];
+      if (!dd || !Array.isArray(dd.courses)) { dSkip++; continue; }
+      dd.name = (dd.name || '').trim() || '导入草稿 ' + (i + 1);
+      const exist = state.savedDrafts.find(x => x.name === dd.name);
+      if (exist) {
+        exist.courses = dd.courses;
+        exist.createdAt = dd.createdAt || exist.createdAt || Date.now();
+        if (!exist.id) exist.id = Date.now();
+        dRep++;
+        continue;
+      }
+      if (state.savedDrafts.length >= 5) {
+        const list = state.savedDrafts.map((x, k) => (k + 1) + '. ' + x.name + ' (' + x.courses.length + '门)').join('\n');
+        const choice = prompt('草稿已满(5/5)，导入「' + dd.name + '」需替换一个现有草稿，输入编号(1-5)，取消则跳过此份：\n' + list);
+        if (!choice) { dSkip++; continue; }
+        const idx = parseInt(choice, 10) - 1;
+        if (isNaN(idx) || idx < 0 || idx >= state.savedDrafts.length) { dSkip++; continue; }
+        state.savedDrafts[idx] = { id: dd.id || Date.now() + i, name: dd.name, courses: dd.courses, createdAt: dd.createdAt || Date.now() };
+        dRep++;
+        continue;
+      }
+      state.savedDrafts.push({ id: dd.id || Date.now() + i, name: dd.name, courses: dd.courses, createdAt: dd.createdAt || Date.now() });
+      dAdd++;
+    }
+    if (dAdd || dRep) { renderDrafts(); store.set('drafts', state.savedDrafts); }
+    // 3) 占用：按 名称+星期+起止 去重（导入不丢既有占用）
+    let mAdd = 0;
+    const mSeen = new Set(state.manualEvents.map(m => [m.name, m.day, m.begin, m.end].join('|')));
+    manualRows.forEach(m => {
+      if (!m || !m.name) return;
+      const key = [m.name, m.day, m.begin, m.end].join('|');
+      if (mSeen.has(key)) return;
+      mSeen.add(key);
+      const id = Date.now() + mAdd;
+      state.manualEvents.push({
+        id, name: m.name, code: 'manual-' + id, seq: '0',
+        day: parseInt(m.day, 10) || 1, begin: m.begin || '18:00', end: m.end || '19:30',
+        time: '', manual: true, credits: 0,
+      });
+      mAdd++;
+    });
+    if (mAdd) {
+      await store.set('manualEvents', state.manualEvents);
+      invalidatePreview();
+      renderPreviewTT(NX.getPreviewCourses(), $('nextthuxk-preview-info')?.textContent || '当前已选');
+      filterCourses();
+    }
+    const parts = ['暂存 +' + r1.added];
+    if (r1.skipped) parts.push('重复跳过' + r1.skipped);
+    if (dAdd) parts.push('草稿新增' + dAdd);
+    if (dRep) parts.push('草稿替换' + dRep);
+    if (dSkip) parts.push('草稿跳过' + dSkip);
+    parts.push('占用+' + mAdd);
+    const added = r1.added + dAdd + dRep + mAdd;
+    showXkResult({ ok: true, msg: added ? '备份导入完成：' + parts.join(' · ') : '备份导入完成：无新增（数据均已存在）' });
+  } catch (e) { showXkResult({ ok: false, msg: '导入失败: ' + e.message }); }
+};

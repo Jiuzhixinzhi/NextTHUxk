@@ -80,6 +80,16 @@ const HTML = `
         <button id="nextthuxk-sem" class="nx-ghost-btn" title="点击修改学期"></button>
         <button id="nextthuxk-grade" class="nx-ghost-btn" title="点击修改年级"></button>
         <button id="nextthuxk-check-update" class="nx-ghost-btn">检查更新</button>
+        <div class="nx-backup-wrap">
+          <button id="nextthuxk-backup" class="nx-ghost-btn">备份</button>
+          <div class="nx-backup-menu" id="nx-backup-menu" hidden>
+            <div class="nx-bm-info" id="nx-bm-info"></div>
+            <button class="nx-bm-item" id="nx-backup-export" type="button">导出备份（.json）</button>
+            <button class="nx-bm-item" id="nx-backup-import" type="button">导入备份</button>
+            <div class="nx-bm-hint">导入按课班 / 草稿名智能合并，不覆盖现有数据；备份文件含暂存、草稿与自定义占用</div>
+          </div>
+        </div>
+        <input type="file" id="nx-backup-file" accept=".json,application/json" style="display:none">
         <button class="nx-exit" id="nextthuxk-exit">返回原系统</button>
       </div>
     </div>
@@ -695,6 +705,46 @@ $('nextthuxk-check-update').onclick = async () => {
     $('nextthuxk-dashboard')?.prepend(toast);
   }
 };
+// ─── 备份（右上角：导出/导入 JSON）─────────────────────────────
+{
+  const hideMenu = () => { const m = $('nx-backup-menu'); if (m) m.hidden = true; };
+  const fillInfo = () => {
+    const info = $('nx-bm-info');
+    if (!info) return;
+    info.textContent = '暂存 ' + (state.stageCart || []).length + ' 门 · 草稿 ' + (state.savedDrafts || []).length + ' 份 · 占用 ' + (state.manualEvents || []).length + ' 条';
+  };
+  $('nextthuxk-backup').onclick = e => {
+    const m = $('nx-backup-menu');
+    if (!m) return;
+    e.stopPropagation();
+    fillInfo();
+    m.hidden = !m.hidden;
+  };
+  $('nx-backup-export').onclick = async () => {
+    hideMenu();
+    try { await NX.backupExport(); } catch (err) { showXkResult({ ok: false, msg: '导出失败: ' + err.message }); }
+  };
+  $('nx-backup-import').onclick = () => {
+    hideMenu();
+    $('nx-backup-file').click();
+  };
+  $('nx-backup-file').addEventListener('change', async e => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    try {
+      const text = await file.text();
+      await NX.backupImport(text);
+    } catch (err) { showXkResult({ ok: false, msg: '读取文件失败: ' + err.message }); }
+  });
+  shadow.addEventListener('pointerdown', e => {
+    const m = $('nx-backup-menu');
+    if (!m || m.hidden) return;
+    if (e.composedPath().includes($('nx-backup-menu')) || e.composedPath().includes($('nextthuxk-backup'))) return;
+    hideMenu();
+  });
+  shadow.addEventListener('keydown', e => { if (e.key === 'Escape') hideMenu(); });
+}
 shadow.querySelectorAll('.nx-chip').forEach(chip => {
   chip.onclick = () => {
     shadow.querySelectorAll('.nx-chip').forEach(c => c.classList.remove('on'));
