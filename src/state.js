@@ -707,6 +707,63 @@ NX.importToStage = function (jsonStr) {
   } catch (e) { showXkResult({ ok: false, msg: '导入失败: ' + e.message }); }
 };
 
+// 载入正选 / 草稿到暂存区（补齐编排入口：现状 → 暂存区迭代）——
+// 按 code_seq（前导零归一）去重合并，不丢暂存区既有内容（importToStage 同款语义）。
+function mergeIntoStage(rows) {
+  const { state, store, renderStageCart, filterCourses, invalidatePreview, renderPreviewTT } = NX;
+  const { stageCart, allCourses } = state;
+  const $ = state.$;
+  let added = 0, skipped = 0;
+  const seen = new Set(stageCart.map(s => s.code + '_' + NX.normSeq(s.seq)));
+  rows.forEach(row => {
+    const key = row.code + '_' + NX.normSeq(row.seq);
+    if (seen.has(key)) { skipped++; return; }
+    seen.add(key);
+    const ac = allCourses.find(x => x.code === row.code && String(x.seq || '0') === String(row.seq || '0'));
+    const note = row.note || (ac ? (ac.note || ac.xkTextNote || '') : '');
+    const time = row.time || (ac ? ac.time : '') || '';
+    stageCart.push({
+      code: row.code, seq: String(row.seq || '0'), name: row.name || '', teacher: row.teacher || '',
+      time, credits: row.credits || 0, flag: row.flag || 'bx', zy: parseInt(row.zy) || 3,
+      baseFlag: row.baseFlag || (ac ? NX.baseFlag(ac) : 'rx'), note,
+    });
+    NX.knoteRemember(row.code, row.seq, note, time);   // 暂存的时候把时间暂存起来
+    added++;
+  });
+  if (!added) return { added: 0, skipped };
+  NX.invalidatePreview();
+  renderStageCart();
+  store.set('stageCart', stageCart);
+  filterCourses();   // 课程卡片「已暂存」置灰同步
+  if (state.previewMode === 'stage') renderPreviewTT(state.stageCart, $('nextthuxk-preview-info')?.textContent || '');
+  return { added, skipped };
+}
+
+NX.loadSelectedToStage = function () {
+  const { state, showXkResult } = NX;
+  const selected = state.allCourses.filter(c => c.selected);
+  if (!selected.length) { showXkResult({ ok: false, msg: '没有已选课程' }); return; }
+  const rows = selected.map(c => ({
+    code: c.code, seq: c.seq || '0', name: c.name, teacher: c.teacher || '',
+    time: c.time || '', credits: c.credits || 0,
+    flag: NX.typeCodeToFlag(c.typeCode),   // typeCodeToFlag 含体育；saveSelectedAsDraft 手写映射缺 ty
+    zy: c.zy || 3, baseFlag: NX.baseFlag(c), note: c.note || c.xkTextNote || '',
+  }));
+  const r = mergeIntoStage(rows);
+  showXkResult({ ok: true, msg: r.added
+    ? '已载入 ' + r.added + ' 门已选课程到暂存区' + (r.skipped ? '（跳过已在暂存区 ' + r.skipped + ' 门）' : '')
+    : '所选课程均已在暂存区' });
+};
+
+NX.loadDraftToStage = function (idx) {
+  const { state, showXkResult } = NX;
+  const draft = state.savedDrafts[idx];
+  if (!draft) return;
+  if (!draft.courses.length) { showXkResult({ ok: false, msg: '草稿「' + draft.name + '」没有课程' }); return; }
+  const r = mergeIntoStage(draft.courses);
+  showXkResult({ ok: true, msg: '已从草稿「' + draft.name + '」载入 ' + r.added + ' 门到暂存区' + (r.skipped ? '（跳过已在暂存区 ' + r.skipped + ' 门）' : '') });
+};
+
 NX.promoteDraft = async function (draft) {
   const { state, showXkResult, fetchSelectedCourses, dropCourse, submitCourse, refreshSelected, renderPreviewTT } = NX;
   const $ = state.$;

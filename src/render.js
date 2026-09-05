@@ -577,7 +577,7 @@ NX.renderStageCart = function () {
   const $ = state.$;
   const el = $('nextthuxk-stage-list');
   if (!el) return;
-  if (!stageCart.length) { el.innerHTML = '<div class="nx-st">暂无暂存课程，点击课程卡片上的「暂存」按钮添加</div>'; $('nextthuxk-stage-conflict').innerHTML = ''; return; }
+  if (!stageCart.length) { el.innerHTML = '<div class="nx-st">暂无暂存课程：点课程卡片「暂存」，或用下方「已选载入」/ 草稿「载入暂存」/「导入」添加</div>'; $('nextthuxk-stage-conflict').innerHTML = ''; return; }
   el.innerHTML = stageCart.map((c, i) => {
     const bf = c.baseFlag || (() => { const ac = allCourses.find(x => x.code === c.code); return ac ? baseFlag(ac) : 'rx'; })();
     const aFlags = allowedFlags(bf);
@@ -650,7 +650,7 @@ NX.draftCourseProbHtml = function (c) {
 };
 
 NX.renderDrafts = function () {
-  const { esc, state, store, baseFlag, allowedFlags, renderPreviewTT, promoteDraft, deleteDraft, exportDraft, renameDraft } = NX;
+  const { esc, state, store, baseFlag, allowedFlags, renderPreviewTT, promoteDraft, deleteDraft, exportDraft, renameDraft, loadDraftToStage } = NX;
   const { savedDrafts, allCourses } = state;
   const $ = state.$;
   const el = $('nextthuxk-drafts');
@@ -682,7 +682,7 @@ NX.renderDrafts = function () {
       courseList += '</div>';
     }
     const expIcon = exp ? '▼' : '▶';
-    return '<div class="nx-draft-card"><div class="nx-draft-head"><span class="nx-draft-name" style="cursor:pointer" data-toggle="' + di + '">' + expIcon + ' ' + esc(d.name) + '</span><span class="nx-draft-info">' + d.courses.length + '门 · ' + cr + '学分 · ' + (dt.getMonth() + 1) + '/' + dt.getDate() + '</span></div><div class="nx-draft-acts"><button class="nx-draft-sim" data-idx="' + di + '">学分模拟</button><button class="nx-draft-view" data-idx="' + di + '">预览 & 修改</button><button class="nx-draft-go" data-idx="' + di + '">提交选课</button><button class="nx-draft-export" data-idx="' + di + '">导出</button><button class="nx-draft-rename" data-idx="' + di + '">重命名</button><button class="nx-draft-del" data-idx="' + di + '">删除</button></div>' + courseList + '</div>';
+    return '<div class="nx-draft-card"><div class="nx-draft-head"><span class="nx-draft-name" style="cursor:pointer" data-toggle="' + di + '">' + expIcon + ' ' + esc(d.name) + '</span><span class="nx-draft-info">' + d.courses.length + '门 · ' + cr + '学分 · ' + (dt.getMonth() + 1) + '/' + dt.getDate() + '</span></div><div class="nx-draft-acts"><button class="nx-draft-sim" data-idx="' + di + '">学分模拟</button><button class="nx-draft-view" data-idx="' + di + '">预览 & 修改</button><button class="nx-draft-tostage" data-idx="' + di + '" title="以草稿为底稿并入暂存区（按课序去重）">载入暂存</button><button class="nx-draft-go" data-idx="' + di + '">提交选课</button><button class="nx-draft-export" data-idx="' + di + '">导出</button><button class="nx-draft-rename" data-idx="' + di + '">重命名</button><button class="nx-draft-del" data-idx="' + di + '">删除</button></div>' + courseList + '</div>';
   }).join('');
   el.querySelectorAll('[data-toggle]').forEach(span => {
     span.onclick = () => {
@@ -731,6 +731,9 @@ NX.renderDrafts = function () {
       const d = savedDrafts[idx];
       if (d) { state.previewDraftIdx = idx; renderPreviewTT(d.courses, '草稿「' + d.name + '」预览'); }
     };
+  });
+  el.querySelectorAll('.nx-draft-tostage').forEach(btn => {
+    btn.onclick = () => loadDraftToStage(parseInt(btn.dataset.idx));
   });
   el.querySelectorAll('.nx-draft-sim').forEach(btn => {
     btn.onclick = () => {
