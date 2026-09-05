@@ -14,13 +14,13 @@ NX.parseTimeSlots = function (timeStr) {
   const slots = [];
   const dayLabels = ['周一','周二','周三','周四','周五','周六','周日'];
   const slotLabels = ['1-2节','3-4节','5-6节','7-8节','9-10节','11-12节'];
-  const re = /(\d+)\s*[-–—]\s*(\d+)\s*\([^)]*\)/g;
+  const re = /(\d+)\s*[-–—]\s*(\d+)\s*\(([^)]*)\)/g;
   let m;
   while ((m = re.exec(timeStr)) !== null) {
     const dayNum = parseInt(m[1]);
     const dajie = parseInt(m[2]);
     if (dayNum >= 1 && dayNum <= 7 && dajie >= 1 && dajie <= 6) {
-      slots.push({ day: dayLabels[dayNum - 1], slot: slotLabels[dajie - 1] });
+      slots.push({ day: dayLabels[dayNum - 1], slot: slotLabels[dajie - 1], week: (m[3] || '').trim() || '全周' });
     }
   }
   NX._slotsCache.set(timeStr, slots);
