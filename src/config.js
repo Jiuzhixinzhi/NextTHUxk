@@ -10,8 +10,8 @@ NX.browser = typeof browser !== 'undefined' ? browser : chrome;
 NX.TAG = '[NextTHUxk]';
 NX.SP = 'nextthuxk_';
 NX.DATA_VER = 6;
-NX.CUR_VER = '2.2.0';
-NX.BUILD = 'a5029db';   // 构建标记：面板+启动日志可见，防「页面刷新了但扩展没刷新」的旧构建疑案
+NX.CUR_VER = '2.3.0';
+NX.BUILD = '5524522';   // 构建标记：面板+启动日志可见，防「页面刷新了但扩展没刷新」的旧构建疑案
 NX.DANGEROUS_VERS = ['1.0.1','1.0.2','1.0.3','1.1.2','1.2.0'];
 NX.ZY_LIMITS = {
   bx: [[1,1],[2,2],[3,Infinity]], // 必修：1志愿1门, 2志愿2门, 3志愿无限
