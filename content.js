@@ -138,6 +138,7 @@ const HTML = `
             <button class="nx-stage-btn" id="nextthuxk-save-draft">保存草稿</button>
             <button class="nx-stage-btn" id="nextthuxk-save-selected">存当前选课</button>
             <button class="nx-stage-btn" id="nextthuxk-preview-stage">预览暂存</button>
+            <button class="nx-stage-btn" id="nextthuxk-credit-sim">学分模拟</button>
             <button class="nx-stage-btn" id="nextthuxk-export">导出</button>
             <button class="nx-stage-btn" id="nextthuxk-import">导入</button>
           </div>
@@ -696,6 +697,10 @@ $('nextthuxk-preview-stage').onclick = () => {
   if (!state.stageCart.length) { showXkResult({ ok: false, msg: '暂存区没有课程' }); return; }
   state.previewMode = 'stage';
   renderPreviewTT(state.stageCart, '暂存区预览');
+};
+$('nextthuxk-credit-sim').onclick = () => {
+  if (!state.stageCart.length) { showXkResult({ ok: false, msg: '暂存区没有课程' }); return; }
+  NX.showCreditSimModal(state.stageCart, '暂存区 · 学分中签模拟');
 };
 $('nextthuxk-add-manual').onclick = NX.showManualEventModal;
 $('nextthuxk-import').onclick = () => {

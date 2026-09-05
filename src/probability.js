@@ -198,3 +198,66 @@ NX.fullProbGrid = function (courseOrAc, bf) {
   }
   return rows.length ? '<div style="margin-top:3px;line-height:1.4;font-size:9px">' + rows.join('<br>') + '</div>' : '';
 };
+
+// ─── 学分中签模拟 ─────────────────────────────────────────────
+// 暂存区/草稿 → 模拟条目 {name, credits, flag, zy, prob}；prob 为 null
+// 表示实时取不到（无志愿数据/课余量已满排队），由用户在弹窗手动填。
+
+NX.creditSimItems = function (courses) {
+  const { state, getCourse, calcProb, normSeq } = NX;
+  const { isQueuePhase, queueDataMap } = state || {};
+  const items = [];
+  (courses || []).forEach(c => {
+    if (!(Number(c.credits) > 0)) return;
+    let prob = null;
+    const ac = getCourse(c.code, c.seq);
+    if (isQueuePhase) {
+      // 课余量阶段：余量 > 0 直接能选 → 必中；已满/排队 → 待填
+      const qd = (queueDataMap || {})[c.code + '_' + normSeq(c.seq)];
+      if (qd && Number(qd.qRemaining) > 0) prob = 1;
+    } else if (ac && c.flag && c.zy) {
+      const p = calcProb(ac, c.flag, c.zy);
+      if (p && p.prob >= 0) prob = p.prob;
+    }
+    items.push({
+      name: c.name || c.code || '',
+      credits: Math.round(Number(c.credits) || 0),
+      flag: c.flag, zy: c.zy,
+      liveProb: prob === null ? null : Math.round(prob * 100) / 100,   // 实时取值快照（按展示精度量化，与输入框同构）
+      prob: prob === null ? null : Math.round(prob * 100) / 100,       // 覆盖模式基准，初始 = 实时值
+    });
+  });
+  return items;
+};
+
+// 精确分布（非蒙特卡洛）：各课中签相互独立时，总学分分布 = 伯努利卷积。
+// 返回 {points: [{credits, prob}], expected, mode, total}；prob 非有限的
+// 条目不参与（视作未计入）。
+NX.creditDist = function (items) {
+  const list = (items || []).filter(it => it && it.credits > 0 && Number.isFinite(it.prob) && it.prob >= 0 && it.prob <= 1);
+  let total = 0;
+  list.forEach(it => { total += it.credits; });
+  const dist = new Float64Array(total + 1);
+  dist[0] = 1;
+  let curMax = 0;
+  for (const it of list) {
+    const p = it.prob, q = 1 - p, cr = it.credits;
+    for (let s = curMax; s >= 0; s--) {
+      const v = dist[s];
+      if (!v) continue;
+      dist[s] = v * q;
+      dist[s + cr] += v * p;
+    }
+    curMax += cr;
+  }
+  const points = [];
+  let expected = 0, mode = 0, modeP = -1;
+  for (let s = 0; s <= total; s++) {
+    const p = dist[s];
+    if (!(p > 0)) continue;
+    if (p > modeP) { modeP = p; mode = s; }
+    expected += s * p;
+    points.push({ credits: s, prob: p });
+  }
+  return { points, expected, mode, total };
+};
