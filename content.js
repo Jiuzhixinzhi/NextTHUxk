@@ -137,6 +137,7 @@ const HTML = `
             <input type="text" class="nx-inp" id="nextthuxk-draft-name" placeholder="草稿名称（如：方案A）" style="flex:1;padding:6px 10px;font-size:12px;min-width:120px">
             <button class="nx-stage-btn" id="nextthuxk-save-draft">保存草稿</button>
             <button class="nx-stage-btn" id="nextthuxk-save-selected">存当前选课</button>
+            <button class="nx-stage-btn" id="nextthuxk-stage-from-selected" title="把当前已选整表并入暂存区，以现有课表为底稿继续编排">已选载入</button>
             <button class="nx-stage-btn" id="nextthuxk-preview-stage">预览暂存</button>
             <button class="nx-stage-btn" id="nextthuxk-credit-sim">学分模拟</button>
             <button class="nx-stage-btn" id="nextthuxk-export">导出</button>
@@ -692,6 +693,7 @@ $('nextthuxk-ai').onclick = NX.callAI;
 $('nextthuxk-ai-search').onclick = NX.aiSearch;
 $('nextthuxk-save-draft').onclick = NX.saveDraft;
 $('nextthuxk-save-selected').onclick = NX.saveSelectedAsDraft;
+$('nextthuxk-stage-from-selected').onclick = NX.loadSelectedToStage;
 $('nextthuxk-export').onclick = NX.exportStageCart;
 $('nextthuxk-preview-stage').onclick = () => {
   if (!state.stageCart.length) { showXkResult({ ok: false, msg: '暂存区没有课程' }); return; }
