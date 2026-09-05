@@ -542,9 +542,10 @@ NX.refreshSelected = async function () {
         if (q) { c.available = q.qRemaining > 0; if (q.qRemaining > 0) c.remaining = q.qRemaining; c.capacity = q.qCapacity; }
       });
     } else {
-      const vol = await NX.fetchVolunteer(allCourses, { force: true });   // 提交后志愿统计必变，重拉
-      NX.state.volMap = Object.assign({}, NX.state.volMap, vol);
-      NX.applyVolunteer(allCourses, vol);
+      // 志愿统计按检查点窗口缓存（用户 9/5 报建议采纳：上游只在 8/12/16/20
+      // 发布，窗口内数据不变——提交后不再重拉，只把缓存套到当前池行；
+      // 缺的院系/课行等仍在 mergeServerRows 按需补拉与整点自动同步兜底）
+      if (state.volMap) NX.applyVolunteer(allCourses, state.volMap);
     }
   } catch (e) { /* 保持现有余量数据 */ }
   filterCourses();
