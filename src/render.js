@@ -1303,30 +1303,38 @@ NX.renderListFooter = function (o) {
 
 // 「加载全部」（OneTHU loadAllSearch 同款）：forceAll 全量补齐探测页，
 // 结果沿用当前关键词的服务端真值，页码/条数刷新。
+// 查询方向用 runServerSearch 生效时的查询快照（kch 0 行课名兜底后搜索栏仍
+// 是课号，buildSearchOpts 重建会回到 kch 方向——外校课贴回旧方向丢横幅）。
+// 过期守卫（评审确认）：补齐期间用户再跳转/输入 → 新查询已接管 _searchRows，
+// sig 快照不符则整批丢弃，绝不覆盖新结果。
 NX.loadAllSearch = async function () {
   const state = NX.state;
   if (state._loadingAll) return;
   state._loadingAll = true;
   NX.filterCourses();   // 提示条立即变「加载中…」
+  const sigAtStart = state._serverSig;
   try {
-    const opts = NX.buildSearchOpts();
-    opts.forceAll = true;
+    const opts = Object.assign({}, state._searchOpts || NX.buildSearchOpts(), { forceAll: true });
     const res = await NX.serverSearchStorm(opts);
-    const selKeys = new Set(state.allCourses.filter(c => c.selected).map(c => c.code + '_' + (c.seq || '0')));
-    const candKeys = new Set(state.candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
-    (res.rows || []).forEach(r => {
-      const k = r.code + '_' + (r.seq || '0');
-      r.selected = selKeys.has(k);
-      r.isCandidate = candKeys.has(k);
-    });
-    state._searchRows = res.rows || [];
-    // 同上：补齐页合并进会话池（暂存/详情/选课按钮一致可用）
-    if ((res.rows || []).length && NX.mergeServerRows(res.rows)) NX.rebuildCourseMap();
-    // 与 runServerSearch 同款判定：个别页失败仍短 → 保留不完整提示，不得谎报完整
-    state._searchIncomplete = !!(res.totalRows && (res.rows || []).length < res.totalRows);
-    if (res.totalPages) state._searchTotalPages = res.totalPages;
-    if (res.totalRows) state._searchTotalRows = res.totalRows;
-    state._searchError = res.pageKind === 'unknown' ? '教务返回异常页，可能需退出重新登录' : '';
+    if (state._serverSig !== sigAtStart) {
+      console.warn(NX.TAG, 'load all 过期丢弃（查询已变化）');
+    } else {
+      const selKeys = new Set(state.allCourses.filter(c => c.selected).map(c => c.code + '_' + (c.seq || '0')));
+      const candKeys = new Set(state.candidateCourses.map(c => c.code + '_' + (c.seq || '0')));
+      (res.rows || []).forEach(r => {
+        const k = r.code + '_' + (r.seq || '0');
+        r.selected = selKeys.has(k);
+        r.isCandidate = candKeys.has(k);
+      });
+      state._searchRows = res.rows || [];
+      // 同上：补齐页合并进会话池（暂存/详情/选课按钮一致可用）
+      if ((res.rows || []).length && NX.mergeServerRows(res.rows)) NX.rebuildCourseMap();
+      // 与 runServerSearch 同款判定：个别页失败仍短 → 保留不完整提示，不得谎报完整
+      state._searchIncomplete = !!(res.totalRows && (res.rows || []).length < res.totalRows);
+      if (res.totalPages) state._searchTotalPages = res.totalPages;
+      if (res.totalRows) state._searchTotalRows = res.totalRows;
+      state._searchError = res.pageKind === 'unknown' ? '教务返回异常页，可能需退出重新登录' : '';
+    }
   } catch (e) {
     console.warn(NX.TAG, 'load all:', e);
   }
@@ -1422,7 +1430,15 @@ NX.runServerSearch = async function () {
         state._browseHasMore = false;
         state._searchError = '查询失败：' + (e && e.message ? e.message : e);
       }
-      if (state._serverSig === ranSig) break;   // 条件未再变 → 收敛
+      if (state._serverSig === ranSig) {
+        // 生效查询快照（loadAllSearch 复用：kch 0 行课名兜底后 direction 得以
+        // 延续；慢速竞态下 _searchOpts 属收敛查询，不属中间态）
+        const snap = Object.assign({}, opts);
+        delete snap.page;
+        delete snap.forceAll;
+        state._searchOpts = snap;
+        break;   // 条件未再变 → 收敛
+      }
     }
   } finally {
     state._ssBusy = false;
@@ -1454,7 +1470,7 @@ NX.highlightJumpTarget = async function () {
   // 一致（避免 kch 0 行课名兜底时 code 前缀差异把 index 弄偏）；每次调前重建
   // （loadAllSearch 返回后 _searchRows 整体替换）
   const findRow = () => {
-    const q = ($('nextthuxk-search').value || '').trim().toLowerCase();
+    const q = ($('nextthuxk-search').value || '').toLowerCase();
     const lcq = s => String(s || '').toLowerCase();
     const src = q ? rows.filter(c => lcq(c.name).includes(q) || lcq(c.code).includes(q) || lcq(c.teacher).includes(q)) : rows;
     return src.findIndex(r => String(r.code) === String(code) && NX.normSeq(r.seq || '0') === seq);
@@ -1469,11 +1485,14 @@ NX.highlightJumpTarget = async function () {
       console.log(NX.TAG, '跳转目标未落在已探测页，自动补齐全量（共',
         state._searchTotalRows, '行 /', tp, '页）:', code + '_' + seq);
       await NX.loadAllSearch();
+      // 竞态守卫（评审确认）：补齐期间用户再跳转/输入 → 新跳转已接管
+      // _jumpCode，本次恢复必须退出且不得清它（新跳转的高亮还要用）
+      if (state._jumpCode !== code || NX.normSeq(state._jumpSeq || '0') !== seq) return;
       rows = state._searchRows || [];
       idx = findRow();
     }
   }
-  state._jumpCode = null;
+  state._jumpCode = null;   // 确认仍属本次跳转（命中或仍找不到，一并收尾）
   if (idx < 0) return;   // 补齐后仍没有 → fail-soft（不完整横幅/手动入口仍在）
   state._uiPage = Math.floor(idx / NX.PAGE_SIZE) + 1;
   NX.filterCourses();   // 翻到目标页渲染（loadAllSearch 尾渲染的是第 1 页，覆盖之）
