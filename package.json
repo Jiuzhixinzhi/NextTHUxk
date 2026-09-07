@@ -1,0 +1,29 @@
+{
+  "name": "nextthuxk",
+  "version": "3.0.0",
+  "private": true,
+  "type": "module",
+  "description": "NextTHUxk — 清华选课增强扩展（Svelte 5 + TS + Tailwind 4）",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "build:content": "vite build --config vite.content.config.ts",
+    "build:popup": "vite build --config vite.popup.config.ts",
+    "build:dev": "npx vite build --config vite.content.config.ts --mode development && node scripts/build.mjs --dev-copy",
+    "dev": "node scripts/build.mjs --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "svelte-check --tsconfig tsconfig.json",
+    "check:fast": "svelte-check --tsconfig tsconfig.json"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^7.3.0",
+    "@tailwindcss/vite": "^4.3.3",
+    "@types/chrome": "^0.2.8",
+    "svelte": "^5.57.0",
+    "svelte-check": "^4.7.6",
+    "tailwindcss": "^4.3.3",
+    "typescript": "^5.9.3",
+    "vite": "^8.2.2",
+    "vitest": "^5.0.0"
+  }
+}

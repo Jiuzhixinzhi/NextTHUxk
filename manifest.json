@@ -2,8 +2,8 @@
   "manifest_version": 3,
   "name": "NextTHUxk",
   "short_name": "NextTHUxk",
-  "version": "2.3.0",
-  "description": "下一代选课 - 基于 AI 决策与现代双栏 UI 的选课无感辅助系统。",
+  "version": "3.0.0",
+  "description": "下一代选课 - 双栏选课工作台：随时查询、草稿编排、中签概率与学分模拟。",
   "permissions": [
     "activeTab",
     "storage",
@@ -28,34 +28,15 @@
         "http://zhjwxk.cic.tsinghua.edu.cn/*"
       ],
       "js": [
-        "src/config.js",
-        "src/gbk.js",
-        "src/data.js",
-        "src/probability.js",
-        "src/reviews.js",
-        "src/state.js",
-        "src/render.js",
-        "src/ai.js",
-        "src/update.js",
         "content.js"
       ],
       "run_at": "document_idle"
     }
   ],
-  "web_accessible_resources": [
-    {
-      "resources": [
-        "content.css"
-      ],
-      "matches": [
-        "<all_urls>"
-      ]
-    }
-  ],
   "browser_specific_settings": {
     "gecko": {
       "id": "nextthuxk@guojl06.github.io",
-      "strict_min_version": "115.0",
+      "strict_min_version": "128.0",
       "data_collection_permissions": {
         "required": [
           "none"
