@@ -13,6 +13,7 @@ import {
   type VolSession,
 } from '../api/volunteers';
 import { volNeedsRefresh, volWindowStart } from '../update/check';
+import { recordVolWindow } from './probhist.svelte.ts';
 
 export const vol = $state({
   map: {} as Record<string, VolDatum>,
@@ -36,10 +37,11 @@ export function volCacheHydrate(sem: string): void {
     .catch(() => {});
 }
 
-/** 志愿缓存写回（防抖 2s；窗口起点调用时刻捕获） */
+/** 志愿缓存写回（防抖 2s；窗口起点调用时刻捕获；同时挂接概率趋势快照） */
 export function volCachePersist(sem: string): void {
   clearTimeout(persistT);
   const win = volWindowStart().getTime();
+  recordVolWindow(sem, vol.map);
   persistT = setTimeout(() => {
     clearTimeout(persistT);
     complete();
