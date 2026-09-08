@@ -5,11 +5,11 @@
   import { capacityStatus, cascadeOf, currentProbMeta, lockedOf, probGridData, volColor } from '../../lib/domain/probability';
   import { ORIGIN_COLORS, originOf, parseTimeSlots } from '../../lib/domain/time';
   import { deptCodeFromCode, deptNameOf } from '../../lib/api/dept';
-  import { session, doChangeVolunteer, doDropCourse, selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
+  import { session, doChangeVolunteer, doDropCourse, doSubmitCourse, selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
   import { addCourseToActive } from '../../lib/stores/drafts.svelte.ts';
   import { probHist } from '../../lib/stores/probhist.svelte.ts';
   import { trendDelta } from '../../lib/domain/probhist';
-  import { showToast } from '../../lib/stores/toast.svelte.ts';
+  import { showToast, showXkResult } from '../../lib/stores/toast.svelte.ts';
   import { confirmDialog, openWindow } from '../../lib/stores/modal.svelte.ts';
   import { buildPreviewSlotIndex, conflictsWithPreview } from '../../lib/domain/conflict';
   import { keyOf, normSeq } from '../../lib/core/utils';
@@ -168,6 +168,25 @@
     try {
       const res = await doDropCourse(course.code, course.seq);
       showToast(res.ok, res.msg);
+    } finally {
+      busy = false;
+    }
+  }
+
+  /** 直接正选：课满时走 submitCourse 内部二段 saveBksKcDl 自动入候补队列 */
+  async function onSelect() {
+    const queue = session.isQueuePhase && !course.available;
+    if (
+      !(await confirmDialog(
+        `${queue ? '排队选' : '选'}「${course.name}」？`,
+        `${course.seq ? course.seq + '课序 · ' : ''}${flagName(selFlag as Flag)} · 第${selZy}志愿 · 教务确认后生效。${queue ? '当前课班余量为 0，将进入候补队列。' : ''}`
+      ))
+    )
+      return;
+    busy = true;
+    try {
+      const res = await doSubmitCourse(course.code, course.seq, selZy, selFlag);
+      showXkResult(res);
     } finally {
       busy = false;
     }
@@ -371,7 +390,10 @@
           </span>
         {/if}
       {/if}
-      <button class="nx-select-btn" disabled={busy} onclick={() => { onAddDraft(); }}>
+      <button class="nx-select-btn" disabled={busy} onclick={() => { void onSelect(); }}>
+        {session.isQueuePhase && !course.available ? '排队选课' : '选课'}
+      </button>
+      <button class="nx-stage-btn" disabled={busy} onclick={() => { onAddDraft(); }}>
         加入草稿
       </button>
     {/if}
