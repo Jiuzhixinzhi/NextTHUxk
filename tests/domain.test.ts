@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest';
 import { parseTimeSlots, clockRangesOf, pvToMin, spansOf } from '../src/lib/domain/time';
 import { detectConflicts } from '../src/lib/domain/conflict';
 import { calcProb, parseVolArr, probResult, creditDist, creditSimItems } from '../src/lib/domain/probability';
-import { draftDiff, draftCourseFrom, draftKeyOf, sameAsDraft } from '../src/lib/domain/draft';
+import { draftDiff, draftCourseFrom, draftKeyOf, mergeSelectedIntoDraft, repairDraftCourse, sameAsDraft } from '../src/lib/domain/draft';
 import { gbkPercentEncode } from '../src/lib/net/gbk';
 import { normSeq, keyOf } from '../src/lib/core/utils';
 import { checkPlanCoverage } from '../src/lib/domain/plancov';
@@ -201,6 +201,79 @@ describe('草稿差量对齐', () => {
     expect(dc.note).toBe('周二 18:30');
     expect(dc.baseFlag).toBe('rx');
     expect(draftKeyOf(dc)).toBe('1_1');
+  });
+});
+
+describe('mergeSelectedIntoDraft（已选载入）', () => {
+  function makeDraft(courses: import('../src/lib/domain/types').DraftCourse[]): import('../src/lib/domain/types').Draft {
+    return { id: 1, name: '草稿1', courses: [...courses], createdAt: 0 };
+  }
+  const sel = (code: string, seq: string, zy: number, typeCode = '007') =>
+    ({ code, seq, zy, typeCode, name: code, teacher: '', time: '', credits: 2 }) as import('../src/lib/domain/types').Course;
+
+  it('新行并入；已在稿行按服务端真实 zy 回写', () => {
+    const draft = makeDraft([
+      { code: 'a', seq: '01', flag: 'rx', zy: 3, name: 'A', teacher: '', time: '', credits: 2, baseFlag: 'rx' },
+    ]);
+    const ins = mergeSelectedIntoDraft(draft, [sel('a', '01', 1), sel('b', '01', 2)]);
+    expect(ins).toEqual({ added: 1, skipped: 0, synced: 1 });
+    expect(draft.courses).toHaveLength(2);
+    expect(draft.courses[0]!.zy).toBe(1);
+    expect(draft.courses[1]!.code).toBe('b');
+    expect(draft.courses[1]!.zy).toBe(2);
+  });
+
+  it('zy=0（解析失败）不回写、不覆盖已有行；去重按 normSeq', () => {
+    const draft = makeDraft([
+      { code: 'a', seq: '01', flag: 'rx', zy: 2, name: 'A', teacher: '', time: '', credits: 2, baseFlag: 'rx' },
+    ]);
+    const ins = mergeSelectedIntoDraft(draft, [sel('a', '1', 0), sel('c', '1', 3)]);
+    expect(ins).toEqual({ added: 1, skipped: 1, synced: 0 });
+    expect(draft.courses[0]!.zy).toBe(2);
+  });
+
+  it('zy 相同视为跳过', () => {
+    const draft = makeDraft([
+      { code: 'a', seq: '01', flag: 'rx', zy: 3, name: 'A', teacher: '', time: '', credits: 2, baseFlag: 'rx' },
+    ]);
+    const ins = mergeSelectedIntoDraft(draft, [sel('a', '01', 3)]);
+    expect(ins).toEqual({ added: 0, skipped: 1, synced: 0 });
+  });
+
+  it('已在稿行 flag 破损（不在 baseFlag 允许集）→ 顺手修复', () => {
+    const draft = makeDraft([
+      { code: 'a', seq: '01', flag: 'bx', zy: 3, name: 'A', teacher: '', time: '', credits: 2, baseFlag: 'rx' },
+    ]);
+    const ins = mergeSelectedIntoDraft(draft, [sel('a', '01', 3)]);
+    expect(ins.skipped).toBe(0);
+    expect(draft.courses[0]!.flag).toBe('rx');
+  });
+});
+
+describe('draftCourseFromSelected / repairDraftCourse（flag 允许集约束）', () => {
+  it('typeCode 缺失 + attr 缺失 → flag 落 baseFlag 兜底 rx 而非 bx', async () => {
+    const { draftCourseFromSelected } = await import('../src/lib/domain/draft');
+    const c = { code: 'a', seq: '01', name: 'A', teacher: '', time: '', credits: 2, zy: 1 } as never;
+    const dc = draftCourseFromSelected(c);
+    expect(dc.flag).toBe('rx');
+    expect(dc.baseFlag).toBe('rx');
+  });
+
+  it('typeCode 006 + attr 必修 → flag bx（允许集内）', async () => {
+    const { draftCourseFromSelected } = await import('../src/lib/domain/draft');
+    const c = { code: 'a', seq: '01', name: 'A', typeCode: '006', attr: '必修', zy: 2 } as never;
+    const dc = draftCourseFromSelected(c);
+    expect(dc.flag).toBe('bx');
+    expect(dc.baseFlag).toBe('bx');
+  });
+
+  it('repairDraftCourse：flag 越集归 baseFlag、zy 越界归 3', () => {
+    const c: import('../src/lib/domain/types').DraftCourse = { code: 'a', seq: '01', name: 'A', teacher: '', time: '', credits: 0, flag: 'bx', zy: 0, baseFlag: 'rx' };
+    expect(repairDraftCourse(c)).toBe(true);
+    expect(c.flag).toBe('rx');
+    expect(c.zy).toBe(3);
+    expect(repairDraftCourse(c)).toBe(false);
+    expect(c).toMatchObject({ flag: 'rx', zy: 3, baseFlag: 'rx' });
   });
 });
 

@@ -53,16 +53,13 @@
     return (activeDraft?.courses || []).reduce((s, c) => s + (c.credits || 0), 0);
   }
 
-  function goSim(courses: ReturnType<typeof getActiveCourses> = []) {
-    if (!courses || !courses.length) {
+  function goSim() {
+    const courses = activeDraft?.courses || [];
+    if (!courses.length) {
       showToast(false, '草稿没有课程');
       return;
     }
     openWindow({ kind: 'creditSim', courses, title: '学分中签模拟' });
-  }
-
-  function getActiveCourses() {
-    return activeDraft?.courses || [];
   }
 </script>
 

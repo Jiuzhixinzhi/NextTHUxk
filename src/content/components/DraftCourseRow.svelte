@@ -1,23 +1,15 @@
 <script lang="ts">
   import type { DraftCourse, Flag } from '../../lib/domain/types';
   import { allowedFlags, flagName } from '../../lib/domain/flags';
-  import { probGridData } from '../../lib/domain/probability';
+  import { currentProbMeta } from '../../lib/domain/probability';
   import { session } from '../../lib/stores/session.svelte.ts';
   import { jumpTo } from '../../lib/stores/search.svelte.ts';
   import { keyOf } from '../../lib/core/utils';
 
   let { course, onFlag, onZy, onRemove }: { course: DraftCourse; onFlag: (f: Flag) => void; onZy: (z: number) => void; onRemove: () => void } = $props();
 
-  let _flag: Flag = $state(course.flag);
-  let _zy: number = $state(course.zy);
-
-  $effect(() => {
-    if (_flag !== course.flag) _flag = course.flag;
-    if (_zy !== course.zy) _zy = course.zy;
-  });
-
   const ac = $derived.by(() => session.allCourses.find((x: { code: string; seq: string }) => x.code === course.code && String(x.seq || '0') === String(course.seq || '0')));
-  const grid = $derived.by(() => (ac ? probGridData(ac) : []));
+  const meta = $derived.by(() => (ac ? currentProbMeta(ac, course.flag, course.zy) : null));
   const qd = $derived.by(() => session.queueDataMap[keyOf(course.code, course.seq)]);
 </script>
 
@@ -32,7 +24,7 @@
   <span style="font-size:10px;color:var(--nx-faint);">{course.credits}学分</span>
   <select
     style="padding:1px 3px;border-radius:5px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer;"
-    value={_flag}
+    value={course.flag}
     onchange={(e) => onFlag((e.currentTarget as HTMLSelectElement).value as Flag)}
   >
     {#each allowedFlags(course.baseFlag) as f}
@@ -41,12 +33,12 @@
   </select>
   <select
     style="padding:1px 3px;border-radius:5px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer;"
-    value={String(_zy)}
+    value={String(course.zy)}
     onchange={(e) => onZy(parseInt((e.currentTarget as HTMLSelectElement).value) || 3)}
   >
-    {#each [1, 2, 3] as z}
-      <option value={z}>{z}志愿</option>
-    {/each}
+    <option value="1">1志愿</option>
+    <option value="2">2志愿</option>
+    <option value="3">3志愿</option>
   </select>
 
   {#if session.isQueuePhase}
@@ -58,12 +50,12 @@
       <span style="font-size:10px;color:#ee4d4d;font-weight:600;white-space:nowrap;">已满</span>
     {/if}
   {:else}
-    {#if grid.length}
-      <span style="font-size:9px;color:var(--nx-ink-soft);white-space:nowrap;">
-        {#each grid as row}
-          {flagName(row.flag)}: {row.cells.map((c) => c.zy + '志愿' + c.label).join(' / ')}
-        {/each}
-      </span>
+    {#if meta}
+      <span
+        style="font-size:10px;font-weight:600;color:{meta.color};white-space:nowrap;"
+        title="{flagName(course.flag)} · {course.zy}志愿 · {meta.percentLabel}{meta.ratioLabel && meta.ratioLabel !== '无数据' ? ' · 申' + meta.ratioLabel.split('/')[0] + '/余' + meta.ratioLabel.split('/')[1] : ''}"
+      >{meta.percentLabel || meta.label}</span
+      >
     {/if}
   {/if}
 
