@@ -1,12 +1,11 @@
 <script lang="ts">
   import type { Course, Flag } from '../../lib/domain/types';
   import { ZY_LIMITS } from '../../lib/core/constants';
-  import { allowedFlags, baseFlag, canAdjustZy, flagName, isSportsCourse, typeCodeToFlag } from '../../lib/domain/flags';
-  import { currentProbMeta, fmtVol, occupancyOf, probGridData, volColor } from '../../lib/domain/probability';
-  import { ORIGIN_COLORS, originOf } from '../../lib/domain/time';
-  import { session, doChangeVolunteer, doDropCourse } from '../../lib/stores/session.svelte.ts';
-  import { selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
-  import type { Course as CourseType } from '../../lib/domain/types';
+  import { allowedFlags, baseFlag, canAdjustZy, flagName, typeCodeToFlag } from '../../lib/domain/flags';
+  import { capacityStatus, cascadeOf, currentProbMeta, lockedOf, probGridData, volColor } from '../../lib/domain/probability';
+  import { ORIGIN_COLORS, originOf, parseTimeSlots } from '../../lib/domain/time';
+  import { deptCodeFromCode, deptNameOf } from '../../lib/api/dept';
+  import { session, doChangeVolunteer, doDropCourse, selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
   import { addCourseToActive } from '../../lib/stores/drafts.svelte.ts';
   import { showToast } from '../../lib/stores/toast.svelte.ts';
   import { confirmDialog, openWindow } from '../../lib/stores/modal.svelte.ts';
@@ -15,7 +14,6 @@
 
   let { course }: { course: Course } = $props();
 
-  let open_ = $state(false);
   let busy = $state(false);
   let selFlag = $state<string>(baseFlag(course));
   let selZy = $state<number>(3);
@@ -29,54 +27,123 @@
   });
 
   const origins = $derived(originOf(course.code));
-  const isSports = $derived(isSportsCourse(course));
   const vc = $derived(volColor(course, session.isQueuePhase));
-  const occ = $derived(occupancyOf(course, session.isQueuePhase));
-  const compLabel = $derived(vc.level === 'easy' ? '竞争宽松' : vc.level === 'medium' ? '竞争适中' : vc.level === 'hard' ? '竞争激烈' : '');
 
   const qKey = $derived(course.code + '_' + normSeq(course.seq));
   const qd = $derived(session.queueDataMap[qKey]);
   const cand = $derived(session.candidateCourses.find((cc) => keyOf(cc.code, cc.seq) === keyOf(course.code, course.seq)));
 
-  function volParts(): string[] {
-    const parts: string[] = [];
-    if (isSports && course.volSports && course.volSports !== '0,0,0') {
-      const s = fmtVol(course.volSports);
-      if (s) parts.push('体 ' + s);
-    } else {
-      if (course.volRequired && course.volRequired !== '0,0,0') {
-        const s = fmtVol(course.volRequired);
-        if (s) parts.push('必 ' + s);
-      }
-      if (course.volElective && course.volElective !== '0,0,0') {
-        const s = fmtVol(course.volElective);
-        if (s) parts.push('限 ' + s);
-      }
-      if (course.volOptional && course.volOptional !== '0,0,0') {
-        const s = fmtVol(course.volOptional);
-        if (s) parts.push('任 ' + s);
-      }
-    }
-    return parts;
-  }
-
-  function queueInfo(): string {
-    if (cand) {
-      const rem = qd ? `余${qd.qRemaining}/${qd.qCapacity}` : '';
-      return `排队第${cand.myPos}名 / 共${cand.queueTotal}人` + (rem ? ` · ${rem}` : '');
-    }
-    if (qd) return qd.qRemaining > 0 ? `余${qd.qRemaining}/${qd.qCapacity}` : qd.qQueue > 0 ? `已满(容量${qd.qCapacity}) · 排队${qd.qQueue}人` : `已满(容量${qd.qCapacity})`;
-    return '';
-  }
-
   const curFlag = $derived(course.selected ? typeCodeToFlag(course.typeCode) : (selFlag as Flag));
   const curZy = $derived(course.selected ? course.zy || 3 : selZy);
+  const selZyDisp = $derived(course.zy || 0); // 志愿档缺失（0）时整段隐藏，同旧版兜底
   const meta = $derived.by(() => currentProbMeta(course, curFlag, curZy));
-  const grid = $derived.by(() => probGridData(course));
 
   const conflicts = $derived.by(() => {
     const idx = buildPreviewSlotIndex(selectedPreviewRows() as Course[], session.manualEvents);
     return conflictsWithPreview(course, idx);
+  });
+
+  // ─── 课号拆段：首位·院系码(蓝)·尾段（尾段末位承载学分：放大加粗） ───
+  const codeParts = $derived.by(() => {
+    const code = String(course.code || '');
+    const dseg = deptCodeFromCode(code);
+    const last = code.slice(-1);
+    const creditLast = /^\d$/.test(code.slice(-1)) && (!course.credits || Number(course.credits) === Number(last));
+    return { head: dseg ? code.slice(0, 1) : '', dept: dseg, body: (dseg ? code.slice(4) : code).slice(0, -1), last, creditLast };
+  });
+
+  /** 课号 chip 悬浮：附带开课院系名（课时内蓝段只表码，名反查进 tooltip） */
+  const codeTitle = $derived.by(() => {
+    const name = deptNameOf(String(course.code || ''));
+    return name ? `${course.code} · ${name}` : course.code;
+  });
+
+  // ─── 时间标签（口径与冲突/课表一致：周四·11-12节） ───
+  const timeSlots = $derived(parseTimeSlots(course.time));
+
+  const flagShort = (f: Flag): string => (f === 'bx' ? '必' : f === 'xx' ? '限' : f === 'rx' ? '任' : '体');
+
+  /** 级联中签率链：节点=类型×志愿，底色=各自概率；当前选法描边 */
+  const chain = $derived.by(() => {
+    if (session.isQueuePhase) return [];
+    const out: { key: string; label: string; pct: string; muted: boolean; color: string; ratio: string; active: boolean; title: string }[] = [];
+    for (const row of probGridData(course)) {
+      for (const cell of row.cells) {
+        const active = row.flag === curFlag && cell.zy === curZy;
+        const muted = (cell.prob ?? -1) < 0;
+        const ratio = cell.ratioLabel || '';
+        const title = `${flagName(row.flag)} ${cell.zy}志愿 · ${cell.percentLabel || cell.label}${ratio && ratio !== '无数据' ? ' · ' + ratio : ''}`;
+        out.push({
+          key: row.flag + cell.zy,
+          label: flagShort(row.flag) + cell.zy,
+          pct: cell.percentLabel || cell.label || '—',
+          muted,
+          color: cell.color,
+          ratio,
+          active,
+          title,
+        });
+      }
+    }
+    return out;
+  });
+
+  /** 课余量容量状态（仅课余量阶段；预选走级联口径） */
+  const cs = $derived(session.isQueuePhase ? capacityStatus(course, qd) : null);
+
+  /** 预选级联拆解：随当前「类型×志愿」选择器联动 */
+  const cascade = $derived(session.isQueuePhase ? null : cascadeOf(course, curFlag, curZy));
+
+  /** 容量条文字：课余量「候补位次 · 已选X · 余Y · 排队Z」；预选「同志愿N争s · 已选锁定+优先」 */
+  const capText = $derived.by(() => {
+    if (session.isQueuePhase) {
+      if (!cs) return null;
+      const rem = cs.rem != null ? `余${cs.rem}` : '';
+      const queue = cs.queue > 0 ? `排队${cs.queue}` : '';
+      const base = `已选${cs.used}` + (rem ? ` · ${rem}` : '') + (queue ? ` · ${queue}` : '');
+      const prefix = cand ? `候补第${cand.myPos}/${cand.queueTotal} · ` : '';
+      const title = `已选${cs.used} · 余${cs.rem ?? '—'} · 排队${cs.queue} · 容量${cs.cap}`;
+      return { text: prefix + base, title, pct: cs.pct, color: vc.color };
+    }
+    const lo = lockedOf(course);
+    if (cascade) {
+      const denom = (lo && lo.cap) || cascade.pool;
+      if (cascade.hasVol) {
+        // 条宽=需求口径：上批锁定 + 本批报名(统计页已报) vs 总容量；文字仍显本档 同志愿N争s · 已选锁定+优先
+        const used = (lo ? lo.locked : 0) + cascade.prior;
+        const demand = (lo ? lo.locked : 0) + (Number(course.volApplied) || 0);
+        return {
+          text: `${cascade.peers}/${cascade.seats}` + (lo ? ` · 已选${used}` : ''),
+          title: (lo ? `已选${lo.locked}(上批)+${cascade.prior}(优先)` : `已选${cascade.prior}(优先)`) + ` · 同志愿${cascade.peers}争${cascade.seats} · 总容量${denom}`,
+          pct: Math.min(100, (demand / denom) * 100),
+          color: meta.color,
+        };
+      }
+    }
+    // 本批志愿数据缺：回退搜索页裸数据（灰条）
+    if (lo) {
+      return {
+        text: `已选${lo.locked} · 余${lo.rem}`,
+        title: `已选${lo.locked} · 余${lo.rem} · 总容量${lo.cap}（本批志愿数据缺）`,
+        pct: (lo.locked / lo.cap) * 100,
+        color: '#9aa1ac',
+      };
+    }
+    return null;
+  });
+
+  /** 开课线：课余量已选 / 预选 上批锁定+本批报名 少于 5 人有停开风险 */
+  const OPEN_LINE = 5;
+  const openRisk = $derived.by(() => {
+    if (session.isQueuePhase) {
+      if (!cs) return null;
+      if (cs.used <= 0 || cs.used >= OPEN_LINE) return null;
+      return { used: cs.used, label: '已选' };
+    }
+    const lo = lockedOf(course);
+    const used = (lo ? lo.locked : 0) + (Number(course.volApplied) || 0);
+    if (used <= 0 || used >= OPEN_LINE) return null;
+    return { used, label: '报名' };
   });
 
   function onAddDraft() {
@@ -109,33 +176,39 @@
   }
 </script>
 
-<div
-  class:selected={course.selected}
-  class:open={open_}
-  class="nx-card"
-  onclick={(e) => {
-    const t = e.target as HTMLElement;
-    if (t.tagName === 'BUTTON' || t.tagName === 'SELECT') return;
-    open_ = !open_;
-  }}
->
+<div class:selected={course.selected} class="nx-card">
   <div class="flex items-center gap-2">
-    <span style="font-size:14px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{course.name}</span>
+    <span class="nx-card-name">{course.name}</span>
+    {#if course.code}
+      <span class="nx-code" title="{codeTitle}">
+        {#if codeParts.dept}
+          <span class="nx-code-head">{codeParts.head}</span><span class="nx-code-dept">{codeParts.dept}</span>{codeParts.body}
+        {:else}
+          {codeParts.body}
+        {/if}
+        {#if codeParts.creditLast}
+          <span class="nx-code-last" title={Number(course.credits) > 0 ? `{course.credits}学分` : undefined}>{codeParts.last}</span>
+        {:else}
+          {codeParts.last}
+          {#if Number(course.credits) > 0}
+            <span class="nx-code-sep"></span><span class="nx-code-credit" title="{course.credits}学分">{course.credits}学分</span>
+          {/if}
+        {/if}
+      </span>
+    {/if}
     {#if course._tbRef && course._tbRef.count}
       <button
         type="button"
         class="nx-tb-badge {course._tbRef.avg >= 4.5 ? 'lv-hi' : course._tbRef.avg >= 4 ? 'lv-good' : course._tbRef.avg >= 3 ? 'lv-mid' : 'lv-bad'}"
+        style="margin-left:auto;"
         title="THU选课社区评分 · 点击查看全部点评"
-        onclick={(e) => {
-          e.stopPropagation();
+        onclick={() => {
           openWindow({ kind: 'reviews', code: course.code, seq: course.seq });
         }}
       >★{Number(course._tbRef.avg).toFixed(1)}<i>{course._tbRef.count}评</i></button
       >
     {/if}
-    <span style="margin-left:auto;font-size:11px;color:var(--nx-faint);white-space:nowrap;">{course.credits}学分</span>
   </div>
-  <div style="font-size:11px;color:var(--nx-faint);margin-bottom:3px;">{course.code}{course.seq ? ' · ' + course.seq + '课序' : ''}</div>
 
   <div class="flex flex-wrap gap-1">
     {#if origins}
@@ -149,99 +222,77 @@
     {#if course.selected}
       <span class="nx-tag nx-tag-sel">已选</span>
     {/if}
-    {#if course.attr === '必修'}
-      <span class="nx-tag nx-tag-req">必修</span>
-    {:else if course.attr === '限选'}
-      <span class="nx-tag nx-tag-ele">限选</span>
-    {:else if course.attr === '任选'}
-      <span class="nx-tag nx-tag-opt">任选</span>
+    {#if course.teacher || course.seq}
+      <span class="nx-tag">{[course.teacher || '', course.seq ? course.seq + '课序' : ''].filter(Boolean).join(' · ')}</span>
     {/if}
-    {#if course.teacher}
-      <span class="nx-tag">{course.teacher}</span>
-    {/if}
-    {#if course.time}
-      <span class="nx-tag">{course.time}</span>
-    {/if}
-    {#if course.department}
-      <span class="nx-tag">{course.department}</span>
+    {#if timeSlots.length}
+      {#each timeSlots as s (s.day + s.slot + s.week)}
+        <span class="nx-tag" title="{course.time}">{s.day}·{s.slot}{s.week !== '全周' ? ' (' + s.week + ')' : ''}</span>
+      {/each}
+    {:else if course.time}
+      <span class="nx-tag" title="{course.time}">{course.time}</span>
     {/if}
   </div>
 
-  {#if session.isQueuePhase && queueInfo()}
-    <div style="margin-top:4px;display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-      <span
-        style="font-size:11px;font-weight:600;color:{cand ? '#ff9f1a' : qd && qd.qRemaining > 0 ? '#07c160' : '#ee4d4d'};"
-      >{queueInfo()}</span
-      >
-      {#if qd && qd.qQueue > 0 && !cand}
-        <span style="font-size:11px;color:var(--nx-amber);">排队 {qd.qQueue}人</span>
+  {#if capText}
+    <div class="nx-cap-wrap">
+      <div class="nx-cap" title="{(capText.title)}{openRisk ? ' · 未达开课线(仅' + openRisk.used + '人' + openRisk.label + ')' : ''}">
+        <div class="nx-cap-fill" style="width:{capText.pct}%;background:{capText.color};"></div>
+        <span class="nx-cap-txt">{capText.text}</span>
+      </div>
+      {#if openRisk}
+        <span class="nx-cap-risk">未达开课线</span>
       {/if}
     </div>
-  {:else}
-    {#if volParts().length}
-      <div class="flex flex-wrap gap-1.5" style="margin-top:3px;">
-        {#each volParts() as p}
-          <span style="font-size:10.5px;color:var(--nx-ink-soft);">{p}</span>
-        {/each}
-      </div>
-    {/if}
-    {#if occ.cap > 0}
-      <div style="display:flex;align-items:center;gap:6px;margin-top:3px;">
-        <span style="height:4px;border-radius:2px;flex:1;min-width:30px;background:linear-gradient(90deg,{vc.color} {vc.pct}%, rgba(0,0,0,.06) {vc.pct}%);"></span>
-        <span style="font-size:10px;font-weight:600;color:{vc.color};white-space:nowrap;">{occ.applied}/{occ.cap} · {compLabel}</span>
-      </div>
-    {/if}
-    <div class="nx-prob-line" style="margin-top:4px;">
-      <span class="nx-prob-label">当前选法</span>
-      <span
-        class:nx-prob-pill-muted={meta.prob < 0}
-        class="nx-prob-pill"
-        style="padding:1px 8px;border-radius:999px;font-size:10.5px;font-weight:600;background:{meta.bg};color:{meta.color};"
-      >{meta.flagLabel} · {meta.zy}志愿 · {meta.percentLabel || meta.label}{meta.ratioLabel && meta.ratioLabel !== '无数据' ? ' · ' + meta.ratioLabel : ''}</span
-      >
-    </div>
-    {#if grid.length > 0}
-      <div style="margin-top:3px;line-height:1.4;font-size:9px;">
-        {#each grid as row}
-          <div>
-            <span style="color:var(--nx-faint);font-size:9px;">{flagName(row.flag)}</span>
-            {#each row.cells as cell}
-              <span style="color:{cell.color};font-weight:600;">{cell.zy}志愿:{cell.label}</span>
-            {/each}
-          </div>
-        {/each}
-      </div>
-    {/if}
   {/if}
 
-  {#if conflicts.length > 0}
-    <div style="font-size:10px;color:var(--nx-red);margin-top:3px;display:flex;gap:4px;align-items:center;flex-wrap:wrap;">
-      <span>冲突:</span>
-      {#each conflicts.slice(0, 3) as cf}
-        <span style="background:rgba(238,77,77,.1);padding:1px 6px;border-radius:4px;">{cf.day}{cf.slot} {cf.name}</span>
+  {#if !session.isQueuePhase && chain.length}
+    <div class="nx-chain">
+      {#each chain as node (node.key)}
+        <span
+          class="nx-chain-node {node.active ? 'active' : ''} {node.muted ? 'muted' : ''}"
+          style="{node.muted ? '' : 'background:' + node.color + ';color:#fff;'}"
+          title="{node.title}"
+        >{node.pct}</span
+        >
       {/each}
     </div>
   {/if}
 
+  {#if conflicts.length > 0}
+    <div class="nx-conflict">
+      <span class="nx-conflict-label">时间冲突</span>
+      {#each conflicts.slice(0, 3) as cf}
+        <span class="nx-conflict-chip">{cf.day}{cf.slot} {cf.name}</span>
+      {/each}
+      {#if conflicts.length > 3}
+        <span class="nx-conflict-more">+{conflicts.length - 3}</span>
+      {/if}
+    </div>
+  {/if}
+
   {#if course.xkTextNote}
-    <div style="font-size:11px;color:var(--nx-amber);margin-top:4px;padding:3px 8px;background:rgba(255,159,26,.06);border-radius:4px;line-height:1.4;">
+    <div style="font-size:11px;color:var(--nx-amber);padding:3px 8px;background:rgba(255,159,26,.06);border-radius:4px;line-height:1.4;">
       {course.xkTextNote}
     </div>
   {/if}
 
-  <div class="flex items-center gap-1.5 flex-wrap" style="margin-top:6px;">
+  <div class="flex items-center gap-1.5 flex-wrap">
     <button
       type="button"
       class="nx-ghost-btn"
       style="font-size:11px;padding:3px 10px;"
-      onclick={(e) => {
-        e.stopPropagation();
+      onclick={() => {
         openWindow({ kind: 'course', code: course.code, teacherId: course.teacherId || '' });
       }}
     >简介</button
     >
     {#if course.selected}
-      <span style="font-size:11px;color:var(--nx-ink-soft);">第{course.zy}志愿 · {course.typeLabel || ''}</span>
+      {#if selZyDisp > 0}
+        <span style="font-size:11px;color:var(--nx-ink-soft);">第{selZyDisp}志愿{course.typeLabel ? ' · ' + course.typeLabel : ''}</span>
+      {:else if course.typeLabel}
+        <span style="font-size:11px;color:var(--nx-ink-soft);">{course.typeLabel}</span>
+      {/if}
       {#if !session.isQueuePhase}
         <span style="font-size:11px;font-weight:700;color:{meta.color};">{meta.prob >= 0 ? meta.percentLabel : meta.label}</span>
       {/if}
@@ -250,8 +301,7 @@
         class="nx-vol-btn"
         disabled={!(course.zy && course.zy > 1 && canAdj(course.zy - 1))}
         title={course.zy && course.zy > 1 ? (canAdj(course.zy - 1) ? '升为第' + (course.zy - 1) + '志愿' : '该志愿名额已满') : ''}
-        onclick={(e) => {
-          e.stopPropagation();
+        onclick={() => {
           void onVolChange('up');
         }}
       >▲</button
@@ -261,8 +311,7 @@
         class="nx-vol-btn"
         disabled={!(course.zy && course.zy < 3 && canAdj(course.zy + 1))}
         title={course.zy && course.zy < 3 ? (canAdj(course.zy + 1) ? '降为第' + (course.zy + 1) + '志愿' : '该志愿名额已满') : ''}
-        onclick={(e) => {
-          e.stopPropagation();
+        onclick={() => {
           void onVolChange('down');
         }}
       >▼</button
@@ -270,8 +319,7 @@
       <button
         type="button"
         class="nx-stage-btn"
-        onclick={(e) => {
-          e.stopPropagation();
+        onclick={() => {
           onAddDraft();
         }}
       >加入草稿</button
@@ -280,8 +328,7 @@
         type="button"
         class="nx-drop-btn"
         disabled={busy}
-        onclick={(e) => {
-          e.stopPropagation();
+        onclick={() => {
           void onDrop();
         }}
       >{course.isCandidate ? '退队' : '退选'}</button
@@ -297,22 +344,12 @@
         <option value="2">2志愿</option>
         <option value="1">1志愿</option>
       </select>
-      {#if session.isQueuePhase}
-        <span style="font-size:11px;font-weight:700;color:{cand ? '#ff9f1a' : qd && qd.qRemaining > 0 ? '#07c160' : '#ee4d4d'};">{queueInfo() || '已满'}</span>
-      {:else}
+      {#if !session.isQueuePhase}
         <span style="font-size:11px;font-weight:700;color:{meta.color};">{meta.prob >= 0 ? meta.percentLabel : meta.label}</span>
       {/if}
-      <button class="nx-select-btn" disabled={busy} onclick={(e) => { e.stopPropagation(); onAddDraft(); }}>
+      <button class="nx-select-btn" disabled={busy} onclick={() => { onAddDraft(); }}>
         加入草稿
       </button>
     {/if}
   </div>
-
-  <div class="nx-card-detail">
-    <div style="font-size:11px;color:var(--nx-faint);margin-top:6px;">
-      {course.capacity ? '容量' + course.capacity : ''}
-      {course.remaining !== undefined && course.remaining !== null ? ' · 余' + course.remaining : ''}
-    </div>
-  </div>
 </div>
-
