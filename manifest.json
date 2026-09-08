@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "NextTHUxk",
   "short_name": "NextTHUxk",
-  "version": "3.0.0",
+  "version": "3.2.0",
   "description": "下一代选课 - 双栏选课工作台：随时查询、草稿编排、中签概率与学分模拟。",
   "permissions": [
     "activeTab",

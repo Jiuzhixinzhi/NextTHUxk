@@ -12,10 +12,10 @@ export const SP = 'nextthuxk_';
 export const DATA_VER = 7;
 
 /** 发布版本（与 manifest.json 同步） */
-export const CUR_VER = '3.0.0';
+export const CUR_VER = '3.2.0';
 
 /** 构建标记：面板+启动日志可见，防旧构建疑案 */
-export const BUILD = '3000003';
+export const BUILD = '3020001';
 
 /** 存在严重缺陷的版本（顶部红色警示横幅） */
 export const DANGEROUS_VERS = ['1.0.1', '1.0.2', '1.0.3', '1.1.2', '1.2.0'];
