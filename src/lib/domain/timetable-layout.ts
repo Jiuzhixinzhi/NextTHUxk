@@ -12,6 +12,7 @@ export interface PreviewBlock {
   lane: number;
   lanes: number;
   label: string;
+  teacher: string;
   when: string;
   color: string;
   probLabel: string;
@@ -48,6 +49,7 @@ interface RawBlock {
   begin: number;
   end: number;
   label: string;
+  teacher: string;
   when: string;
   color: string;
   probLabel: string;
@@ -81,7 +83,8 @@ export function layoutPreview(
       day,
       begin,
       end,
-      label: lbl,
+      label: c.name,
+      teacher: teacher || '',
       when,
       color: meta.color,
       probLabel: meta.probLabel,
@@ -156,7 +159,7 @@ export function layoutPreview(
       lane: ln.lane,
       lanes: ln.lanes,
       color: bc,
-      title: [b.label, !b.manual && b.seq && b.seq !== '0' ? String(parseInt(b.seq, 10) || 0) : '', b.when || ''].filter(Boolean).join(' · '),
+      title: [b.label, b.teacher, !b.manual && b.seq && b.seq !== '0' ? '课序' + String(parseInt(b.seq, 10) || 0) : '', b.when || ''].filter(Boolean).join(' · '),
     };
   });
   return { A0, A1, H, blocks, undet, hasClock: raw.length > 0 };
