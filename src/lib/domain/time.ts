@@ -42,7 +42,49 @@ export const PV_AXIS_END = pvToMin(PV_END[14]!);
 
 const slotCache = new Map<string, Slot[]>();
 
-/** 时间串解析（缓存：全校时间串种类有限） */
+// ─── 周段同类项合并（同 day+大节 拆多周段，如 4-6(1-7周),4-6(8周) → 4-6(1-8周)）───
+/** 周串 → 周号集合；无法数值化（全周/单周/双周/杂文本）返回 null */
+function weekNumsOf(w: string): Set<number> | null {
+  const s = w.replace(/\s/g, '');
+  if (!s || s === '全周' || s === '单周' || s === '双周') return null;
+  const out = new Set<number>();
+  for (const part of s.split(/[,，、]/)) {
+    const m = /^(\d+)(?:-(\d+))?周?$/.exec(part);
+    if (!m) return null;
+    const a = parseInt(m[1]!);
+    const b = m[2] ? parseInt(m[2]!) : a;
+    if (a < 1 || b < a || b > 25) return null;
+    for (let i = a; i <= b; i++) out.add(i);
+  }
+  return out.size ? out : null;
+}
+
+/** 周号集合 → 连续段压缩标签（1-8周 / 1-7周,9周） */
+function weekLabelOf(nums: number[]): string {
+  const sorted = [...nums].sort((x, y) => x - y);
+  const runs: string[] = [];
+  let a = sorted[0]!;
+  let p = a;
+  for (let i = 1; i <= sorted.length; i++) {
+    const n = sorted[i];
+    if (n === undefined || n !== p + 1) {
+      runs.push(a === p ? a + '周' : a + '-' + p + '周');
+      a = n!;
+      p = n!;
+    } else p = n;
+  }
+  return runs.filter(Boolean).join(',');
+}
+
+/** 合并两个周段标签（同类项并集；数值化失败回落为文本拼接） */
+function mergeWeek(a: string, b: string): string {
+  const A = weekNumsOf(a);
+  const B = weekNumsOf(b);
+  if (A && B) return weekLabelOf([...A, ...B]);
+  return a === b ? a : a + ',' + b;
+}
+
+/** 时间串解析 + 同类项合并（缓存：全校时间串种类有限） */
 export function parseTimeSlots(timeStr: string | undefined | null): Slot[] {
   if (!timeStr) return [];
   const hit = slotCache.get(timeStr);
@@ -57,8 +99,16 @@ export function parseTimeSlots(timeStr: string | undefined | null): Slot[] {
       slots.push({ day: DAY_NAMES[dayNum - 1]!, slot: SLOT_NAMES[dajie - 1]!, week: (m[3] || '').trim() || '全周' });
     }
   }
-  slotCache.set(timeStr, slots);
-  return slots;
+  // 历史 Bug：拆周段（4-6(1-7周),4-6(8周)）生成重复区间 → 课程被误判「与自己冲突」
+  const merged = new Map<string, Slot>();
+  for (const s of slots) {
+    const k = s.day + '|' + s.slot;
+    const ex = merged.get(k);
+    merged.set(k, ex ? { ...ex, week: mergeWeek(ex.week, s.week) } : s);
+  }
+  const out = [...merged.values()];
+  slotCache.set(timeStr, out);
+  return out;
 }
 
 // ── 外校课（北大/北外）时间与来源（OneTHU Courses.tsx 移植）──

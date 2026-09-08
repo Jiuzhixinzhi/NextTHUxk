@@ -29,6 +29,26 @@ describe('parseTimeSlots', () => {
     expect(parseTimeSlots('')).toEqual([]);
     expect(parseTimeSlots('无固定时间')).toEqual([]);
   });
+
+  it('同类项合并：同日同大节拆周段并集（4-6(1-7周),4-6(8周) → 4-6(1-8周)）', () => {
+    const s = parseTimeSlots('4-6(1-7周),4-6(8周),2-4(5周)');
+    expect(s).toHaveLength(2);
+    expect(s[0]).toEqual({ day: '周四', slot: '11-12节', week: '1-8周' });
+    expect(s[1]).toEqual({ day: '周二', slot: '7-8节', week: '5周' });
+  });
+
+  it('非同周段不并集、非连续周段逗号分隔', () => {
+    const s = parseTimeSlots('1-2(1-8周),1-2(10-16周)');
+    expect(s).toHaveLength(1);
+    expect(s[0]!.week).toBe('1-8周,10-16周');
+    expect(parseTimeSlots('1-2(1-8周),3-4(1-16周)')).toHaveLength(2);
+  });
+
+  it('单双周无法数值化 → 文本拼接兜底且不重复', () => {
+    const s = parseTimeSlots('2-6(单周),2-6(双周)');
+    expect(s).toHaveLength(1);
+    expect(s[0]!.week).toBe('单周,双周');
+  });
 });
 
 describe('clockRangesOf（外校课钟点）', () => {
@@ -69,6 +89,15 @@ describe('冲突检测（区间重叠）', () => {
     const a = { code: '1', seq: '01', name: '甲', time: '1-2(1-16周)' };
     const b = { code: '2', seq: '01', name: '乙', time: '1-4(1-16周)' };
     expect(detectConflicts([a, b] as never, [])).toHaveLength(0);
+  });
+
+  it('拆周段非同课自冲突（4-6(1-7周),4-6(8周) 合并为 4-6(1-8周)）', () => {
+    const a = { code: '1', seq: '01', name: '甲', time: '4-6(1-7周),4-6(8周),2-4(5周)' };
+    expect(detectConflicts([a] as never, [])).toHaveLength(0);
+    const b = { code: '2', seq: '01', name: '乙', time: '2-4(1-16周)' };
+    const cs = detectConflicts([a, b] as never, []);
+    expect(cs).toHaveLength(1);
+    expect(cs[0]).toMatchObject({ day: '周二', slot: '7-8节' });
   });
 
   it('半大节跨界重叠（大节 vs 自由钟点）', () => {
@@ -228,7 +257,7 @@ describe('课表布局（多周段合并）', () => {
     const keys = lay.blocks.map((b) => b.key + '_' + b.begin + '_' + b.end);
     expect(new Set(keys).size).toBe(keys.length);
     expect(lay.blocks).toHaveLength(1);
-    expect(lay.blocks[0]!.when).toContain('1-9周');
+    expect(lay.blocks[0]!.when).toContain('1-16周');
   });
 });
 
