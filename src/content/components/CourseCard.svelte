@@ -7,6 +7,8 @@
   import { deptCodeFromCode, deptNameOf } from '../../lib/api/dept';
   import { session, doChangeVolunteer, doDropCourse, selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
   import { addCourseToActive } from '../../lib/stores/drafts.svelte.ts';
+  import { probHist } from '../../lib/stores/probhist.svelte.ts';
+  import { trendDelta } from '../../lib/domain/probhist';
   import { showToast } from '../../lib/stores/toast.svelte.ts';
   import { confirmDialog, openWindow } from '../../lib/stores/modal.svelte.ts';
   import { buildPreviewSlotIndex, conflictsWithPreview } from '../../lib/domain/conflict';
@@ -63,16 +65,16 @@
 
   const flagShort = (f: Flag): string => (f === 'bx' ? '必' : f === 'xx' ? '限' : f === 'rx' ? '任' : '体');
 
-  /** 级联中签率链：节点=类型×志愿，底色=各自概率；当前选法描边 */
+  /** 级联中签率链：节点=类型×志愿，底色=各自概率；当前选法描边；点击查看趋势 */
   const chain = $derived.by(() => {
     if (session.isQueuePhase) return [];
-    const out: { key: string; label: string; pct: string; muted: boolean; color: string; ratio: string; active: boolean; title: string }[] = [];
+    const out: { key: string; label: string; pct: string; muted: boolean; color: string; ratio: string; active: boolean; title: string; flag: Flag; zy: number }[] = [];
     for (const row of probGridData(course)) {
       for (const cell of row.cells) {
         const active = row.flag === curFlag && cell.zy === curZy;
         const muted = (cell.prob ?? -1) < 0;
         const ratio = cell.ratioLabel || '';
-        const title = `${flagName(row.flag)} ${cell.zy}志愿 · ${cell.percentLabel || cell.label}${ratio && ratio !== '无数据' ? ' · ' + ratio : ''}`;
+        const title = `${flagName(row.flag)} ${cell.zy}志愿 · ${cell.percentLabel || cell.label}${ratio && ratio !== '无数据' ? ' · ' + ratio : ''} · 点击看趋势`;
         out.push({
           key: row.flag + cell.zy,
           label: flagShort(row.flag) + cell.zy,
@@ -82,10 +84,18 @@
           ratio,
           active,
           title,
+          flag: row.flag,
+          zy: cell.zy,
         });
       }
     }
     return out;
+  });
+
+  /** 相对上一志愿窗口的涨跌（百分点；历史不足 2 点 → null 不显示） */
+  const cardDelta = $derived.by(() => {
+    if (session.isQueuePhase) return null;
+    return trendDelta(probHist.map[keyOf(course.code, course.seq)], curFlag, curZy);
   });
 
   /** 课余量容量状态（仅课余量阶段；预选走级联口径） */
@@ -249,11 +259,15 @@
   {#if !session.isQueuePhase && chain.length}
     <div class="nx-chain">
       {#each chain as node (node.key)}
-        <span
+        <button
+          type="button"
           class="nx-chain-node {node.active ? 'active' : ''} {node.muted ? 'muted' : ''}"
           style="{node.muted ? '' : 'background:' + node.color + ';color:#fff;'}"
           title="{node.title}"
-        >{node.pct}</span
+          onclick={() => {
+            openWindow({ kind: 'probTrend', code: course.code, seq: course.seq, flag: node.flag, zy: node.zy });
+          }}
+        >{node.pct}</button
         >
       {/each}
     </div>
@@ -295,6 +309,11 @@
       {/if}
       {#if !session.isQueuePhase}
         <span style="font-size:11px;font-weight:700;color:{meta.color};">{meta.prob >= 0 ? meta.percentLabel : meta.label}</span>
+        {#if cardDelta !== null}
+          <span class="nx-trend-delta {cardDelta > 0 ? 'up' : cardDelta < 0 ? 'down' : ''}" title="相对上一志愿检查点窗口">
+            {cardDelta > 0 ? '▲ +' + cardDelta + '%' : cardDelta < 0 ? '▼ ' + cardDelta + '%' : '– 0%'}
+          </span>
+        {/if}
       {/if}
       <button
         type="button"
@@ -346,6 +365,11 @@
       </select>
       {#if !session.isQueuePhase}
         <span style="font-size:11px;font-weight:700;color:{meta.color};">{meta.prob >= 0 ? meta.percentLabel : meta.label}</span>
+        {#if cardDelta !== null}
+          <span class="nx-trend-delta {cardDelta > 0 ? 'up' : cardDelta < 0 ? 'down' : ''}" title="相对上一志愿检查点窗口">
+            {cardDelta > 0 ? '▲ +' + cardDelta + '%' : cardDelta < 0 ? '▼ ' + cardDelta + '%' : '– 0%'}
+          </span>
+        {/if}
       {/if}
       <button class="nx-select-btn" disabled={busy} onclick={() => { onAddDraft(); }}>
         加入草稿

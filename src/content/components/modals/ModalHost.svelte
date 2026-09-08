@@ -5,8 +5,10 @@
   import { ensureIndex, tbMatch, tbFetchReviews, tbCourseUrl, tbWriteUrl, tbStars } from '../../../lib/reviews/reviews';
   import { creditSimItems, creditDist } from '../../../lib/domain/probability';
 import { flagName } from '../../../lib/domain/flags';
+  import { keyOf } from '../../../lib/core/utils';
   import { addManualEvent } from '../../../lib/stores/session.svelte.ts';
   import { showToast } from '../../../lib/stores/toast.svelte.ts';
+  import ProbTrendModal from '../ProbTrendModal.svelte';
   import type { CreditSimItem, DraftCourse, TbEntry } from '../../../lib/domain/types';
 
 const cur = $derived(modal.cur);
@@ -154,6 +156,8 @@ const cur = $derived(modal.cur);
             {session.allCourses.find((x) => x.code === cur.code)?.name || cur.code}（{cur.code}）
           {:else if cur.kind === 'reviews'}
             {session.allCourses.find((x) => x.code === cur.code)?.name || '课程'} · 社区点评
+          {:else if cur.kind === 'probTrend'}
+            {session.allCourses.find((x) => keyOf(x.code, x.seq) === keyOf(cur.code, cur.seq))?.name || cur.code} · 概率趋势
           {:else if cur.kind === 'creditSim'}
             {cur.title} · 学分中签模拟
           {:else if cur.kind === 'manualEvent'}
@@ -226,6 +230,8 @@ const cur = $derived(modal.cur);
               {/each}
             {/if}
           {/if}
+        {:else if cur.kind === 'probTrend'}
+          <ProbTrendModal code={cur.code} seq={cur.seq} flag={cur.flag} zy={cur.zy} />
         {:else if cur.kind === 'creditSim'}
           <div class="nx-sim-modes">
             <button class="nx-sim-mode" class:on={sim.mode === 'live'} onclick={() => (sim.mode = 'live')}>实时取值</button>

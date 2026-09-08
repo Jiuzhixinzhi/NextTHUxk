@@ -28,6 +28,7 @@ import { checkPlanCoverage } from '../domain/plancov';
 import { showXkResult } from './toast.svelte.ts';
 import { promptDialog, zyConfirm } from './modal.svelte.ts';
 import { vol, volCacheHydrate, volCachePersist, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
+import { probHistHydrate } from './probhist.svelte.ts';
 import { emitServerRowsMerged, emitLaunchDone } from './bus.svelte.ts';
 import { checkUpdate } from '../update/check';
 import { ensureIndex, tbAttach, setOnIndexChange } from '../reviews/reviews';
@@ -131,6 +132,7 @@ export async function launch(): Promise<void> {
     }
     session.planData = sd?.plan || [];
     volCacheHydrate(session.SEM);
+    probHistHydrate(session.SEM);
     console.log(TAG, 'on-demand mode: fetching selected + candidates + plan');
     const [selectedCourses, candCourses, planFresh, level, catAttrs] = await Promise.all([
       fetchSelectedCourses(ctx()).catch(e => {

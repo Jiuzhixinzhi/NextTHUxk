@@ -1,13 +1,14 @@
 // ═══════════════════════════════════════════════════════════════
 // NextTHUxk — 模态框调度（类型化弹窗状态机；ModalHost 统一渲染）
 // ═══════════════════════════════════════════════════════════════
-import type { Course, DraftCourse } from '../domain/types';
+import type { Course, DraftCourse, Flag } from '../domain/types';
 
 export type ModalState =
   | { kind: 'none' }
   | { kind: 'course'; code: string; teacherId: string }
   | { kind: 'reviews'; code: string; seq: string }
   | { kind: 'creditSim'; courses: DraftCourse[]; title: string }
+  | { kind: 'probTrend'; code: string; seq: string; flag: Flag; zy: number }
   | { kind: 'manualEvent' }
   | { kind: 'zyConfirm'; courses: Course[]; resolve: (values: number[]) => void }
   | { kind: 'dialog'; title: string; message: string; danger?: boolean; confirmText?: string; resolve: (ok: boolean) => void }

@@ -50,6 +50,7 @@ export const K = {
   zyCache: 'zyCache',
   knote: 'knote',
   volCache: 'volCache',
+  probHist: 'probHist',
   filtersOpen: 'filtersOpen',
   lastUpdateCheck: 'lastUpdateCheck',
   tbookIdx: 'tbookIdx',
