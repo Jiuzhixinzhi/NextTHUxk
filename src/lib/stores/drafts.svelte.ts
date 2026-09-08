@@ -9,10 +9,11 @@ import { normSeq } from '../core/utils';
 import { K, store } from '../storage/store';
 import {
   draftCourseFrom,
-  draftCourseFromSelected,
   draftDiff,
   draftKeyOf,
+  mergeSelectedIntoDraft,
   newDraft,
+  repairDraftCourse,
   repairDraftCourses,
 } from '../domain/draft';
 import { allowedFlags, baseFlag } from '../domain/flags';
@@ -98,6 +99,7 @@ export async function loadDrafts(): Promise<void> {
         c.baseFlag = ac ? baseFlag(ac) : 'rx';
         migrated = true;
       }
+      if (repairDraftCourse(c)) migrated = true;
     });
   });
   // 草稿 ID 全局唯一（备份导入/旧数据可能撞 id：each (d.id) 键控崩溃）
@@ -239,29 +241,26 @@ export async function renameDraft(id: number): Promise<void> {
   showToast(true, '已重命名为「' + d.name + '」');
 }
 
-/** 已选载入：当前已选整表并入活跃草稿（按课班去重） */
+/** 已选载入：当前已选整表并入活跃草稿（按课班去重；已在稿行回写真实志愿） */
 export function loadSelectedIntoActive(): AddResult {
   const selected = session.allCourses.filter(c => c.selected);
   if (!selected.length) return { ok: false, msg: '没有已选课程' };
   const d = ensureActiveDraft();
-  let added = 0,
-    skipped = 0;
-  const seen = new Set(d.courses.map(draftKeyOf));
+  const { added, skipped, synced } = mergeSelectedIntoDraft(d, selected);
   selected.forEach(row => {
-    const key = draftKeyOf(row);
-    if (seen.has(key)) {
-      skipped++;
-      return;
-    }
-    seen.add(key);
-    d.courses.push(draftCourseFromSelected(row));
     knoteRemember(row.code, row.seq, row.note || row.xkTextNote || '', row.time || '');
-    added++;
   });
-  if (!added) return { ok: false, msg: '所选课程均已在草稿「' + d.name + '」中' };
+  if (!added) {
+    if (synced) {
+      persistSoon();
+      refreshCoverage();
+      return { ok: true, msg: '所选课程均已在草稿「' + d.name + '」中（已同步 ' + synced + ' 门志愿等级）' };
+    }
+    return { ok: false, msg: '所选课程均已在草稿「' + d.name + '」中' };
+  }
   persistSoon();
   refreshCoverage();
-  return { ok: true, msg: '已载入 ' + added + ' 门已选课程到草稿「' + d.name + '」' + (skipped ? '（跳过已在稿 ' + skipped + ' 门）' : '') };
+  return { ok: true, msg: '已载入 ' + added + ' 门已选课程到草稿「' + d.name + '」' + (skipped ? '（跳过已在稿 ' + skipped + ' 门）' : '') + (synced ? ' · 同步 ' + synced + ' 门志愿' : '') };
 }
 
 /** JSON 导入（分享格式）：并入活跃草稿 */

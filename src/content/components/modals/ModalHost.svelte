@@ -259,6 +259,7 @@ const cur = $derived(modal.cur);
               {/each}
             </div>
             {#if simResult}
+              {@const excluded = sim.items.filter((it) => it.prob === null).length}
               <div class="nx-sim-stats">
                 <div class="nx-sim-stat">
                   <div class="nx-sim-stat-v">{simResult.dist.expected.toFixed(2)}</div>
@@ -274,15 +275,15 @@ const cur = $derived(modal.cur);
                 </div>
                 <div class="nx-sim-stat">
                   <div class="nx-sim-stat-v" style="font-size:11px;margin-top:6px;">
-                    {sim.items.length} 门{sim.items.filter((it) => it.prob === null).length ? '（<span style="color:#ee4d4d">' + sim.items.filter((it) => it.prob === null).length + ' 门未计入</span>）' : ''}
+                    {sim.items.length} 门{#if excluded}（<span style="color:#ee4d4d">{excluded} 门未计入</span>）{/if}
                   </div>
                   <div class="nx-sim-stat-k">参与统计</div>
                 </div>
               </div>
               <div class="nx-sim-histo">
                 {#each simResult.dist.points as pt}
-                  <div class="nx-sim-bar-col" title="{pt.credits} 学分 · {Math.round(pt.prob * 100) / 100}%">
-                    <div class="nx-sim-bar-val">{Math.round(pt.prob * 100) / 100}%</div>
+                  <div class="nx-sim-bar-col" title="{pt.credits} 学分 · {Math.round(pt.prob * 1000) / 10}%">
+                    <div class="nx-sim-bar-val">{Math.round(pt.prob * 1000) / 10}%</div>
                     <div class="nx-sim-bar" style="height:{Math.max(3, Math.round((pt.prob / simResult.maxP) * 92))}px;"></div>
                     <div class="nx-sim-bar-x">{pt.credits}</div>
                   </div>

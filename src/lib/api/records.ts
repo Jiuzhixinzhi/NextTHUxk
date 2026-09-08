@@ -25,7 +25,7 @@ export async function fetchSelectedCourses(ctx: Ctx): Promise<Course[]> {
     while ((zm = zyRe.exec(html)) !== null) {
       const [, code, seq, zy, typeCode, isSports] = zm;
       const typeLabel = isSports === '是' ? '体育' : ({ '006': '必修', '008': '限选', '007': '任选' } as Record<string, string>)[typeCode!] || '';
-      zyMap[code + '_' + seq] = { zy: parseInt(zy!), typeCode: typeCode!, typeLabel };
+      zyMap[code + '_' + normSeq(seq)] = { zy: parseInt(zy!), typeCode: typeCode!, typeLabel };
     }
     const rows = doc.querySelectorAll('tr.trr2');
     const selected: Course[] = [];
@@ -37,11 +37,13 @@ export async function fetchSelectedCourses(ctx: Ctx): Promise<Course[]> {
       if (!code) return;
       const tds = row.querySelectorAll('td');
       const cell = (i: number) => (tds[i]?.textContent || '').trim().replace(/\s+/g, ' ');
-      const zyInfo = (zyMap[code + '_' + seq] || {}) as { zy: number; typeCode: string; typeLabel: string };
+      const zyInfo = (zyMap[code + '_' + normSeq(seq)] || {}) as { zy: number; typeCode: string; typeLabel: string };
       const cell2 = cell(2) || '';
-      const zyFromCell = cell2.match(/第([一二三])志愿/);
+      // 列序变更史（2026-2027-1 起课号独立成列）致 cell(2) 不可靠 → 退回整行匹配「第X志愿」
+      const zyFromCell = cell2.match(/第([一二三])志愿/) || row.textContent!.match(/第([一二三])志愿/) || null;
+      const zyNumFromCell = zyFromCell ? ({ '一': 1, '二': 2, '三': 3 } as Record<string, number>)[zyFromCell[1]!] : 0;
       const sportsDetected = !cell(1) && !!zyFromCell;
-      const zyNum = zyInfo.zy || (zyFromCell ? ({ '一': 1, '二': 2, '三': 3 } as Record<string, number>)[zyFromCell[1]!] : 0);
+      const zyNum = zyInfo.zy || zyNumFromCell;
       const typeLabel = sportsDetected ? '体育' : cell(1) || zyInfo.typeLabel || '';
       // 2026-2027-1 起已选表列序变更：课号独立成列 → 自适应取第一个非纯数字候选格
       const nameCell = [cell(4), cell(3)].find(x => x !== '' && !/^\d+$/.test(x)) || '';
