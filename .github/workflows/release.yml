@@ -14,23 +14,43 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: 版本一致性守卫
+      - name: 安装依赖
+        uses: pnpm/action-setup@v4
+        with:
+          version: latest
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: 版本一致性守门
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           MANIFEST=$(jq -r .version manifest.json)
-          CURVER=$(grep -oP "NX\.CUR_VER = '\K[^']+" src/config.js)
+          CURVER=$(grep -oP "CUR_VER = '\K[^']+" src/lib/core/constants.ts)
           echo "tag=$TAG manifest=$MANIFEST cur=$CURVER"
           if [ "$TAG" != "$MANIFEST" ] || [ "$TAG" != "$CURVER" ]; then
-            echo "::error::版本不一致: tag=v$TAG manifest=$MANIFEST NX.CUR_VER=$CURVER"
+            echo "::error::版本不一致: tag=v$TAG manifest=$MANIFEST CUR_VER=$CURVER"
             exit 1
           fi
 
+      - name: 类型检查
+        run: pnpm check
+
+      - name: 单元测试
+        run: pnpm test
+
       - name: 打包 zip / xpi
         run: |
+          pnpm build
           VER="${GITHUB_REF_NAME#v}"
-          zip -r "nextthuxk-$VER.zip" . \
-            -x ".git/*" ".github/*" "docs/*" "*.md" "Preview.png"
+          cd dist
+          zip -r "nextthuxk-$VER.zip" . -x "*.map"
           cp "nextthuxk-$VER.zip" "nextthuxk-$VER.xpi"
+          cd ..
+          mv "dist/nextthuxk-$VER.zip" .
+          mv "dist/nextthuxk-$VER.xpi" .
 
       - name: 创建 Release
         env:

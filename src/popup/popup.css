@@ -1,0 +1,63 @@
+/* popup 专属样式：液态玻璃（Shadow 外独立小页，直接全局作用域） */
+@import "tailwindcss";
+
+@theme {
+  --color-accent: #2f6bff;
+  --font-sans: -apple-system, "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Source Han Sans SC", "Noto Sans SC", "Helvetica Neue", sans-serif;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  background: #eef1f6;
+  color: #1f2329;
+  letter-spacing: 0.01em;
+}
+
+.pop-root {
+  --nx-ink: #1f2329;
+  --nx-ink-soft: #5f6672;
+  --nx-faint: #9aa1ac;
+  --nx-line: rgba(28, 39, 64, 0.1);
+  --nx-accent: #2f6bff;
+  --nx-glass: rgba(255, 255, 255, 0.55);
+  --nx-glass-strong: rgba(255, 255, 255, 0.72);
+  --nx-glass-blur: saturate(180%) blur(24px);
+  --nx-glass-blur-strong: saturate(200%) blur(36px);
+  --nx-glass-edge: inset 0 1px 0 rgba(255, 255, 255, 0.85), inset 0 0 0 1px rgba(28, 39, 64, 0.06);
+  --nx-glass-shadow: 0 8px 32px rgba(28, 39, 64, 0.12);
+  --nx-lg-edge: inset 0 1.5px 1px -1px rgba(255, 255, 255, 0.95), inset 0 -1.5px 1px -1px rgba(130, 150, 180, 0.45), inset 1.5px 0 1px -1px rgba(255, 255, 255, 0.55), inset -1.5px 0 1px -1px rgba(255, 210, 170, 0.35), inset 0 0 0 1px rgba(255, 255, 255, 0.28);
+  --nx-lg-filter: saturate(180%) blur(8px);
+  width: 300px;
+}
+
+.othu-logo {
+  display: inline-grid;
+  grid-template-columns: auto auto auto auto auto;
+  line-height: 1;
+  text-align: center;
+}
+.othu-logo .lp {
+  font-family: "SF Mono", Menlo, Consolas, "Courier New", monospace;
+  font-weight: 400;
+  transform: scaleY(1.06);
+}
+.othu-logo .word {
+  grid-column: 2 / 5;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-family: Georgia, "Playfair Display", "Times New Roman", serif;
+  font-weight: 500;
+  font-size: 1.14em;
+  letter-spacing: -0.035em;
+  line-height: 1;
+}
+.othu-logo .word i {
+  font-style: normal;
+  display: block;
+}
+.othu-logo .tu {
+  font-family: Inter, "SF Pro Display", "Helvetica Neue", system-ui, -apple-system, sans-serif;
+  font-weight: 800;
+}
