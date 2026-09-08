@@ -7,6 +7,8 @@
   let suggestOpen = $state(false);
   let items = $state<Course[]>([]);
   let idx = $state(-1);
+  // 联想武装：仅用户真实键入激活；jumpTo/pick 等程序性改 q 不应弹出（课表点击定位场景）
+  let suggestArmed = $state(false);
   let blurT: ReturnType<typeof setTimeout>;
 
   function scoreCourse(c: Course, q: string): number {
@@ -29,7 +31,7 @@
 
   $effect(() => {
     const q = search.q.trim().toLowerCase();
-    if (!q) {
+    if (!q || !suggestArmed) {
       hide();
       return;
     }
@@ -50,6 +52,7 @@
     suggestOpen = false;
     items = [];
     idx = -1;
+    suggestArmed = false;
   }
 
   function pick(i: number) {
@@ -90,6 +93,7 @@
       value={search.q}
       oninput={(e) => {
         onInput((e.currentTarget as HTMLInputElement).value);
+        suggestArmed = true;
       }}
       onkeydown={onKeydown}
       onblur={() => {
@@ -102,6 +106,7 @@
         type="button"
         aria-label="清空搜索"
         onclick={() => {
+          hide();
           clearQuery();
         }}
         style="position:absolute;right:10px;background:none;border:none;color:var(--nx-faint);font-size:16px;cursor:pointer;line-height:1;"
