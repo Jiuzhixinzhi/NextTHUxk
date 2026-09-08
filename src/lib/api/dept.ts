@@ -46,3 +46,10 @@ export function deptCodeFromCode(code: string): string {
 export function deptOfCourse(c: Course): string {
   return deptCodeOf(c.department) || (isSportsCourse(c) ? '' : deptCodeFromCode(c.code));
 }
+
+/** 课号 → 院系名反查（department 字段缺位时用；白名单外返回空串） */
+export function deptNameOf(code: string): string {
+  const v = deptCodeFromCode(code);
+  if (!v) return '';
+  return Object.keys(DEPT_CODES).find(k => DEPT_CODES[k] === v) || '';
+}

@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseTimeSlots, clockRangesOf, pvToMin, spansOf } from '../src/lib/domain/time';
 import { detectConflicts } from '../src/lib/domain/conflict';
-import { calcProb, parseVolArr, probResult, creditDist, creditSimItems } from '../src/lib/domain/probability';
+import { calcProb, capacityStatus, cascadeOf, lockedOf, parseVolArr, probResult, creditDist, creditSimItems } from '../src/lib/domain/probability';
 import { draftDiff, draftCourseFrom, draftKeyOf, mergeSelectedIntoDraft, repairDraftCourse, sameAsDraft } from '../src/lib/domain/draft';
 import { gbkPercentEncode } from '../src/lib/net/gbk';
 import { normSeq, keyOf } from '../src/lib/core/utils';
@@ -144,6 +144,70 @@ describe('概率模型', () => {
     expect(probResult(0, 99).prob).toBe(0);
     expect(probResult(10, 20).prob).toBe(0.5);
     expect(probResult(Number.NaN, 1).prob).toBe(-1);
+  });
+});
+
+describe('capacityStatus（课余量：已选 · 余量 · 排队）', () => {
+  const c = (v: Record<string, unknown>) => v as never;
+
+  it('已选/余/排队 三段', () => {
+    const s = capacityStatus(c({ capacity: 40 }), { code: 'x', seq: '1', qCapacity: 40, qRemaining: 7, qQueue: 5 });
+    expect(s).toMatchObject({ cap: 40, used: 33, rem: 7, queue: 5 });
+    expect(s!.pct).toBeCloseTo(82.5);
+  });
+
+  it('已满 = 余 0，排队仍有', () => {
+    const s = capacityStatus(c({ capacity: 30 }), { code: 'x', seq: '1', qCapacity: 30, qRemaining: 0, qQueue: 12 });
+    expect(s).toMatchObject({ used: 30, rem: 0, queue: 12, pct: 100 });
+  });
+
+  it('无 qd 数据回退课程 remaining', () => {
+    const s = capacityStatus(c({ capacity: 20, remaining: 3 }), undefined);
+    expect(s).toMatchObject({ cap: 20, used: 17, rem: 3, queue: 0 });
+  });
+
+  it('无容量 → null', () => {
+    expect(capacityStatus(c({ capacity: 0 }), undefined)).toBeNull();
+  });
+});
+
+describe('cascadeOf / lockedOf（预选级联：池 · 上批锁定 · 优先 · 同志愿）', () => {
+  const c = (v: Record<string, unknown>) => v as never;
+
+  it('多批次：池=统计页容量，锁定=搜索页 容量-余量', () => {
+    // 容量 35、上批报 30、本批优先 1、同志愿 29 → 争 4，显示 29/4 · 已选31
+    const cs = cascadeOf(c({ volCapacity: 5, volApplied: 30, capacity: 35, remaining: 5, volRequired: '(1)1,29,0' }), 'bx', 2);
+    expect(cs).toMatchObject({ pool: 5, cap: 35, locked: 30, prior: 1, peers: 29, seats: 4, hasVol: true });
+    const p = calcProb(c({ volCapacity: 5, volApplied: 30, capacity: 35, remaining: 5, volRequired: '(1)1,29,0' }), 'bx', 2);
+    expect(p.prob).toBeCloseTo(4 / 29);
+    expect(p.ratioLabel).toBe('29/4');
+  });
+
+  it('首轮预选：余量=容量 → 锁定 0', () => {
+    const cs = cascadeOf(c({ volCapacity: 50, capacity: 50, remaining: 50, volRequired: '(1)15,20,25' }), 'bx', 3);
+    expect(cs).toMatchObject({ locked: 0, prior: 35, peers: 25, seats: 15 });
+  });
+
+  it('余量缺失 → locked null（不显示已选段）', () => {
+    const cs = cascadeOf(c({ volCapacity: 50, volRequired: '(1)15,20,25' }), 'bx', 1);
+    expect(cs).toMatchObject({ locked: null, prior: 0, peers: 15, seats: 50 });
+  });
+
+  it('统计页容量 0（已满课）→ 池无数据返回 null', () => {
+    expect(cascadeOf(c({ volCapacity: 0, capacity: 35, volRequired: '(1)1,1,1' }), 'bx', 1)).toBeNull();
+  });
+
+  it('本类型志愿串缺 → hasVol false，概率无数据', () => {
+    const cs = cascadeOf(c({ volCapacity: 50, volRequired: '(1)15,20,25' }), 'xx', 1);
+    expect(cs!.hasVol).toBe(false);
+    expect(calcProb(c({ volCapacity: 50, volRequired: '(1)15,20,25' }), 'xx', 1).prob).toBe(-1);
+  });
+
+  it('lockedOf：搜索页 容量-余量 口径', () => {
+    expect(lockedOf(c({ capacity: 35, remaining: 5 }))).toEqual({ locked: 30, rem: 5, cap: 35 });
+    expect(lockedOf(c({ capacity: 35, remaining: 99 }))).toBeNull();
+    expect(lockedOf(c({ capacity: 0, remaining: 5 }))).toBeNull();
+    expect(lockedOf(c({ capacity: 35 }))).toBeNull();
   });
 });
 

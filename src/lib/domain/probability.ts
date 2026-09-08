@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
 // NextTHUxk — 中签概率模型 + 学分中签模拟（纯函数）
 // ═══════════════════════════════════════════════════════════════
-import type { Course, CreditSimItem, Flag, ProbResult } from './types';
+import type { Course, CreditSimItem, Flag, ProbResult, QueueDatum } from './types';
 import { allowedFlags, baseFlag, flagName, isSportsCourse } from './flags';
 import { normSeq } from '../core/utils';
 
@@ -30,6 +30,95 @@ export function occupancyOf(c: Course, isQueuePhase: boolean): { applied: number
     return { applied: Math.max(0, cap - Number(rem)), cap };
   }
   return { applied: Number(c.volApplied) || 0, cap: Number(c.volCapacity) || cap || 0 };
+}
+
+/** 课余量容量状态（已选 · 余量 · 排队）：统一口径，外显三数，「容量」只留提示用 */
+export interface CapacityStatus {
+  cap: number; // 容量（占比/提示用）
+  used: number; // 已选 = 容量 - 余量
+  rem: number | null; // 余量（未知 null）
+  queue: number; // 候补排队人数
+  pct: number; // 填充百分比 0-100（used/cap）
+}
+
+export function capacityStatus(c: Course, q: QueueDatum | undefined): CapacityStatus | null {
+  const cap = (q && q.qCapacity) || Number(c.capacity) || 0;
+  if (!cap) return null;
+  const rem = q ? q.qRemaining : c.remaining != null ? Number(c.remaining) : null;
+  const queue = q ? q.qQueue : 0;
+  const used = rem != null && Number(rem) >= 0 ? Math.min(Math.max(0, cap - Number(rem)), cap) : Math.max(0, Number(c.volApplied) || 0);
+  return { cap, used, rem: rem != null ? Math.max(0, Number(rem)) : null, queue, pct: Math.min((used / cap) * 100, 100) };
+}
+
+/** 上批已选（锁定）：搜索页 容量-余量；数据不齐/越界（如队列期余位被覆盖）返回 null */
+export function lockedOf(c: Course): { locked: number; rem: number; cap: number } | null {
+  const cap = Number(parseInt(String(c.capacity ?? 0), 10)) || 0;
+  const rem = c.remaining;
+  if (!cap || rem == null || Number(rem) < 0 || Number(rem) > cap) return null;
+  return { locked: cap - Number(rem), rem: Number(rem), cap };
+}
+
+/** 预选级联拆解：池=统计页容量（本批可分配，兜底搜索页容量）；已选=上批锁定+本批优先 */
+export interface CascadeStatus {
+  pool: number; // 本批级联池
+  cap: number; // 总容量（搜索页，仅显示/分母用）
+  locked: number | null; // 上批已选（搜索页 容量-余量；缺数据 null）
+  prior: number; // 优先于我的本批报名
+  peers: number; // 同志愿报名
+  seats: number; // 可争位 = pool - prior
+  hasVol: boolean; // 本类型志愿串齐备（false → 组件回退搜索页裸数据）
+}
+
+export function cascadeOf(course: Course, flag: Flag, zy: number): CascadeStatus | null {
+  const pool = Number(parseInt(String(course.volCapacity ?? course.capacity ?? 0), 10)) || 0;
+  if (!pool) return null;
+  const lo = lockedOf(course);
+  const zyIdx = zy - 1;
+  let prior = 0;
+  let peers = 0;
+  let hasVol = false;
+  if (flag === 'ty') {
+    const vols = parseVolArr(course.volSports);
+    if (vols) {
+      hasVol = true;
+      for (let i = 0; i < zyIdx; i++) prior += vols[i]!;
+      peers = vols[zyIdx]!;
+    }
+  } else {
+    const bxV = parseVolArr(course.volRequired);
+    const xxV = parseVolArr(course.volElective);
+    const rxV = parseVolArr(course.volOptional);
+    const sumAll = (v: (number[] & { priority?: number }) | null) => (v ? v[0]! + v[1]! + v[2]! + (v.priority || 0) : 0);
+    if (bxV) {
+      if (flag === 'bx') {
+        hasVol = true;
+        for (let i = 0; i < zyIdx; i++) prior += bxV[i]!;
+        peers = bxV[zyIdx]!;
+      } else {
+        prior += sumAll(bxV);
+      }
+    }
+    if (!hasVol && xxV) {
+      if (flag === 'xx') {
+        hasVol = true;
+        for (let i = 0; i < zyIdx; i++) prior += xxV[i]!;
+        peers = xxV[zyIdx]!;
+      } else {
+        prior += sumAll(xxV);
+      }
+    }
+    if (!hasVol && rxV) {
+      prior += rxV.priority || 0;
+      if (flag === 'rx') {
+        hasVol = true;
+        for (let i = 0; i < zyIdx; i++) prior += rxV[i]!;
+        peers = rxV[zyIdx]!;
+      } else {
+        prior += sumAll(rxV);
+      }
+    }
+  }
+  return { pool, cap: (lo && lo.cap) || 0, locked: lo ? lo.locked : null, prior, peers, seats: Math.max(0, pool - prior), hasVol };
 }
 
 export interface VolColor {
@@ -87,47 +176,11 @@ export function probResult(rem: number, applicants: number): ProbResult {
   return { prob, label: percentLabel, percentLabel, ratioLabel, color };
 }
 
-/** 「课班 × 课程类型 × 志愿」中签率（志愿级联） */
+/** 「课班 × 课程类型 × 志愿」中签率（志愿级联；拆解口径见 cascadeOf，行为同旧版） */
 export function calcProb(course: Course, flag: Flag, zy: number): ProbResult {
-  const cap = Number(parseInt(String(course.volCapacity ?? course.capacity ?? 0), 10)) || 0;
-  if (!cap) return { prob: -1, label: '无数据', color: '#9aa1ac' };
-  const zyIdx = zy - 1;
-  if (flag === 'ty') {
-    const vols = parseVolArr(course.volSports);
-    if (!vols) return { prob: -1, label: '无数据', color: '#9aa1ac' };
-    let rem = cap;
-    for (let i = 0; i < zyIdx; i++) rem -= vols[i]!;
-    return probResult(rem, vols[zyIdx]!);
-  }
-  const bxV = parseVolArr(course.volRequired);
-  const xxV = parseVolArr(course.volElective);
-  const rxV = parseVolArr(course.volOptional);
-  let rem = cap;
-  if (bxV) {
-    if (flag === 'bx') {
-      for (let i = 0; i < zyIdx; i++) rem -= bxV[i]!;
-      return probResult(rem, bxV[zyIdx]!);
-    }
-    for (let i = 0; i < 3; i++) rem -= bxV[i]!;
-  }
-  if (xxV) {
-    if (flag === 'xx') {
-      for (let i = 0; i < zyIdx; i++) rem -= xxV[i]!;
-      return probResult(rem, xxV[zyIdx]!);
-    }
-    for (let i = 0; i < 3; i++) rem -= xxV[i]!;
-  }
-  if (rxV) {
-    const pri = rxV.priority || 0;
-    if (flag === 'rx') {
-      rem -= pri;
-      for (let i = 0; i < zyIdx; i++) rem -= rxV[i]!;
-      return probResult(rem, rxV[zyIdx]!);
-    }
-    rem -= pri;
-    for (let i = 0; i < 3; i++) rem -= rxV[i]!;
-  }
-  return { prob: -1, label: '无数据', color: '#9aa1ac' };
+  const cs = cascadeOf(course, flag, zy);
+  if (!cs || !cs.hasVol) return { prob: -1, label: '无数据', color: '#9aa1ac' };
+  return probResult(cs.seats, cs.peers);
 }
 
 export const probBg = (color: string): string => {
