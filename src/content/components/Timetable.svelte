@@ -100,7 +100,7 @@
 </script>
 
 <div class="nx-sec">
-  <div class="nx-sec-title">
+  <div class="nx-sec-title flex items-center">
     <div class="flex items-center gap-2" style="flex:1;min-width:0;">
       <span style="white-space:nowrap;">课表预览</span>
       <span style="font-size:11px;color:var(--nx-ink-soft);font-weight:400;">{previewLabel}</span>
@@ -153,7 +153,10 @@
                   {#if b.origin}
                     <span class="nx-tta-origin" style="background:{originColorOf(b)};">{b.origin}</span>
                   {/if}
-                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{b.label}</span>
+                  <span class="nx-tta-name">{b.label}</span>
+                  {#if b.teacher || (!b.manual && b.seq && b.seq !== '0')}
+                    <span class="nx-tta-sub">{b.teacher}{b.teacher && b.seq && b.seq !== '0' ? ' · ' : ''}{!b.manual && b.seq && b.seq !== '0' ? '课序' + String(parseInt(b.seq, 10) || 0) : ''}</span>
+                  {/if}
                   {#if b.probLabel}
                     <span class="nx-tt-prob" style="background:{b.bg};color:{b.color};">{b.probLabel}</span>
                   {/if}

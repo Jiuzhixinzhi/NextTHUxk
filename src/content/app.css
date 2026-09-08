@@ -794,6 +794,19 @@
   padding: 0 3px;
   font-weight: 700;
 }
+.nx-tta-name {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nx-tta-sub {
+  font-size: 8.5px;
+  color: var(--nx-ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .nx-tta-tag {
   font-size: 8px;
   opacity: 0.75;
