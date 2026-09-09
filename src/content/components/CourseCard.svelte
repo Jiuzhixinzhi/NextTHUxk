@@ -311,7 +311,7 @@
             {codeParts.body}
           {/if}
           {#if codeParts.creditLast}
-            <span class="nx-code-last" title={Number(course.credits) > 0 ? `{course.credits}学分` : undefined}>{codeParts.last}</span>
+            <span class="nx-code-last" title={Number(course.credits) > 0 ? '课号末位即学分：' + course.credits + ' 学分' : undefined}>{codeParts.last}</span>
           {:else}
             {codeParts.last}
             {#if Number(course.credits) > 0}

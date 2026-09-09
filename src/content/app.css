@@ -1176,8 +1176,20 @@
 .nx-tta-b:hover .nx-tta-x {
   display: block;
 }
-.nx-tt-manual {
-  border-left: 3px solid #8b5cf6 !important;
+/* 自定义占用：半透明斜纹底（紫色签名）；与课程重叠时升级为全宽覆盖层——
+   不拦截课程块点击/✕（容器 pointer-events 穿透），✕ 常驻右下角避免与课程 ✕（右上）相撞 */
+.nx-tta-b.manual {
+  background: repeating-linear-gradient(45deg, rgba(139, 92, 246, 0.22) 0 5px, rgba(139, 92, 246, 0.08) 5px 10px);
+}
+.nx-tta-b.manual.overlay {
+  z-index: 2;
+  pointer-events: none;
+}
+.nx-tta-b.manual.overlay .nx-tta-x {
+  display: block;
+  top: auto;
+  bottom: 2px;
+  pointer-events: auto;
 }
 .nx-tt-jump {
   border-left: 3px solid transparent;

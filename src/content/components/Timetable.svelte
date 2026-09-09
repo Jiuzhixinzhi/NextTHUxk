@@ -170,29 +170,33 @@
           <div class="nx-tta-day-h">{dn}</div>
           <div class="nx-tta-day-b" style="height:{layout.H}px;">
             {#each layout.blocks.filter((b) => b.day === di + 1) as b (b.key + '_' + b.begin + '_' + b.end)}
+              {@const isOverlay = b.manual && b.overlap === true}
               <div
                 class:manual={b.manual}
+                class:overlay={isOverlay}
                 class="nx-tta-b"
-                style="top:{Math.round((b.begin - layout.A0) * 0.72)}px;height:{Math.max(14, Math.round((b.end - b.begin) * 0.72) - 2)}px;left:calc({b.lane * 100 / b.lanes}% + 1px);width:calc({100 / b.lanes}% - 2px);background:{b.bg || b.color + '22'};border-left:3px solid {b.color};"
-                title={b.title}
+                style="top:{Math.round((b.begin - layout.A0) * 0.72)}px;height:{Math.max(14, Math.round((b.end - b.begin) * 0.72) - 2)}px;left:calc({b.lane * 100 / b.lanes}% + 1px);width:calc({100 / b.lanes}% - 2px);{b.manual ? '' : 'background:' + (b.bg || b.color + '22') + ';'}border-left:3px solid {b.color};"
+                title={isOverlay ? undefined : b.title}
                 onclick={() => onBlockClick(b)}
               >
-                <div class="nx-tta-l">
-                  {#if b.origin}
-                    <span class="nx-tta-origin" style="background:{originColorOf(b)};">{b.origin}</span>
-                  {/if}
-                  <span class="nx-tta-name">{b.label}</span>
-                  {#if b.teacher || (!b.manual && b.seq && b.seq !== '0')}
-                    <span class="nx-tta-sub">{b.teacher}{b.teacher && b.seq && b.seq !== '0' ? ' · ' : ''}{!b.manual && b.seq && b.seq !== '0' ? '课序' + String(parseInt(b.seq, 10) || 0) : ''}</span>
-                  {/if}
-                  {#if b.probLabel}
-                    <span class="nx-tt-prob" style="background:{b.bg};color:{b.color};">{b.probLabel}</span>
-                  {/if}
-                  <span class="nx-tta-tag">{hm(b.begin)}-{hm(b.end)}</span>
-                </div>
+                {#if !isOverlay}
+                  <div class="nx-tta-l">
+                    {#if b.origin}
+                      <span class="nx-tta-origin" style="background:{originColorOf(b)};">{b.origin}</span>
+                    {/if}
+                    <span class="nx-tta-name">{b.label}</span>
+                    {#if b.teacher || (!b.manual && b.seq && b.seq !== '0')}
+                      <span class="nx-tta-sub">{b.teacher}{b.teacher && b.seq && b.seq !== '0' ? ' · ' : ''}{!b.manual && b.seq && b.seq !== '0' ? '课序' + String(parseInt(b.seq, 10) || 0) : ''}</span>
+                    {/if}
+                    {#if b.probLabel}
+                      <span class="nx-tt-prob" style="background:{b.bg};color:{b.color};">{b.probLabel}</span>
+                    {/if}
+                    <span class="nx-tta-tag">{hm(b.begin)}-{hm(b.end)}</span>
+                  </div>
+                {/if}
                 <span
                   class="nx-tta-x"
-                  title="移除"
+                  title={isOverlay ? b.title + ' · 删除此占用' : '移除'}
                   onclick={(e) => {
                     e.stopPropagation();
                     void onBlockRemove(b);
