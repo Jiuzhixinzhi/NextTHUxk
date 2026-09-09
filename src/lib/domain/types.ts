@@ -46,6 +46,7 @@ export interface Course {
   queueTotal?: number;
   fromLevelTable?: boolean;
   _tbRef?: TbEntry | null;
+  _scoreRef?: ScoreEntry | null; // 教务评教均分（校评，7 分制，行按 kch 唯一）
 }
 
 /** THU选课社区索引条目 */
@@ -58,6 +59,12 @@ export interface TbEntry {
   count: number;
   avg: number;
   nt?: string[];
+}
+
+/** 教务评教分数条目（校评，满分 7：avg=Σ(i×fsi)/Σfsi · count=Σfsi） */
+export interface ScoreEntry {
+  avg: number;
+  count: number;
 }
 
 /** 草稿课程条目（快照字段，与 Course 子集同构） */

@@ -584,6 +584,39 @@
   color: var(--nx-red);
 }
 
+/* 教务评教（校评）徽章：7 分制档位，与社区点评徽章并列居右 */
+.nx-score-badge {
+  border: none;
+  border-radius: 999px;
+  padding: 1px 8px;
+  font-size: 10.5px;
+  font-weight: 700;
+  font-family: inherit;
+  white-space: nowrap;
+}
+.nx-score-badge i {
+  font-style: normal;
+  font-weight: 400;
+  margin-left: 3px;
+  opacity: 0.8;
+}
+.nx-score-badge.lv-hi {
+  background: rgba(7, 193, 96, 0.14);
+  color: #07994f;
+}
+.nx-score-badge.lv-good {
+  background: rgba(47, 107, 255, 0.12);
+  color: var(--nx-accent);
+}
+.nx-score-badge.lv-mid {
+  background: rgba(255, 159, 26, 0.14);
+  color: #b97500;
+}
+.nx-score-badge.lv-bad {
+  background: rgba(238, 77, 77, 0.12);
+  color: var(--nx-red);
+}
+
 /* Toast */
 .nx-toast {
   position: fixed;
@@ -1036,6 +1069,22 @@
   color: #b97500;
 }
 .nx-sg-star.lv-bad {
+  color: var(--nx-red);
+}
+.nx-sg-score {
+  font-size: 10.5px;
+  font-weight: 700;
+}
+.nx-sg-score.lv-hi {
+  color: #07994f;
+}
+.nx-sg-score.lv-good {
+  color: var(--nx-accent);
+}
+.nx-sg-score.lv-mid {
+  color: #b97500;
+}
+.nx-sg-score.lv-bad {
   color: var(--nx-red);
 }
 .nx-sg-cnt {

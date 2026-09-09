@@ -2,6 +2,7 @@
   import { search, onInput, onEnter, clearQuery, hasText } from '../../lib/stores/search.svelte.ts';
   import { session } from '../../lib/stores/session.svelte.ts';
   import { lc } from '../../lib/core/utils';
+  import { scoreLv } from '../../lib/domain/scores';
   import type { Course } from '../../lib/domain/types';
 
   let suggestOpen = $state(false);
@@ -25,6 +26,8 @@
     if (sc < 0) return sc;
     const tb = c._tbRef;
     if (tb && tb.count) sc += Math.min((tb.avg * 2 * Math.min(tb.count, 20)) / 20, 5);
+    const sr = c._scoreRef;
+    if (sr) sc += Math.min(((sr.avg - 5) * 1.5 * Math.min(sr.count, 20)) / 20, 3);
     if (c.available) sc += 2;
     return sc;
   }
@@ -129,13 +132,17 @@
         >
           <span class="nx-sg-name">{h.before}<b>{h.hit}</b>{h.after}</span>
           <span class="nx-sg-meta">{c.teacher || ''}{c.teacher && c.department ? ' · ' : ''}{c.department || ''}</span>
+          {#if c._scoreRef}
+            <span class="nx-sg-score {scoreLv(c._scoreRef.avg)}">校评 {c._scoreRef.avg.toFixed(1)}</span>
+            <span class="nx-sg-cnt">{c._scoreRef.count}人</span>
+          {/if}
           {#if c._tbRef && c._tbRef.count}
             <span
               class="nx-sg-star {c._tbRef.avg >= 4.5 ? 'lv-hi' : c._tbRef.avg >= 4 ? 'lv-good' : c._tbRef.avg >= 3 ? 'lv-mid' : 'lv-bad'}"
             >★{Number(c._tbRef.avg).toFixed(1)}</span
             >
             <span class="nx-sg-cnt">{c._tbRef.count}评</span>
-          {:else}
+          {:else if !c._scoreRef}
             <span class="nx-sg-norev">无点评</span>
           {/if}
         </div>

@@ -5,6 +5,7 @@
   import { capacityStatus, cascadeOf, currentProbMeta, lockedOf, probGridData, volColor } from '../../lib/domain/probability';
   import { ORIGIN_COLORS, originOf, parseTimeSlots } from '../../lib/domain/time';
   import { deptCodeFromCode, deptNameOf } from '../../lib/api/dept';
+  import { scoreLv } from '../../lib/domain/scores';
   import { session, doChangeVolunteer, doDropCourse, doSubmitCourse, selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
   import { addCourseToActive } from '../../lib/stores/drafts.svelte.ts';
   import { probHist } from '../../lib/stores/probhist.svelte.ts';
@@ -30,6 +31,7 @@
 
   const origins = $derived(originOf(course.code));
   const vc = $derived(volColor(course, session.isQueuePhase));
+  const scoreRef = $derived(course._scoreRef);
 
   const qKey = $derived(course.code + '_' + normSeq(course.seq));
   const qd = $derived(session.queueDataMap[qKey]);
@@ -225,11 +227,18 @@
         {/if}
       </span>
     {/if}
+    {#if scoreRef}
+      <span
+        class="nx-score-badge {scoreLv(scoreRef.avg)}"
+        style="margin-left:auto;"
+        title="教务系统评教均分（7 分制，按授课教师匹配）· {scoreRef.count}人参评 · 数据截至上一学期"
+      >校评 {scoreRef.avg.toFixed(1)}<i>{scoreRef.count}人</i></span>
+    {/if}
     {#if course._tbRef && course._tbRef.count}
       <button
         type="button"
         class="nx-tb-badge {course._tbRef.avg >= 4.5 ? 'lv-hi' : course._tbRef.avg >= 4 ? 'lv-good' : course._tbRef.avg >= 3 ? 'lv-mid' : 'lv-bad'}"
-        style="margin-left:auto;"
+        style="margin-left:{scoreRef ? '6px' : 'auto'};"
         title="THU选课社区评分 · 点击查看全部点评"
         onclick={() => {
           openWindow({ kind: 'reviews', code: course.code, seq: course.seq });
