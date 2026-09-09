@@ -12,6 +12,7 @@
   import { trendDelta } from '../../lib/domain/probhist';
   import { showToast, showXkResult } from '../../lib/stores/toast.svelte.ts';
   import { confirmDialog, openWindow } from '../../lib/stores/modal.svelte.ts';
+  import { cardExpanded, toggleCard } from '../../lib/stores/uicards.svelte.ts';
   import { buildPreviewSlotIndex, conflictsWithPreview } from '../../lib/domain/conflict';
   import { keyOf, normSeq } from '../../lib/core/utils';
 
@@ -20,6 +21,7 @@
   let busy = $state(false);
   let selFlag = $state<string>(baseFlag(course));
   let selZy = $state<number>(3);
+  let chainFull = $state(false);
 
   $effect(() => {
     // 等值守卫：仅在真正变化时写，消除「写→失效→重跑」振荡面
@@ -68,9 +70,21 @@
   const flagShort = (f: Flag): string => (f === 'bx' ? '必' : f === 'xx' ? '限' : f === 'rx' ? '任' : '体');
 
   /** 级联中签率链：节点=类型×志愿，底色=各自概率；当前选法描边；点击查看趋势 */
+  interface ChainNode {
+    key: string;
+    label: string;
+    pct: string;
+    muted: boolean;
+    color: string;
+    ratio: string;
+    active: boolean;
+    title: string;
+    flag: Flag;
+    zy: number;
+  }
   const chain = $derived.by(() => {
-    if (session.isQueuePhase) return [];
-    const out: { key: string; label: string; pct: string; muted: boolean; color: string; ratio: string; active: boolean; title: string; flag: Flag; zy: number }[] = [];
+    if (session.isQueuePhase) return [] as ChainNode[];
+    const out: ChainNode[] = [];
     for (const row of probGridData(course)) {
       for (const cell of row.cells) {
         const active = row.flag === curFlag && cell.zy === curZy;
@@ -158,6 +172,71 @@
     return { used, label: '报名' };
   });
 
+  // ─── 渐进式披露：手动覆盖优先，自动规则兜底
+  // （已选/候补/开课线风险默认展开；冲突一律折叠、红标明示课节+课名，压过 available；
+  //   available 两阶段统一：课余量按 qRemaining>0 回写，预选为搜索页未满标志） ───
+  const cardKey = $derived(keyOf(course.code, course.seq));
+  const autoOpen = $derived.by(() => {
+    if (course.selected || course.isCandidate || openRisk != null) return true;
+    if (conflicts.length > 0) return false;
+    return !!course.available;
+  });
+  const exp = $derived(cardExpanded(cardKey, autoOpen));
+
+  /** 切换展开；收起时重置链行展开态，再展开不残留 */
+  function toggleExp(): void {
+    toggleCard(cardKey, autoOpen);
+    if (!cardExpanded(cardKey, autoOpen)) chainFull = false;
+  }
+
+  /** 整卡点击切换展开；按钮/下拉/链接等交互元素不触发 */
+  function onCardClick(ev: MouseEvent): void {
+    if ((ev.target as HTMLElement).closest('button, select, a, input, option')) return;
+    toggleExp();
+  }
+
+  /** 教师·课序·时间合并小字（折叠行与展开态标签行共用；title 保留原始时间串） */
+  const subText = $derived.by(() => {
+    const parts: string[] = [];
+    if (course.teacher) parts.push(course.teacher);
+    if (course.seq) parts.push(course.seq + '课序');
+    if (timeSlots.length) {
+      parts.push(timeSlots.map((s) => s.day + '·' + s.slot + (s.week !== '全周' ? '(' + s.week + ')' : '')).join(' / '));
+    } else if (course.time) {
+      parts.push(course.time);
+    }
+    return parts.join(' · ');
+  });
+
+  /** 折叠行关键数字：已选显志愿档；课余量「候补x/y · 余Y · 排队Z」；预选当前选法概率% */
+  const miniNum = $derived.by(() => {
+    if (course.selected) {
+      if (selZyDisp > 0) return { text: '第' + selZyDisp + '志愿', color: '#07a150', title: course.typeLabel || '' };
+      return course.typeLabel ? { text: course.typeLabel, color: '#07a150', title: '' } : null;
+    }
+    if (session.isQueuePhase) {
+      if (!cs) return null;
+      const rem = cs.rem != null ? '余' + cs.rem : '';
+      const q = cs.queue > 0 ? ' · 排队' + cs.queue : '';
+      const prefix = cand ? `候补${cand.myPos ?? '?'}/${cand.queueTotal ?? '?'} · ` : '';
+      return { text: prefix + rem + q, color: vc.color, title: `已选${cs.used} · 余${cs.rem ?? '—'} · 排队${cs.queue} · 容量${cs.cap}` };
+    }
+    const ratio = meta.ratioLabel && meta.ratioLabel !== '无数据' ? ' · ' + meta.ratioLabel : '';
+    return { text: meta.prob >= 0 ? meta.percentLabel : meta.label, color: meta.color, title: `${meta.flagLabel} ${meta.zy}志愿${ratio}` };
+  });
+
+  /** 折叠行冲突明示：首条课节+课名必须可见（不止悬浮），title 带完整清单 */
+  const conflictMini = $derived.by(() => {
+    if (!conflicts.length) return null;
+    const first = conflicts[0]!;
+    return {
+      label: `冲突 ${first.day}${first.slot} ${first.name}` + (conflicts.length > 1 ? ` +${conflicts.length - 1}` : ''),
+      title: '时间冲突：' + conflicts.map((cf) => `${cf.day}${cf.slot} 与「${cf.name}」`).join('；'),
+    };
+  });
+
+  /** 级联链完整渲染由操作行概率按钮（.nx-prob-btn）切换 chainFull 驱动 */
+
   function onAddDraft() {
     const res = addCourseToActive(course, selFlag as Flag, selZy);
     showToast(res.ok, res.msg);
@@ -207,204 +286,250 @@
   }
 </script>
 
-<div class:selected={course.selected} class="nx-card">
-  <div class="flex items-center gap-2">
-    <span class="nx-card-name">{course.name}</span>
-    {#if course.code}
-      <span class="nx-code" title="{codeTitle}">
-        {#if codeParts.dept}
-          <span class="nx-code-head">{codeParts.head}</span><span class="nx-code-dept">{codeParts.dept}</span>{codeParts.body}
-        {:else}
-          {codeParts.body}
-        {/if}
-        {#if codeParts.creditLast}
-          <span class="nx-code-last" title={Number(course.credits) > 0 ? `{course.credits}学分` : undefined}>{codeParts.last}</span>
-        {:else}
-          {codeParts.last}
-          {#if Number(course.credits) > 0}
-            <span class="nx-code-sep"></span><span class="nx-code-credit" title="{course.credits}学分">{course.credits}学分</span>
-          {/if}
-        {/if}
-      </span>
-    {/if}
-    {#if scoreRef}
-      <span
-        class="nx-score-badge {scoreLv(scoreRef.avg)}"
-        style="margin-left:auto;"
-        title="教务系统评教均分（7 分制，按授课教师匹配）· {scoreRef.count}人参评 · 数据截至上一学期"
-      >校评 {scoreRef.avg.toFixed(1)}<i>{scoreRef.count}人</i></span>
-    {/if}
-    {#if course._tbRef && course._tbRef.count}
-      <button
-        type="button"
-        class="nx-tb-badge {course._tbRef.avg >= 4.5 ? 'lv-hi' : course._tbRef.avg >= 4 ? 'lv-good' : course._tbRef.avg >= 3 ? 'lv-mid' : 'lv-bad'}"
-        style="margin-left:{scoreRef ? '6px' : 'auto'};"
-        title="THU选课社区评分 · 点击查看全部点评"
-        onclick={() => {
-          openWindow({ kind: 'reviews', code: course.code, seq: course.seq });
-        }}
-      >★{Number(course._tbRef.avg).toFixed(1)}<i>{course._tbRef.count}评</i></button
-      >
-    {/if}
-  </div>
+<div class:selected={course.selected} class="nx-card" class:mini={!exp} onclick={onCardClick}>
+  {#snippet chainNode(node: ChainNode)}
 
-  <div class="flex flex-wrap gap-1">
-    {#if origins}
-      <span class="nx-tag" style="color:#fff;background:{ORIGIN_COLORS[origins] || '#666'};border:none;">{origins}</span>
-    {/if}
-    {#if course.available}
-      <span class="nx-tag nx-tag-ok">可选</span>
-    {:else}
-      <span class="nx-tag nx-tag-no">已满</span>
-    {/if}
-    {#if course.selected}
-      <span class="nx-tag nx-tag-sel">已选</span>
-    {/if}
-    {#if course.teacher || course.seq}
-      <span class="nx-tag">{[course.teacher || '', course.seq ? course.seq + '课序' : ''].filter(Boolean).join(' · ')}</span>
-    {/if}
-    {#if timeSlots.length}
-      {#each timeSlots as s (s.day + s.slot + s.week)}
-        <span class="nx-tag" title="{course.time}">{s.day}·{s.slot}{s.week !== '全周' ? ' (' + s.week + ')' : ''}</span>
-      {/each}
-    {:else if course.time}
-      <span class="nx-tag" title="{course.time}">{course.time}</span>
-    {/if}
-  </div>
-
-  {#if capText}
-    <div class="nx-cap-wrap">
-      <div class="nx-cap" title="{(capText.title)}{openRisk ? ' · 未达开课线(仅' + openRisk.used + '人' + openRisk.label + ')' : ''}">
-        <div class="nx-cap-fill" style="width:{capText.pct}%;background:{capText.color};"></div>
-        <span class="nx-cap-txt">{capText.text}</span>
-      </div>
-      {#if openRisk}
-        <span class="nx-cap-risk">未达开课线</span>
-      {/if}
-    </div>
-  {/if}
-
-  {#if !session.isQueuePhase && chain.length}
-    <div class="nx-chain">
-      {#each chain as node (node.key)}
-        <button
-          type="button"
-          class="nx-chain-node {node.active ? 'active' : ''} {node.muted ? 'muted' : ''}"
-          style="{node.muted ? '' : 'background:' + node.color + ';color:#fff;'}"
-          title="{node.title}"
-          onclick={() => {
-            openWindow({ kind: 'probTrend', code: course.code, seq: course.seq, flag: node.flag, zy: node.zy });
-          }}
-        >{node.pct}</button
-        >
-      {/each}
-    </div>
-  {/if}
-
-  {#if conflicts.length > 0}
-    <div class="nx-conflict">
-      <span class="nx-conflict-label">时间冲突</span>
-      {#each conflicts.slice(0, 3) as cf}
-        <span class="nx-conflict-chip">{cf.day}{cf.slot} {cf.name}</span>
-      {/each}
-      {#if conflicts.length > 3}
-        <span class="nx-conflict-more">+{conflicts.length - 3}</span>
-      {/if}
-    </div>
-  {/if}
-
-  {#if course.xkTextNote}
-    <div style="font-size:11px;color:var(--nx-amber);padding:3px 8px;background:rgba(255,159,26,.06);border-radius:4px;line-height:1.4;">
-      {course.xkTextNote}
-    </div>
-  {/if}
-
-  <div class="flex items-center gap-1.5 flex-wrap">
     <button
       type="button"
-      class="nx-ghost-btn"
-      style="font-size:11px;padding:3px 10px;"
+      class="nx-chain-node {node.active ? 'active' : ''} {node.muted ? 'muted' : ''}"
+      style="{node.muted ? '' : 'background:' + node.color + ';color:#fff;'}"
+      title="{node.title}"
       onclick={() => {
-        openWindow({ kind: 'course', code: course.code, teacherId: course.teacherId || '' });
+        openWindow({ kind: 'probTrend', code: course.code, seq: course.seq, flag: node.flag, zy: node.zy });
       }}
-    >简介</button
+    >{node.pct}</button
     >
-    {#if course.selected}
-      {#if selZyDisp > 0}
-        <span style="font-size:11px;color:var(--nx-ink-soft);">第{selZyDisp}志愿{course.typeLabel ? ' · ' + course.typeLabel : ''}</span>
-      {:else if course.typeLabel}
-        <span style="font-size:11px;color:var(--nx-ink-soft);">{course.typeLabel}</span>
+  {/snippet}
+  {#if exp}
+    <div class="flex items-center gap-2">
+      <span class="nx-card-name">{course.name}</span>
+      {#if course.code}
+        <span class="nx-code" title="{codeTitle}">
+          {#if codeParts.dept}
+            <span class="nx-code-head">{codeParts.head}</span><span class="nx-code-dept">{codeParts.dept}</span>{codeParts.body}
+          {:else}
+            {codeParts.body}
+          {/if}
+          {#if codeParts.creditLast}
+            <span class="nx-code-last" title={Number(course.credits) > 0 ? `{course.credits}学分` : undefined}>{codeParts.last}</span>
+          {:else}
+            {codeParts.last}
+            {#if Number(course.credits) > 0}
+              <span class="nx-code-sep"></span><span class="nx-code-credit" title="{course.credits}学分">{course.credits}学分</span>
+            {/if}
+          {/if}
+        </span>
       {/if}
-      {#if !session.isQueuePhase}
-        <span style="font-size:11px;font-weight:700;color:{meta.color};">{meta.prob >= 0 ? meta.percentLabel : meta.label}</span>
-        {#if cardDelta !== null}
-          <span class="nx-trend-delta {cardDelta > 0 ? 'up' : cardDelta < 0 ? 'down' : ''}" title="相对上一志愿检查点窗口">
-            {cardDelta > 0 ? '▲ +' + cardDelta + '%' : cardDelta < 0 ? '▼ ' + cardDelta + '%' : '– 0%'}
-          </span>
+      <span class="nx-head-right">
+        {#if scoreRef}
+          <span
+            class="nx-score-badge {scoreLv(scoreRef.avg)}"
+            title="教务系统评教均分（7 分制，按授课教师匹配）· {scoreRef.count}人参评 · 数据截至上一学期"
+          >校评 {scoreRef.avg.toFixed(1)}<i>{scoreRef.count}人</i></span>
         {/if}
-      {/if}
-      <button
-        type="button"
-        class="nx-vol-btn"
-        disabled={!(course.zy && course.zy > 1 && canAdj(course.zy - 1))}
-        title={course.zy && course.zy > 1 ? (canAdj(course.zy - 1) ? '升为第' + (course.zy - 1) + '志愿' : '该志愿名额已满') : ''}
-        onclick={() => {
-          void onVolChange('up');
-        }}
-      >▲</button
-      >
-      <button
-        type="button"
-        class="nx-vol-btn"
-        disabled={!(course.zy && course.zy < 3 && canAdj(course.zy + 1))}
-        title={course.zy && course.zy < 3 ? (canAdj(course.zy + 1) ? '降为第' + (course.zy + 1) + '志愿' : '该志愿名额已满') : ''}
-        onclick={() => {
-          void onVolChange('down');
-        }}
-      >▼</button
-      >
-      <button
-        type="button"
-        class="nx-stage-btn"
-        onclick={() => {
-          onAddDraft();
-        }}
-      >加入草稿</button
-      >
-      <button
-        type="button"
-        class="nx-drop-btn"
-        disabled={busy}
-        onclick={() => {
-          void onDrop();
-        }}
-      >{course.isCandidate ? '退队' : '退选'}</button
-      >
-    {:else}
-      <select class="nx-type-select" value={selFlag} onchange={(e) => (selFlag = (e.currentTarget as HTMLSelectElement).value)}>
-        {#each allowedFlags(baseFlag(course)) as f}
-          <option value={f}>{flagName(f)}</option>
-        {/each}
-      </select>
-      <select class="nx-zy-select" value={String(selZy)} onchange={(e) => (selZy = parseInt((e.currentTarget as HTMLSelectElement).value) || 3)}>
-        <option value="3">3志愿</option>
-        <option value="2">2志愿</option>
-        <option value="1">1志愿</option>
-      </select>
-      {#if !session.isQueuePhase}
-        <span style="font-size:11px;font-weight:700;color:{meta.color};">{meta.prob >= 0 ? meta.percentLabel : meta.label}</span>
-        {#if cardDelta !== null}
-          <span class="nx-trend-delta {cardDelta > 0 ? 'up' : cardDelta < 0 ? 'down' : ''}" title="相对上一志愿检查点窗口">
-            {cardDelta > 0 ? '▲ +' + cardDelta + '%' : cardDelta < 0 ? '▼ ' + cardDelta + '%' : '– 0%'}
-          </span>
+        {#if course._tbRef && course._tbRef.count}
+          <button
+            type="button"
+            class="nx-tb-badge {course._tbRef.avg >= 4.5 ? 'lv-hi' : course._tbRef.avg >= 4 ? 'lv-good' : course._tbRef.avg >= 3 ? 'lv-mid' : 'lv-bad'}"
+            title="THU选课社区评分 · 点击查看全部点评"
+            onclick={() => {
+              openWindow({ kind: 'reviews', code: course.code, seq: course.seq });
+            }}
+          >★{Number(course._tbRef.avg).toFixed(1)}<i>{course._tbRef.count}评</i></button
+          >
         {/if}
+        <button type="button" class="nx-chev" title="收起" onclick={() => toggleExp()}>▾</button>
+      </span>
+    </div>
+
+    <div class="flex flex-wrap gap-1 items-center">
+      {#if origins}
+        <span class="nx-tag" style="color:#fff;background:{ORIGIN_COLORS[origins] || '#666'};border:none;">{origins}</span>
       {/if}
-      <button class="nx-select-btn" disabled={busy} onclick={() => { void onSelect(); }}>
-        {session.isQueuePhase && !course.available ? '排队选课' : '选课'}
-      </button>
-      <button class="nx-stage-btn" disabled={busy} onclick={() => { onAddDraft(); }}>
-        加入草稿
-      </button>
+      {#if course.selected}
+        <span class="nx-tag nx-tag-sel">已选</span>
+      {:else if !course.available}
+        <span class="nx-tag nx-tag-no">已满</span>
+      {/if}
+      {#if subText}
+        <span class="nx-tagline-soft" title="{course.time}">{subText}</span>
+      {/if}
+    </div>
+
+    {#if capText}
+      <div class="nx-cap-wrap">
+        <div class="nx-cap" title="{(capText.title)}{openRisk ? ' · 未达开课线(仅' + openRisk.used + '人' + openRisk.label + ')' : ''}">
+          <div class="nx-cap-fill" style="width:{capText.pct}%;background:{capText.color};"></div>
+          <span class="nx-cap-txt">{capText.text}</span>
+        </div>
+        {#if openRisk}
+          <span class="nx-cap-risk">未达开课线</span>
+        {/if}
+      </div>
     {/if}
-  </div>
+
+    {#if conflicts.length > 0}
+      <div class="nx-conflict">
+        <span class="nx-conflict-label">时间冲突</span>
+        {#each conflicts.slice(0, 3) as cf}
+          <span class="nx-conflict-chip">{cf.day}{cf.slot} {cf.name}</span>
+        {/each}
+        {#if conflicts.length > 3}
+          <span class="nx-conflict-more">+{conflicts.length - 3}</span>
+        {/if}
+      </div>
+    {/if}
+
+    {#if course.xkTextNote}
+      <div style="font-size:11px;color:var(--nx-amber);padding:3px 8px;background:rgba(255,159,26,.06);border-radius:4px;line-height:1.4;">
+        {course.xkTextNote}
+      </div>
+    {/if}
+
+    {#if !session.isQueuePhase && chainFull && chain.length}
+      <div class="nx-chain">
+        {#each chain as node (node.key)}
+          {@render chainNode(node)}
+        {/each}
+      </div>
+    {/if}
+
+    <div class="flex items-center gap-1.5 flex-wrap">
+      <button
+        type="button"
+        class="nx-ghost-btn"
+        style="font-size:11px;padding:3px 10px;"
+        onclick={() => {
+          openWindow({ kind: 'course', code: course.code, teacherId: course.teacherId || '' });
+        }}
+      >简介</button
+      >
+      {#if course.selected}
+        {#if selZyDisp > 0}
+          <span style="font-size:11px;color:var(--nx-ink-soft);">第{selZyDisp}志愿{course.typeLabel ? ' · ' + course.typeLabel : ''}</span>
+        {:else if course.typeLabel}
+          <span style="font-size:11px;color:var(--nx-ink-soft);">{course.typeLabel}</span>
+        {/if}
+        {#if !session.isQueuePhase}
+          <button
+            type="button"
+            class="nx-prob-btn"
+            style="color:{meta.color};background:{meta.bg};"
+            title={chainFull ? '收起全部类型×志愿概率' : '展开全部类型×志愿概率'}
+            onclick={() => {
+              if (chain.length) chainFull = !chainFull;
+            }}
+          >{meta.prob >= 0 ? meta.percentLabel : meta.label}{chain.length ? (chainFull ? ' ▴' : ' ▾') : ''}</button>
+          {#if cardDelta !== null}
+            <span class="nx-trend-delta {cardDelta > 0 ? 'up' : cardDelta < 0 ? 'down' : ''}" title="相对上一志愿检查点窗口">
+              {cardDelta > 0 ? '▲ +' + cardDelta + '%' : cardDelta < 0 ? '▼ ' + cardDelta + '%' : '– 0%'}
+            </span>
+          {/if}
+        {/if}
+        <button
+          type="button"
+          class="nx-vol-btn"
+          disabled={!(course.zy && course.zy > 1 && canAdj(course.zy - 1))}
+          title={course.zy && course.zy > 1 ? (canAdj(course.zy - 1) ? '升为第' + (course.zy - 1) + '志愿' : '该志愿名额已满') : ''}
+          onclick={() => {
+            void onVolChange('up');
+          }}
+        >▲</button
+        >
+        <button
+          type="button"
+          class="nx-vol-btn"
+          disabled={!(course.zy && course.zy < 3 && canAdj(course.zy + 1))}
+          title={course.zy && course.zy < 3 ? (canAdj(course.zy + 1) ? '降为第' + (course.zy + 1) + '志愿' : '该志愿名额已满') : ''}
+          onclick={() => {
+            void onVolChange('down');
+          }}
+        >▼</button
+        >
+        <button
+          type="button"
+          class="nx-stage-btn"
+          onclick={() => {
+            onAddDraft();
+          }}
+        >加入草稿</button
+        >
+        <button
+          type="button"
+          class="nx-drop-btn"
+          disabled={busy}
+          onclick={() => {
+            void onDrop();
+          }}
+        >{course.isCandidate ? '退队' : '退选'}</button
+        >
+      {:else}
+        <select class="nx-type-select" value={selFlag} onchange={(e) => (selFlag = (e.currentTarget as HTMLSelectElement).value)}>
+          {#each allowedFlags(baseFlag(course)) as f}
+            <option value={f}>{flagName(f)}</option>
+          {/each}
+        </select>
+        <select class="nx-zy-select" value={String(selZy)} onchange={(e) => (selZy = parseInt((e.currentTarget as HTMLSelectElement).value) || 3)}>
+          <option value="3">3志愿</option>
+          <option value="2">2志愿</option>
+          <option value="1">1志愿</option>
+        </select>
+        {#if !session.isQueuePhase}
+          <button
+            type="button"
+            class="nx-prob-btn"
+            style="color:{meta.color};background:{meta.bg};"
+            title={chainFull ? '收起全部类型×志愿概率' : '展开全部类型×志愿概率'}
+            onclick={() => {
+              if (chain.length) chainFull = !chainFull;
+            }}
+          >{meta.prob >= 0 ? meta.percentLabel : meta.label}{chain.length ? (chainFull ? ' ▴' : ' ▾') : ''}</button>
+          {#if cardDelta !== null}
+            <span class="nx-trend-delta {cardDelta > 0 ? 'up' : cardDelta < 0 ? 'down' : ''}" title="相对上一志愿检查点窗口">
+              {cardDelta > 0 ? '▲ +' + cardDelta + '%' : cardDelta < 0 ? '▼ ' + cardDelta + '%' : '– 0%'}
+            </span>
+          {/if}
+        {/if}
+        <button class="nx-select-btn" disabled={busy} onclick={() => { void onSelect(); }}>
+          {session.isQueuePhase && !course.available ? '排队选课' : '选课'}
+        </button>
+        <button class="nx-stage-btn" disabled={busy} onclick={() => { onAddDraft(); }}>
+          加入草稿
+        </button>
+      {/if}
+    </div>
+  {:else}
+    <div class="nx-mini-row">
+      <span class="nx-mini-name" title="{course.name}">{course.name}</span>
+      {#if course.selected}
+        <span class="nx-tag nx-tag-sel">已选</span>
+      {:else if !course.available}
+        <span class="nx-tag nx-tag-no">已满</span>
+      {/if}
+      {#if conflictMini}
+        <span class="nx-mini-conflict" title="{conflictMini.title}">{conflictMini.label}</span>
+      {/if}
+      {#if subText}
+        <span class="nx-mini-sub" title="{subText}">{subText}</span>
+      {/if}
+      {#if course.xkTextNote}
+        <span class="nx-mini-warn" title="{course.xkTextNote}">⚠</span>
+      {/if}
+      {#if miniNum}
+        <span class="nx-mini-num" style="color:{miniNum.color};" title="{miniNum.title}">{miniNum.text}</span>
+      {/if}
+      <span class="nx-mini-actions">
+        {#if course.selected}
+          <button type="button" class="nx-stage-btn nx-mini-btn" onclick={() => { onAddDraft(); }}>＋草稿</button>
+          <button type="button" class="nx-drop-btn nx-mini-btn" disabled={busy} onclick={() => { void onDrop(); }}>{course.isCandidate ? '退队' : '退选'}</button>
+        {:else}
+          <button type="button" class="nx-select-btn nx-mini-btn" disabled={busy} onclick={() => { void onSelect(); }}>
+            {session.isQueuePhase && !course.available ? '排队选课' : '选课'}
+          </button>
+          <button type="button" class="nx-stage-btn nx-mini-btn" disabled={busy} onclick={() => { onAddDraft(); }}>＋草稿</button>
+        {/if}
+        <button type="button" class="nx-chev" title="展开详情" onclick={() => toggleExp()}>▸</button>
+      </span>
+    </div>
+  {/if}
 </div>

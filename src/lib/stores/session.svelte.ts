@@ -27,6 +27,7 @@ import { typeCodeToFlag } from '../domain/flags';
 import { parseTimeSlots, clockRangesOf } from '../domain/time';
 import { checkPlanCoverage } from '../domain/plancov';
 import { showXkResult } from './toast.svelte.ts';
+import { clearCardExpansions } from './uicards.svelte.ts';
 import { promptDialog, zyConfirm } from './modal.svelte.ts';
 import { vol, volCacheHydrate, volCachePersist, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
 import { probHistHydrate } from './probhist.svelte.ts';
@@ -667,6 +668,7 @@ export async function changeSemester(newSem: string): Promise<void> {
   session.planData = [];
   session.levelMap = {};
   session.queueDataMap = {};
+  clearCardExpansions();
   vol.map = {};
   Object.keys(volSession.depts).forEach(k => delete volSession.depts[k]);
   session.fetchWarn = '';
@@ -675,4 +677,5 @@ export async function changeSemester(newSem: string): Promise<void> {
 
 export function closeWorkbench(): void {
   session.open = false;
+  clearCardExpansions();
 }

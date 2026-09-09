@@ -1,6 +1,8 @@
 ﻿<script lang="ts">
   import { search as st, gotoPage, browseGoto, loadAll, runServerQuery, getDisplayed, getVisibleRows, getPager, isSearchMode, isLocalFiltersActive } from '../../lib/stores/search.svelte.ts';
   import { session } from '../../lib/stores/session.svelte.ts';
+  import { uicards, setCardsExpand } from '../../lib/stores/uicards.svelte.ts';
+  import { keyOf } from '../../lib/core/utils';
   import CourseCard from './CourseCard.svelte';
   import PlanView from './PlanView.svelte';
 
@@ -21,6 +23,8 @@
     if (!el) return;
     const code = st.lastHit.code;
     const sq = st.lastHit.seq;
+    // 跳转定位前强制展开目标卡，避免高亮落在折叠行上
+    uicards.map[keyOf(code, sq)] = true;
     const t = el.querySelector<HTMLElement>(`.nx-card-holder[data-code="${code}"][data-seq="${sq}"]`);
     if (t) {
       t.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -55,6 +59,14 @@
     if (!searchMode) return next ? !st.browseHasMore && !(p.totalPages > p.curPage) : p.curPage <= 1;
     return next ? p.curPage >= p.totalPages : p.curPage <= 1;
   }
+
+  /** 批量披露：对当前可见课班全部展开/收起（收起连冲突/已选卡也强制生效） */
+  function setAllExpand(on: boolean): void {
+    setCardsExpand(
+      visibleRows.map((c) => keyOf(c.code, c.seq)),
+      on,
+    );
+  }
 </script>
 
 <div class="flex-1 min-h-0 overflow-y-auto" style="padding:4px 16px 40px;">
@@ -70,6 +82,13 @@
   {:else if visibleRows.length === 0}
     <div class="nx-empty">{searchMode ? '暂无匹配课程' : '暂无课程'}</div>
   {:else}
+    <div class="nx-list-tools">
+      <span>共 {visibleRows.length} 门</span>
+      <span class="nx-tools-gap"></span>
+      <button type="button" class="nx-list-tool" onclick={() => setAllExpand(true)}>全部展开</button>
+      <span style="color:var(--nx-faint);">·</span>
+      <button type="button" class="nx-list-tool" onclick={() => setAllExpand(false)}>全部收起</button>
+    </div>
     <div bind:this={listEl}>
       {#each visibleRows as c (c.code + '_' + (c.seq || '0'))}
         <div class="nx-card-holder" data-code={c.code} data-seq={c.seq || '0'}>
