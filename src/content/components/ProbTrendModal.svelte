@@ -3,7 +3,7 @@
   import { flagName, isSportsCourse } from '../../lib/domain/flags';
   import { probHist } from '../../lib/stores/probhist.svelte.ts';
   import { session } from '../../lib/stores/session.svelte.ts';
-  import { probAt, probSeries, sparkPath, trendDelta } from '../../lib/domain/probhist';
+  import { probAt, probSeries, probYDomain, sparkPath, trendDelta } from '../../lib/domain/probhist';
   import { fmtTime, keyOf } from '../../lib/core/utils';
 
   let { code, seq, flag: initFlag, zy: initZy }: { code: string; seq: string; flag: Flag; zy: number } = $props();
@@ -28,8 +28,11 @@
   const W = 480;
   const H = 96;
   const PAD = 6;
-  const path = $derived.by(() => sparkPath(series, W, H, PAD));
-  const grid50 = $derived(H - PAD - 0.5 * (H - PAD * 2));
+  const [yMin, yMax] = $derived(probYDomain(series));
+  const yOf = (p: number): number => H - PAD - ((p - yMin) / Math.max(1e-9, yMax - yMin)) * (H - PAD * 2);
+  const path = $derived.by(() => sparkPath(series, W, H, PAD, yMin, yMax));
+  const gridY = $derived.by(() => (0.5 >= yMin && 0.5 <= yMax ? yOf(0.5) : null));
+  const labelFrom = $derived(Math.max(0, series.length - 12));
 </script>
 
 <div class="nx-modal-row">
@@ -64,17 +67,41 @@
     {/if}
     <span class="nx-trend-last">最后更新 {fmtTime(points[points.length - 1]!.t)}</span>
   </div>
-  <svg class="nx-trend-chart" viewBox="0 0 {W} {H}" preserveAspectRatio="none">
-    <line class="nx-trend-grid" x1="{PAD}" y1="{grid50}" x2="{W - PAD}" y2="{grid50}" />
-    {#if path}
-      <polyline class="nx-trend-line" points="{path}" />
-    {/if}
+  <div class="nx-trend-plot">
+    <svg class="nx-trend-chart" viewBox="0 0 {W} {H}" preserveAspectRatio="none">
+      {#if gridY !== null}
+        <line class="nx-trend-grid" x1="{PAD}" y1="{gridY}" x2="{W - PAD}" y2="{gridY}" />
+      {/if}
+      {#if path}
+        <polyline class="nx-trend-line" points="{path}" />
+      {/if}
+      {#each series as s, i (s.t)}
+        <circle
+          class="nx-trend-dot {i === series.length - 1 ? 'last' : ''}"
+          cx="{PAD + ((s.t - series[0]!.t) / Math.max(1, series[series.length - 1]!.t - series[0]!.t)) * (W - PAD * 2)}"
+          cy="{yOf(s.prob)}"
+          r="3"
+        >
+          <title>{fmtTime(s.t)} · {Math.round(s.prob * 100)}%</title>
+        </circle>
+      {/each}
+    </svg>
+    <span class="nx-trend-ylbl top">{Math.round(yMax * 100)}%</span>
+    <span class="nx-trend-ylbl bot">{Math.round(yMin * 100)}%</span>
     {#each series as s, i (s.t)}
-      <circle class="nx-trend-dot {i === series.length - 1 ? 'last' : ''}" cx="{PAD + ((s.t - series[0]!.t) / Math.max(1, series[series.length - 1]!.t - series[0]!.t)) * (W - PAD * 2)}" cy="{H - PAD - s.prob * (H - PAD * 2)}" r="3">
-        <title>{fmtTime(s.t)} · {Math.round(s.prob * 100)}%</title>
-      </circle>
+      {#if i >= labelFrom}
+        {@const xPct = ((PAD + ((s.t - series[0]!.t) / Math.max(1, series[series.length - 1]!.t - series[0]!.t)) * (W - PAD * 2)) / W) * 100}
+        <span
+          class="nx-trend-lbl"
+          class:dn={i % 2 === 1}
+          class:edge0={i === 0}
+          class:edge1={i === series.length - 1}
+          style="--x:{xPct.toFixed(2)}%;--y:{(yOf(s.prob) / H) * 100}%;"
+        >{Math.round(s.prob * 100)}%</span
+        >
+      {/if}
     {/each}
-  </svg>
+  </div>
   <div class="nx-trend-axis">
     <span>{fmtTime(series[0]!.t)}</span>
     <span>{fmtTime(series[Math.floor((series.length - 1) / 2)]!.t)}</span>

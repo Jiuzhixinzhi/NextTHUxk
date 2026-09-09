@@ -426,11 +426,57 @@
   font-size: 10.5px;
   color: var(--nx-faint);
 }
+.nx-trend-plot {
+  position: relative;
+  margin-top: 6px;
+}
 .nx-trend-chart {
   display: block;
   width: 100%;
   height: 110px;
-  margin-top: 6px;
+}
+.nx-trend-lbl {
+  position: absolute;
+  top: var(--y);
+  left: var(--x);
+  transform: translate(-50%, -165%);
+  font-size: 8px;
+  line-height: 1;
+  color: var(--nx-faint);
+  background: rgba(255, 255, 255, 0.78);
+  border-radius: 4px;
+  padding: 1px 3px 1.5px;
+  white-space: nowrap;
+  pointer-events: none;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.04);
+}
+.nx-trend-lbl.dn {
+  transform: translate(-50%, 45%);
+}
+.nx-trend-lbl.edge0 {
+  transform: translate(-22%, -165%);
+}
+.nx-trend-lbl.edge0.dn {
+  transform: translate(-22%, 45%);
+}
+.nx-trend-lbl.edge1 {
+  transform: translate(-78%, -165%);
+}
+.nx-trend-lbl.edge1.dn {
+  transform: translate(-78%, 45%);
+}
+.nx-trend-ylbl {
+  position: absolute;
+  left: 3px;
+  font-size: 8px;
+  line-height: 1;
+  color: var(--nx-faint);
+}
+.nx-trend-ylbl.top {
+  top: 0;
+}
+.nx-trend-ylbl.bot {
+  bottom: 0;
 }
 .nx-trend-grid {
   stroke: rgba(0, 0, 0, 0.08);
