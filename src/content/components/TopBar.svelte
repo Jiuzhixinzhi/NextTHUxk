@@ -10,7 +10,7 @@
   import { banner, setBanner } from '../../lib/stores/session.svelte.ts';
 
   let backupOpen = $state(false);
-  let counts = $state({ drafts: 0, manual: 0 });
+  let counts = $state({ drafts: 0, manual: 0, hist: 0 });
   let fileEl: HTMLInputElement;
 
   function cacheInfo(): string {
@@ -66,7 +66,7 @@
 
   async function countsRefresh() {
     const c = await draftCounts();
-    counts = { drafts: c.drafts, manual: c.manual };
+    counts = { drafts: c.drafts, manual: c.manual, hist: c.hist };
   }
 
   function pickExport() {
@@ -102,10 +102,10 @@
       >
       {#if backupOpen}
         <div class="absolute right-0 top-full mt-2 min-w-60 flex-col gap-0.5 p-2" style="position:absolute;top:36px;right:0;min-width:240px;background:var(--nx-glass-strong);backdrop-filter:var(--nx-glass-blur-strong);-webkit-backdrop-filter:var(--nx-glass-blur-strong);box-shadow:var(--nx-lg-edge),0 16px 48px rgba(16,20,32,.22);border-radius:14px;z-index:60;display:flex;flex-direction:column;gap:2px;">
-          <div style="font-size:11px;color:var(--nx-faint);padding:4px 10px 6px;">草稿 {counts.drafts} 份 · 占用 {counts.manual} 条</div>
+          <div style="font-size:11px;color:var(--nx-faint);padding:4px 10px 6px;">草稿 {counts.drafts} 份 · 占用 {counts.manual} 条{counts.hist ? ` · 趋势历史 ${counts.hist} 课` : ''}</div>
           <button class="nx-bm-item" type="button" onclick={pickExport}>导出备份（.json）</button>
           <button class="nx-bm-item" type="button" onclick={() => { backupOpen = false; fileEl?.click(); }}>导入备份</button>
-          <div style="font-size:10px;color:var(--nx-faint);padding:4px 10px;border-top:1px solid var(--nx-line);margin-top:4px;">导入按课班 / 草稿名智能合并，不覆盖现有数据；备份文件含草稿与自定义占用</div>
+          <div style="font-size:10px;color:var(--nx-faint);padding:4px 10px;border-top:1px solid var(--nx-line);margin-top:4px;">导入按课班 / 草稿名智能合并，不覆盖现有数据；备份文件含草稿、自定义占用与概率缓存（趋势历史 + 当前窗口志愿）</div>
         </div>
       {/if}
     </div>

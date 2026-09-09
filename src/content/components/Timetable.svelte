@@ -16,7 +16,9 @@
   import type { Course, ManualEvent } from '../../lib/domain/types';
 
   const layout = $derived.by(() => {
-    return layoutPreview(previewRows as (Course | ManualEvent)[], (c) => {
+    // 占用块与课程同池渲染（重叠自动分道）；previewRows 保持纯课程行（草稿/已选按 index 移除依赖）
+    const rows: (Course | ManualEvent)[] = (previewRows as (Course | ManualEvent)[]).concat(session.manualEvents);
+    return layoutPreview(rows, (c) => {
       const manual = (c as ManualEvent).manual === true;
       if (manual) return { color: '#8b5cf6', probLabel: '自定义', bg: 'rgba(139,92,246,.14)' };
       const cc = c as Course;

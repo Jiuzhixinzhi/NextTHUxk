@@ -47,12 +47,41 @@ export function volCachePersist(sem: string): void {
     complete();
   }, 2000);
   function complete() {
-    try {
-      store.set(K.volCache, { sem, windowStart: win, map: vol.map, depts: volSession.depts });
-    } catch (e) {
-      console.warn(TAG, 'volCache persist:', e);
-    }
+    // vol.map 是 $state Proxy，直传 storage 序列化会失败——先深拷贝（失败时 store.set 内部已 console.warn）
+    store
+      .set(K.volCache, { sem, windowStart: win, map: JSON.parse(JSON.stringify(vol.map)), depts: volSession.depts })
+      .catch(() => {});
   }
+}
+
+/** 备份导入的志愿缓存并入（仅同检查点窗口才收——跨窗口数据陈旧，展示会失真）。
+ *  语义与 volCacheHydrate 同构：同窗快照视为权威整覆盖；depts 时间戳只进不退。
+ *  返回并入行数（新增键计 1）；窗口不符返回 -1。 */
+export function mergeImportedVolCache(
+  curSem: string,
+  windowStart: number,
+  map: Record<string, VolDatum>,
+  depts: Record<string, number>,
+  targets: Course[],
+): number {
+  if (!curSem || !map || !Object.keys(map).length || windowStart !== volWindowStart().getTime()) return -1;
+  let added = 0;
+  const merged = Object.assign({}, vol.map) as Record<string, VolDatum>;
+  for (const k of Object.keys(map)) {
+    const v = map[k];
+    if (!v || !v.code) continue;
+    if (!merged[k]) added++;
+    merged[k] = v;
+  }
+  vol.map = merged;
+  const dep = depts || {};
+  for (const k of Object.keys(dep)) {
+    const t = Number(dep[k]) || 0;
+    if (t > 0 && (!volSession.depts[k] || volSession.depts[k]! < t)) volSession.depts[k] = t;
+  }
+  if (targets && targets.length) applyVolunteer(targets, vol.map);
+  volCachePersist(curSem);
+  return added;
 }
 
 /** 志愿自动同步定时器（到检查点触发回调再重新排程） */
