@@ -59,7 +59,7 @@
       showToast(false, '草稿没有课程');
       return;
     }
-    openWindow({ kind: 'creditSim', courses, title: '学分中签模拟' });
+    openWindow({ kind: 'creditSim', courses, title: activeDraft ? '草稿「' + activeDraft.name + '」' : '草稿' });
   }
 </script>
 
@@ -144,7 +144,7 @@
           </div>
           <div class="nx-draft-acts">
             <button class="nx-stage-btn" onclick={() => setActive(d.id)}>设为活跃</button>
-            <button class="nx-stage-btn" onclick={() => openWindow({ kind: 'creditSim', courses: d.courses, title: '草稿「' + d.name + '」 · 学分中签模拟' })}>学分模拟</button>
+            <button class="nx-stage-btn" onclick={() => openWindow({ kind: 'creditSim', courses: d.courses, title: '草稿「' + d.name + '」' })}>学分模拟</button>
             <button class="nx-stage-btn" onclick={() => setPreview({ kind: 'draft', id: d.id })}>预览</button>
             <button class="nx-stage-btn" onclick={() => void promote(d)}>提交选课</button>
             <button class="nx-stage-btn" onclick={() => void copyExport(d)}>导出</button>

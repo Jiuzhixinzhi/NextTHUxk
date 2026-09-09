@@ -7,7 +7,7 @@ export type ModalState =
   | { kind: 'none' }
   | { kind: 'course'; code: string; teacherId: string }
   | { kind: 'reviews'; code: string; seq: string }
-  | { kind: 'creditSim'; courses: DraftCourse[]; title: string }
+  | { kind: 'creditSim'; courses: DraftCourse[]; title: string; certainKeys?: string[] }
   | { kind: 'probTrend'; code: string; seq: string; flag: Flag; zy: number }
   | { kind: 'manualEvent' }
   | { kind: 'zyConfirm'; courses: Course[]; resolve: (values: number[]) => void }

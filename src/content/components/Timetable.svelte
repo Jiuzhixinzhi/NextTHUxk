@@ -2,10 +2,11 @@
   import { draftStore, setPreview, removeActiveCourse, previewRowsNow } from '../../lib/stores/drafts.svelte.ts';
 
   const previewRows = $derived.by(() => previewRowsNow());
-  import { session, removeManualEvent, backfillSelTimes, resetBfBudget, doDropCourse } from '../../lib/stores/session.svelte.ts';
+  import { session, removeManualEvent, backfillSelTimes, resetBfBudget, doDropCourse, selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
   import { search, jumpTo } from '../../lib/stores/search.svelte.ts';
   import { layoutPreview, axisHours, dayNames, type PreviewBlock } from '../../lib/domain/timetable-layout';
   import { calcProb, probBg } from '../../lib/domain/probability';
+  import { draftCourseFromSelected } from '../../lib/domain/draft';
   import { typeCodeToFlag } from '../../lib/domain/flags';
   import { hm, ORIGIN_COLORS } from '../../lib/domain/time';
   import { previewBlockMeta } from '../../lib/domain/preview';
@@ -74,6 +75,22 @@
     return previewRows.length + '门课 · ' + total + '学分' + (session.manualEvents.length ? ' · 自定义占用' + session.manualEvents.length + '项' : '');
   })());
 
+  function goSimSelected() {
+    const rows = selectedPreviewRows();
+    if (!rows.length) {
+      showToast(false, '当前已选为空');
+      return;
+    }
+    openWindow({
+      kind: 'creditSim',
+      courses: rows.map(draftCourseFromSelected),
+      title: '当前已选',
+      certainKeys: session.isQueuePhase
+        ? rows.filter((r) => r.selected && !r.isCandidate).map((r) => keyOf(r.code, r.seq))
+        : undefined,
+    });
+  }
+
   function onRetry() {
     resetBfBudget();
     void backfillSelTimes();
@@ -105,7 +122,12 @@
       <span style="white-space:nowrap;">课表预览</span>
       <span style="font-size:11px;color:var(--nx-ink-soft);font-weight:400;">{previewLabel}</span>
     </div>
-    <button class="nx-stage-btn" onclick={() => openWindow({ kind: 'manualEvent' })}>＋ 添加占用</button>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      {#if draftStore.preview.kind === 'selected'}
+        <button class="nx-stage-btn" title="对当前已选（含候补）做学分中签模拟" onclick={goSimSelected}>学分模拟</button>
+      {/if}
+      <button class="nx-stage-btn" onclick={() => openWindow({ kind: 'manualEvent' })}>＋ 添加占用</button>
+    </div>
   </div>
 
   <div class="flex gap-1.5 flex-wrap" style="margin-bottom:8px;">
