@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { coverageRows } from '../../lib/stores/session.svelte.ts';
+  import { planCov } from '../../lib/stores/session.svelte.ts';
   import { search } from '../../lib/stores/search.svelte.ts';
   import { jumpTo } from '../../lib/stores/search.svelte.ts';
   import { lc } from '../../lib/core/utils';
+
+  const coverageRows = $derived(planCov.rows);
 
   const list = $derived.by(() => {
     const q = search.q.trim().toLowerCase();
