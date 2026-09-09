@@ -4,14 +4,14 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
 import css from './app.css?inline';
-import { TAG, BUILD, CUR_VER } from '../lib/core/constants';
+import { TAG, BUILD, curVer } from '../lib/core/constants';
 import { bootSite, session } from '../lib/stores/session.svelte.ts';
 import { loadDrafts, draftStore } from '../lib/stores/drafts.svelte.ts';
 
 async function main(): Promise<void> {
   if (window.parent !== window) return;
   if (!/zhjwxk|zhjw\.cic|webvpn/.test(location.hostname)) return;
-  console.log(TAG, 'v' + CUR_VER + ' 构建 ' + BUILD + ' loading on', location.href);
+  console.log(TAG, 'v' + curVer() + ' 构建 ' + BUILD + ' loading on', location.href);
 
   const host = document.createElement('div');
   host.id = 'nextthuxk-host';

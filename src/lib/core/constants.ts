@@ -11,8 +11,19 @@ export const SP = 'nextthuxk_';
 /** 存储结构版本：结构变更必须递增（不匹配即整体清缓存）；7 = v3.0.0 草稿模型 + AI/暂存移除 */
 export const DATA_VER = 7;
 
-/** 发布版本（与 manifest.json 同步） */
-export const CUR_VER = '3.2.0';
+/** 发布版本回退值：仅限无 chrome.runtime 的环境（vitest / 工具链）；
+ *  扩展运行时一律以 manifest.json 为单源（上游 v2.0.1 实录：双版本源漂移致永远提示更新） */
+export const VER_FALLBACK = '3.2.0';
+
+/** 发布版本单源：读 manifest.json（content/popup 扩展环境可用），与 manifest 永不再漂移 */
+export function curVer(): string {
+  try {
+    if (typeof chrome !== 'undefined' && chrome.runtime?.getManifest) return chrome.runtime.getManifest().version || VER_FALLBACK;
+  } catch {
+    /* 非 扩展环境（vitest）走回退 */
+  }
+  return VER_FALLBACK;
+}
 
 /** 构建标记：面板+启动日志可见，防旧构建疑案 */
 export const BUILD = '3020001';

@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { banner, clearBanner, CUR_VER } from '../../../lib/stores/session.svelte.ts';
+  import { curVer } from '../../../lib/core/constants';
+  import { banner, clearBanner } from '../../../lib/stores/session.svelte.ts';
 </script>
 
 {#if banner.kind !== 'none'}
@@ -13,8 +14,8 @@
         <br />
         <small style="opacity:.72;font-weight:400;">更新前建议先在扩展管理界面移除旧版，再加载新版，避免新旧实例冲突</small>
       {:else}
-        当前版本 <b style="color:var(--nx-red)">v{CUR_VER}</b> 存在严重错误，请立即升级到
-        <a href="https://github.com/smartThise/NextTHUxk/releases/latest" target="_blank" style="color:var(--nx-red);font-weight:700;">最新版本</a>
+        当前版本 <b style="color:var(--nx-red)">v{curVer()}</b> 存在严重错误，请立即升级到
+        <a href="https://github.com/Jiuzhixinzhi/NextTHUxk/releases/latest" target="_blank" style="color:var(--nx-red);font-weight:700;">最新版本</a>
         <br />
         <small style="opacity:.72;font-weight:400;">安装前请先移除本版本，避免新旧实例冲突</small>
       {/if}

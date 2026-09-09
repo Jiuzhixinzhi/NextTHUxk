@@ -1,8 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
 // NextTHUxk — 版本更新检查（GitHub Releases）
 // ═══════════════════════════════════════════════════════════════
-import { CUR_VER, DANGEROUS_VERS, TAG } from '../core/constants';
+import { curVer, DANGEROUS_VERS, TAG } from '../core/constants';
 import { K, store } from '../storage/store';
+
+/** 更新检查目标：fork 自己的 releases（上游 smartThise 是另一代码世系，
+ *  版本号命名空间已冲突，比上游会把用户引向旧世代构建） */
+const RELEASES_LATEST = 'https://api.github.com/repos/Jiuzhixinzhi/NextTHUxk/releases/latest';
 
 export function cmpVer(a: string, b: string): number {
   const pa = a.replace(/^v/, '').split('.').map(Number);
@@ -22,7 +26,8 @@ export interface UpdateUi {
 let timer: ReturnType<typeof setInterval> | null = null;
 
 export async function checkUpdate(ui: UpdateUi, throttle = true): Promise<void> {
-  if (DANGEROUS_VERS.includes(CUR_VER)) {
+  const cur = curVer();
+  if (DANGEROUS_VERS.includes(cur)) {
     ui.onDanger();
     return;
   }
@@ -31,12 +36,12 @@ export async function checkUpdate(ui: UpdateUi, throttle = true): Promise<void> 
       const lastCheck = await store.get<number>(K.lastUpdateCheck);
       if (lastCheck && Date.now() - lastCheck < 30 * 60 * 1000) return;
     }
-    const resp = await fetch('https://api.github.com/repos/smartThise/NextTHUxk/releases/latest', { cache: 'no-store' });
+    const resp = await fetch(RELEASES_LATEST, { cache: 'no-store' });
     if (!resp.ok) return;
     const data = (await resp.json()) as { tag_name?: string; html_url?: string };
     await store.set(K.lastUpdateCheck, Date.now());
     const remote = (data.tag_name || '').replace(/^v/, '');
-    if (remote && cmpVer(remote, CUR_VER) > 0) ui.onUpdate(remote, data.html_url || '');
+    if (remote && cmpVer(remote, cur) > 0) ui.onUpdate(remote, data.html_url || '');
   } catch (e) {
     console.warn(TAG, 'update check:', e);
   }

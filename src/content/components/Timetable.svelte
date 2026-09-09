@@ -53,7 +53,7 @@
 
   function onBlockClick(b: PreviewBlock) {
     if (b.manual) return;
-    if (b.code) jumpTo(b.code, b.seq || '0');
+    if (b.code) jumpTo(b.code, b.seq || '0', b.teacher);
   }
 
   async function onBlockRemove(b: PreviewBlock) {
@@ -107,7 +107,11 @@
       const idx = previewRows.findIndex((x) => x.code === u.code && String(x.seq || '0') === String(u.seq));
       if (idx >= 0) removeActiveCourse(idx);
     } else {
-      jumpTo(u.code, u.seq);
+      // 未定时间块无教师字段：从池行回查（候补/已选均可能）
+      const c =
+        session.allCourses.find((x) => keyOf(x.code, x.seq) === keyOf(u.code, u.seq)) ||
+        session.candidateCourses.find((x) => keyOf(x.code, x.seq) === keyOf(u.code, u.seq));
+      jumpTo(u.code, u.seq, c?.teacher);
     }
   }
 

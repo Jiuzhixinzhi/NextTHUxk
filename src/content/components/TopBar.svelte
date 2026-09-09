@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { BUILD, CUR_VER } from '../../lib/core/constants';
+  import { BUILD, curVer } from '../../lib/core/constants';
   import { session, changeSemester, closeWorkbench } from '../../lib/stores/session.svelte.ts';
   import { fmtTime } from '../../lib/core/utils';
   import { vol } from '../../lib/stores/volunteer.svelte.ts';
@@ -43,7 +43,7 @@
       },
       false,
     );
-    if (!found) showToast(true, '当前已是最新版本 v' + CUR_VER);
+    if (!found) showToast(true, '当前已是最新版本 v' + curVer());
   }
 
   async function onExport() {

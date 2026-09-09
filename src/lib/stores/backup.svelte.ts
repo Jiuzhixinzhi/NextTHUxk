@@ -2,7 +2,7 @@
 // NextTHUxk — 一键备份（统一导出/导入 JSON：草稿 + 自定义占用 + 概率缓存）
 // v4：backupVer=3（+probHist 趋势历史 / volCache 志愿缓存）；导入兼容 v1-3。
 // ═══════════════════════════════════════════════════════════════
-import { CUR_VER } from '../core/constants';
+import { curVer } from '../core/constants';
 import { K, store } from '../storage/store';
 import type { Draft, ManualEvent, VolDatum } from '../domain/types';
 import { mergeHistSeries, sanitizeHistMap, type VolHistMap } from '../domain/probhist';
@@ -34,7 +34,7 @@ export async function backupExport(): Promise<void> {
   const data = {
     app: 'NextTHUxk',
     backupVer: 3,
-    ver: CUR_VER,
+    ver: curVer(),
     sem: session.SEM || '',
     ts: Date.now(),
     drafts: JSON.parse(JSON.stringify(draftStore.drafts)),

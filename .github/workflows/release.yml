@@ -24,14 +24,13 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
 
-      - name: 版本一致性守门
+      - name: 版本一致性守门（tag ↔ manifest；运行时版本由 getManifest 单源读取）
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           MANIFEST=$(jq -r .version manifest.json)
-          CURVER=$(grep -oP "CUR_VER = '\K[^']+" src/lib/core/constants.ts)
-          echo "tag=$TAG manifest=$MANIFEST cur=$CURVER"
-          if [ "$TAG" != "$MANIFEST" ] || [ "$TAG" != "$CURVER" ]; then
-            echo "::error::版本不一致: tag=v$TAG manifest=$MANIFEST CUR_VER=$CURVER"
+          echo "tag=$TAG manifest=$MANIFEST"
+          if [ "$TAG" != "$MANIFEST" ]; then
+            echo "::error::版本不一致: tag=v$TAG manifest=$MANIFEST"
             exit 1
           fi
 

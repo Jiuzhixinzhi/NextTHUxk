@@ -18,7 +18,7 @@
     class="nx-jumpable"
     title="点击按课号搜索此课程"
     style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600;color:var(--nx-ink);cursor:pointer;"
-    onclick={() => jumpTo(course.code, course.seq)}
+    onclick={() => jumpTo(course.code, course.seq, course.teacher)}
   >{course.name}</span
   >
   <span style="font-size:10px;color:var(--nx-faint);">{course.credits}学分</span>

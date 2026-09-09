@@ -25,7 +25,7 @@
             class="nx-stage-name"
             style="flex:1;cursor:pointer;"
             title="点击按课号搜索此课程"
-            onclick={() => jumpTo(c.code, c.seq || '0')}
+            onclick={() => jumpTo(c.code, c.seq || '0', c.teacher)}
           >{c.name} <span style="color:var(--nx-faint);font-weight:400;font-size:11px;">{c.code}</span></span
           >
           <span style="font-size:11px;color:var(--nx-amber);font-weight:600;white-space:nowrap;">
