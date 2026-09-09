@@ -290,7 +290,7 @@ const cur = $derived(modal.cur);
                 {#each simResult.dist.points as pt}
                   <div class="nx-sim-bar-col" title="{pt.credits} 学分 · {Math.round(pt.prob * 1000) / 10}%">
                     <div class="nx-sim-bar-val">{Math.round(pt.prob * 1000) / 10}%</div>
-                    <div class="nx-sim-bar" style="height:{Math.max(3, Math.round((pt.prob / simResult.maxP) * 92))}px;"></div>
+                    <div class="nx-sim-bar" style="height:{Math.max(3, Math.round((pt.prob / simResult.maxP) * 84))}px;"></div>
                     <div class="nx-sim-bar-x">{pt.credits}</div>
                   </div>
                 {/each}

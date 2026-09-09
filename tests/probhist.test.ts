@@ -7,6 +7,7 @@ import {
   mergeWindow,
   probAt,
   probSeries,
+  probYDomain,
   snapshotVolMap,
   sparkPath,
   trendDelta,
@@ -121,5 +122,40 @@ describe('sparkPath（SVG 折线）', () => {
     const pts: number[][] = path.split(' ').map(p => p.split(',').map(Number));
     expect(pts[0]![0]!).toBeLessThan(pts[1]![0]!);
     expect(pts[0]![1]!).toBeGreaterThan(pts[1]![1]!);
+  });
+
+  it('传入 [yMin,yMax] → y 按域缩放（默认 0-1 域名拆分）', () => {
+    const p = sparkPath([{ t: 0, prob: 0.6 }, { t: 1, prob: 0.7 }], 100, 40, 4, 0.5, 0.8)!;
+    const pts: number[][] = p.split(' ').map(q => q.split(',').map(Number));
+    expect(pts[0]![1]!).toBeCloseTo(25.3, 1); // 36 - (0.1/0.3)*32
+    expect(pts[1]![1]!).toBeCloseTo(14.7, 1); // 36 - (0.2/0.3)*32
+    expect(pts[1]![1]!).toBeLessThan(pts[0]![1]!);
+  });
+});
+
+describe('probYDomain（动态 y 域）', () => {
+  it('min/max ±15% padding（max(ratio, 0.02)），不夹紧时原样', () => {
+    const [lo, hi] = probYDomain([{ t: 0, prob: 0.6 }, { t: 1, prob: 0.72 }]);
+    expect(lo).toBeCloseTo(0.58, 5); // 0.6 - 0.02（ratio=0.018 < 0.02）
+    expect(hi).toBeCloseTo(0.74, 5); // 0.72 + 0.02
+  });
+
+  it('越界夹紧 [0,1]', () => {
+    const [lo, hi] = probYDomain([{ t: 0, prob: 0.01 }, { t: 1, prob: 0.1 }]);
+    expect(lo).toBe(0); // 0.01 - 0.02 → 负 → 0
+    expect(hi).toBeCloseTo(0.12, 5);
+    const [lo2, hi2] = probYDomain([{ t: 0, prob: 0.9 }, { t: 1, prob: 0.99 }]);
+    expect(lo2).toBeCloseTo(0.88, 5);
+    expect(hi2).toBe(1); // 0.99 + 0.02 → 超 → 1
+  });
+
+  it('扁平序列（差<1 百分点）退化为值 ±5% 区间', () => {
+    const [lo, hi] = probYDomain([{ t: 0, prob: 0.5 }, { t: 1, prob: 0.505 }]);
+    expect(lo).toBeCloseTo(0.4525, 5); // 均值 0.5025 - 0.05
+    expect(hi).toBeCloseTo(0.5525, 5); // 均值 0.5025 + 0.05
+  });
+
+  it('空序列 → [0,1]', () => {
+    expect(probYDomain([])).toEqual([0, 1]);
   });
 });
