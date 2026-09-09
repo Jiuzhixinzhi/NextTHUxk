@@ -55,6 +55,7 @@ export const K = {
   lastUpdateCheck: 'lastUpdateCheck',
   tbookIdx: 'tbookIdx',
   tbookIdxTs: 'tbookIdxTs',
+  semScore: 'semScore',
   /** 遗留键：v3.0.0 起不再使用（stageCart=暂存、config=AI、grade=年级） */
   legacy: ['stageCart', 'config', 'grade'],
 } as const;

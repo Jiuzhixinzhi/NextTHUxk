@@ -22,6 +22,7 @@ import {
 } from '../api/records';
 import { applyVolunteer, volSession } from '../api/volunteers';
 import { dropCourse, submitCourse, changeVolunteer } from '../api/write';
+import { attachScores, ensureScores } from '../api/scores';
 import { typeCodeToFlag } from '../domain/flags';
 import { parseTimeSlots, clockRangesOf } from '../domain/time';
 import { checkPlanCoverage } from '../domain/plancov';
@@ -220,6 +221,14 @@ export async function launch(): Promise<void> {
         if (!ok) return;
         const r = tbAttach(session.allCourses);
         console.log(TAG, '[TB] 社区评价匹配', r.matched + '/' + r.total, JSON.stringify({}));
+      })
+      .catch(() => {});
+    // 校评（教务评教均分）：学期静止数据，缓存命中不发请求；全量拉取后回填池行
+    ensureScores(ctx())
+      .then(ok => {
+        if (!ok) return;
+        const r = attachScores(session.allCourses);
+        console.log(TAG, '[Score] 校评匹配', r.matched + '/' + r.total);
       })
       .catch(() => {});
     startVolAutoSyncIfNeeded();
@@ -488,6 +497,7 @@ export function mergeRows(rows: Course[]): number {
       }
     }
   }
+  if (added) attachScores(rows); // 新入池行补挂校评（launch 后台已 ensureScores；未就绪时空转下次合并补上）
   applyLevelMap(rows, session.levelMap, session.planData);
   if (rows.length) {
     const wa = rows.filter(r => r.attr).length;
