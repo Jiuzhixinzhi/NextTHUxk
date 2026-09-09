@@ -165,6 +165,8 @@ export interface CreditSimItem {
   zy?: number;
   liveProb: number | null;
   prob: number | null;
+  /** 正选锁定（课余量阶段已确认选入，prob 恒 1） */
+  certain?: boolean;
 }
 
 /** 概率结果 */

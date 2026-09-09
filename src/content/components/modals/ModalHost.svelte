@@ -65,11 +65,12 @@ const cur = $derived(modal.cur);
   let zySel: number[] = $state([]);
   let promptVal: string = $state('');
 
-  function simReinit(courses: DraftCourse[]) {
+  function simReinit(courses: DraftCourse[], certainKeys?: string[]) {
     const items = creditSimItems(courses, {
       isQueuePhase: session.isQueuePhase,
       queueDataMap: session.queueDataMap as never,
       courseLookup: (code, seq) => session.allCourses.find((x) => x.code === code && String(x.seq || '0') === String(seq || '0')),
+      certainKeys: certainKeys && certainKeys.length ? new Set(certainKeys) : undefined,
     });
     sim.items = items;
     sim.mode = 'live';
@@ -112,7 +113,7 @@ const cur = $derived(modal.cur);
     const cur = modal.cur;
     if (cur.kind === 'course') void onCourseOpen(cur.code, cur.teacherId);
     else if (cur.kind === 'reviews') void onReviewsOpen(cur.code, cur.seq);
-    else if (cur.kind === 'creditSim') simReinit(cur.courses);
+    else if (cur.kind === 'creditSim') simReinit(cur.courses, cur.certainKeys);
     else if (cur.kind === 'zyConfirm') zySel = cur.courses.map((c) => c.zy || 3);
     else if (cur.kind === 'prompt') promptVal = cur.initial;
   });
@@ -244,7 +245,9 @@ const cur = $derived(modal.cur);
                 <div class="nx-sim-row">
                   <span class="nx-sim-name" title={it.name}>{it.name}</span>
                   <span class="nx-sim-cred">{it.credits}学分</span>
-                  {#if it.flag && it.zy}
+                  {#if it.certain}
+                    <span class="nx-sim-tag" title="课余量阶段已确认选入，概率恒 100%">已选锁定</span>
+                  {:else if it.flag && it.zy}
                     <span class="nx-sim-tag">{flagName(it.flag)} · {it.zy}志愿</span>
                   {/if}
                   <input

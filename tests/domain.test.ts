@@ -258,6 +258,43 @@ describe('学分模拟（伯努利卷积）', () => {
     expect(items).toHaveLength(1);
     expect(items[0]!.prob).toBeGreaterThan(0);
   });
+
+  it('creditSimItems 队列阶段：正选锁定恒 1，候补走余量/手动', () => {
+    const held = { code: '100', seq: '01', name: '锁', credits: 3, flag: 'bx', zy: 1 } as never;
+    const cand0 = { code: '200', seq: '01', name: '候', credits: 2, flag: 'rx', zy: 3 } as never;
+    const cand1 = { code: '300', seq: '01', name: '候2', credits: 2, flag: 'rx', zy: 3 } as never;
+    const items = creditSimItems([held, cand0, cand1], {
+      isQueuePhase: true,
+      queueDataMap: {
+        '100_1': { qRemaining: 0 } as never,
+        '200_1': { qRemaining: 0 } as never,
+        '300_1': { qRemaining: 5 } as never,
+      },
+      courseLookup: () => undefined,
+      certainKeys: new Set(['100_1']),
+    });
+    expect(items[0]!.prob).toBe(1);
+    expect(items[0]!.certain).toBe(true);
+    expect(items[1]!.prob).toBeNull();
+    expect(items[1]!.certain).toBeUndefined();
+    expect(items[2]!.prob).toBe(1);
+    expect(items[2]!.certain).toBeUndefined();
+  });
+
+  it('creditSimItems 非队列阶段忽略 certainKeys（走志愿级联）', () => {
+    const c = {
+      code: '1', seq: '1', name: '课', credits: 3, flag: 'bx', zy: 1,
+      volRequired: '(0)5,5,5', volCapacity: 4, volApplied: 9,
+    } as never;
+    const items = creditSimItems([c], {
+      isQueuePhase: false,
+      queueDataMap: {},
+      courseLookup: () => c,
+      certainKeys: new Set(['1_1']),
+    });
+    expect(items[0]!.prob).toBeCloseTo(0.8);
+    expect(items[0]!.certain).toBeUndefined();
+  });
 });
 
 describe('草稿差量对齐', () => {

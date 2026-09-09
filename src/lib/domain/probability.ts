@@ -208,13 +208,14 @@ export function probGridData(course: Course): { flag: Flag; cells: (ProbResult &
   }));
 }
 
-/** 学分中签模拟条目（prob=null 表示实时取不到，由用户手动填） */
+/** 学分中签模拟条目（prob=null 表示实时取不到，由用户手动填；certainKeys=课余量阶段已锁定正选的键集，恒 prob=1） */
 export function creditSimItems(
   courses: Course[],
   ctx: {
     isQueuePhase: boolean;
     queueDataMap: Record<string, { qRemaining: number } | undefined>;
     courseLookup: (code: string, seq: string) => Course | undefined;
+    certainKeys?: Set<string>;
   },
 ): CreditSimItem[] {
   const items: CreditSimItem[] = [];
@@ -222,9 +223,14 @@ export function creditSimItems(
     if (!(Number(c.credits) > 0)) return;
     let prob: number | null = null;
     const ac = ctx.courseLookup(c.code, c.seq);
+    const qkey = c.code + '_' + normSeq(c.seq);
     if (ctx.isQueuePhase) {
-      const qd = ctx.queueDataMap[c.code + '_' + normSeq(c.seq)];
-      if (qd && Number(qd.qRemaining) > 0) prob = 1;
+      if (ctx.certainKeys?.has(qkey)) {
+        prob = 1; // 正选锁定：已确认选入与余量无关
+      } else {
+        const qd = ctx.queueDataMap[qkey];
+        if (qd && Number(qd.qRemaining) > 0) prob = 1;
+      }
     } else if (ac && c.flag && c.zy) {
       const p = calcProb(ac, c.flag, c.zy);
       if (p && p.prob >= 0) prob = p.prob;
@@ -236,6 +242,7 @@ export function creditSimItems(
       zy: c.zy,
       liveProb: prob === null ? null : Math.round(prob * 100) / 100,
       prob: prob === null ? null : Math.round(prob * 100) / 100,
+      certain: ctx.isQueuePhase && ctx.certainKeys?.has(qkey) ? true : undefined,
     });
   });
   return items;
