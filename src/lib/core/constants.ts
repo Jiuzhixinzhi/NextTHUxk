@@ -13,7 +13,7 @@ export const DATA_VER = 7;
 
 /** 发布版本回退值：仅限无 chrome.runtime 的环境（vitest / 工具链）；
  *  扩展运行时一律以 manifest.json 为单源（上游 v2.0.1 实录：双版本源漂移致永远提示更新） */
-export const VER_FALLBACK = '3.2.0';
+export const VER_FALLBACK = '3.3.0';
 
 /** 发布版本单源：读 manifest.json（content/popup 扩展环境可用），与 manifest 永不再漂移 */
 export function curVer(): string {
@@ -26,7 +26,7 @@ export function curVer(): string {
 }
 
 /** 构建标记：面板+启动日志可见，防旧构建疑案 */
-export const BUILD = '3020001';
+export const BUILD = '3030001';
 
 /** 存在严重缺陷的版本（顶部红色警示横幅） */
 export const DANGEROUS_VERS = ['1.0.1', '1.0.2', '1.0.3', '1.1.2', '1.2.0'];
