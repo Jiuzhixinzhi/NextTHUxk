@@ -497,7 +497,10 @@ export function mergeRows(rows: Course[]): number {
       }
     }
   }
-  if (added) attachScores(rows); // 新入池行补挂校评（launch 后台已 ensureScores；未就绪时空转下次合并补上）
+  // 每次合并都补挂（校评 + 社区评价）：重复行（added=0）的展示对象是本次新解析的行，
+  // 不挂会让搜索结果的徽章丢失（刷新首搜显示、再搜消失）；未就绪时空转，下次合并自愈
+  attachScores(rows);
+  tbAttach(rows);
   applyLevelMap(rows, session.levelMap, session.planData);
   if (rows.length) {
     const wa = rows.filter(r => r.attr).length;
