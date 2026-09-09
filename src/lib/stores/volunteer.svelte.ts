@@ -125,11 +125,10 @@ export async function fetchVolForPool(ctx: VolApplyCtx & { BASE: string; SEM: st
       },
     },
   );
-  if (Object.keys(partial).length) {
-    vol.map = Object.assign({}, vol.map, partial);
-    const targets = ctx.allCourses.concat(ctx.searchRows || []);
-    applyVolunteer(targets, vol.map);
-  }
+  // 无条件回放（幂等）：launch 重建池行后若所有院系均在检查点窗口内 fresh，partial
+  // 为空但池行仍缺 vol 字段（概率标签消失）——必须回放缓存 vol.map
+  vol.map = Object.assign({}, vol.map, partial);
+  applyVolunteer(ctx.allCourses.concat(ctx.searchRows || []), vol.map);
   volCachePersist(ctx.SEM);
   return partial;
 }

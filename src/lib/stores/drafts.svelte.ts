@@ -23,6 +23,7 @@ import { fetchSelectedCourses } from '../api/records';
 import { dropCourse, submitCourse } from '../api/write';
 import { confirmDialog, promptDialog } from './modal.svelte.ts';
 import { showToast, showXkResult } from './toast.svelte.ts';
+import { onLaunchDone, onSelectedChanged } from './bus.svelte.ts';
 import { refreshPlanCoverage, refreshSelected, selectedPreviewRows, knoteRemember, session } from './session.svelte.ts';
 
 export type PreviewTarget = { kind: 'selected' } | { kind: 'draft'; id: number };
@@ -116,12 +117,19 @@ export async function loadDrafts(): Promise<void> {
   if (migrated) persistSoon();
   if (draftStore.activeId && !draftStore.drafts.some(d => d.id === draftStore.activeId)) draftStore.activeId = draftStore.drafts[0]?.id || 0;
   if (!draftStore.activeId) draftStore.activeId = draftStore.drafts[0]?.id || 0;
-  if (session.allCourses.length && draftStore.drafts.length) refreshCoverage();
+  if (session.allCourses.length) refreshCoverage();
 }
 
 function refreshCoverage(): void {
   refreshPlanCoverage(draftStore.drafts.map(d => d.courses));
 }
+
+// 首开时序：openWorkbench 先 loadDrafts（此时池为空、上面漏算）后 launch —— launch 完成后补算
+onLaunchDone(() => {
+  if (session.allCourses.length) refreshCoverage();
+});
+// 退选/提交草稿等已选变更 → 覆盖数重算
+onSelectedChanged(() => refreshCoverage());
 
 /** 保证存在活跃草稿（首个加入自动创建） */
 export function ensureActiveDraft(): Draft {

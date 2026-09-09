@@ -29,7 +29,7 @@ import { showXkResult } from './toast.svelte.ts';
 import { promptDialog, zyConfirm } from './modal.svelte.ts';
 import { vol, volCacheHydrate, volCachePersist, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
 import { probHistHydrate } from './probhist.svelte.ts';
-import { emitServerRowsMerged, emitLaunchDone } from './bus.svelte.ts';
+import { emitServerRowsMerged, emitLaunchDone, emitSelectedChanged } from './bus.svelte.ts';
 import { checkUpdate } from '../update/check';
 import { ensureIndex, tbAttach, setOnIndexChange } from '../reviews/reviews';
 import { deptOfCourse } from '../api/dept';
@@ -83,10 +83,12 @@ export function selectedPreviewRows(): Course[] {
   return sel.concat(cand);
 }
 
-/** 培养方案覆盖（正选 + 全部草稿）——由 launch 在草稿加载后填充 */
-export let coverageRows: ReturnType<typeof checkPlanCoverage> = [];
+/** 培养方案覆盖（正选 + 全部草稿）——launch 完成后（bus onLaunchDone）与草稿/已选变更时重算。
+ *  历史缺陷：曾用普通 let 导出（非响应式），且首开时 loadDrafts 先于 launch、池为空漏算，
+ *  卡片「等待加载」直到返回原系统再开启（重开时池非空、挂载前恰好算好）才出现。 */
+export const planCov = $state({ rows: [] as ReturnType<typeof checkPlanCoverage> });
 export function refreshPlanCoverage(drafts: DraftCourse[][]): void {
-  coverageRows = checkPlanCoverage(session.planData, session.allCourses, drafts);
+  planCov.rows = checkPlanCoverage(session.planData, session.allCourses, drafts);
 }
 
 // ─── 站点识别（boot 时调用一次） ───────────────────────────────
@@ -172,6 +174,9 @@ export async function launch(): Promise<void> {
     });
     session.allCourses = pool;
     applyLevelMap(pool, session.levelMap, session.planData);
+    // 重开场景：志愿院系均在检查点窗口内 fresh → 后台拉取返回空，池行会一直缺 vol 字段
+    // （概率标签消失）。此处先用内存/缓存 vol.map 同步回放，后台到货后再刷新。
+    if (Object.keys(vol.map).length) applyVolunteer(pool, vol.map);
     // 课余量/排队 + 志愿：非阻塞（UI 先上屏，数据后到回填）
     void (async () => {
       const qResult = await fetchQueueData(ctx(), pool).catch(e => {
@@ -378,6 +383,7 @@ export async function refreshSelected(withModal = true): Promise<void> {
   } catch {
     /* 保持现有余量数据 */
   }
+  emitSelectedChanged();
 }
 
 /** 检查点同步：队列 + 候补 + 余量 + 志愿（fire-and-forget 完成后再回渲） */

@@ -1,8 +1,10 @@
 <script lang="ts">
-  import { coverageRows } from '../../lib/stores/session.svelte.ts';
+  import { planCov } from '../../lib/stores/session.svelte.ts';
   import { setChip } from '../../lib/stores/search.svelte.ts';
 
-  function groups(): { name: string; cov: number; cr: number; n: number }[] {
+  const coverageRows = $derived(planCov.rows);
+
+  const groups = $derived.by(() => {
     const g = new Map<string, { cov: number; cr: number; n: number }>();
     coverageRows.forEach((c) => {
       const name = c.group || c.attr || '其他';
@@ -13,20 +15,20 @@
       e.n++;
     });
     return [...g.entries()].map(([name, v]) => ({ name, ...v }));
-  }
+  });
 
-  const total = (() => {
+  const total = $derived.by(() => {
     const cr = coverageRows.reduce((s, c) => s + c.credits, 0);
     const cov = coverageRows.filter((c) => c.covered).reduce((s, c) => s + c.credits, 0);
     return { cr, cov, n: coverageRows.length };
-  })();
+  });
 </script>
 
 <div class="nx-sec">
   <div class="nx-sec-title">我的培养方案</div>
   {#if coverageRows.length}
     <div class="grid gap-2" style="grid-template-columns:1fr 1fr;">
-      {#each groups() as g}
+      {#each groups as g}
         <div class="nx-plan-card" title="点击在培养方案视图查看本组" onclick={() => setChip('plan')}>
           <div class="nx-plan-num">{g.cov}<small style="font-size:12px;font-weight:400;color:var(--nx-faint);">/{g.cr}学分</small></div>
           <div class="nx-plan-lbl">{g.name} ({g.n}门)</div>

@@ -37,3 +37,20 @@ export function emitLaunchDone(): void {
     }
   }
 }
+
+// ─── 已选变更钩子（refreshSelected 后 → 培养方案覆盖数重算等） ─────
+const selectedChangedHooks: (() => void)[] = [];
+
+export function onSelectedChanged(fn: () => void): void {
+  selectedChangedHooks.push(fn);
+}
+
+export function emitSelectedChanged(): void {
+  for (const fn of selectedChangedHooks) {
+    try {
+      fn();
+    } catch {
+      /* fail-soft */
+    }
+  }
+}
