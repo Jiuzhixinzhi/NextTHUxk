@@ -3,13 +3,14 @@
 // 启动编排、已选刷新、课程行合并、已选时间回填。
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Ctx, DraftCourse, ManualEvent, PlanCourse, QueueDatum, VolDatum } from '../domain/types';
-import { CUR_VER, DATA_VER, TAG } from '../core/constants';
+import { DATA_VER, TAG } from '../core/constants';
 import { keyOf, normSeq, sleep } from '../core/utils';
 import { K, cleanupLegacyKeys, store } from '../storage/store';
 import { knoteLoad, makeKnoteRemember, type KnoteMap } from '../storage/knote';
 import { ensureSiteIdentity } from '../site/webvpn';
+import { fetchPageRaw, setWebvpnReenter } from '../net/http';
 import { fetchTrainingPlan } from '../api/plan';
-import { serverSearch } from '../api/search';
+import { isXkDeadHtml, serverSearch } from '../api/search';
 import {
   applyLevelMap,
   backfillCandidateMeta,
@@ -102,6 +103,21 @@ export async function bootSite(): Promise<void> {
   session.isZhjwxk = id.isZhjwxk;
   session.isZhjw = id.isZhjw;
   session.isWebvpn = id.isWebvpn;
+  setWebvpnReenter(reenterXkRoot);
+}
+
+/** WebVPN 票据自愈：重进一次教务入口根（BASE）换票（wengine_vpn_ticket 过期而
+ *  主会话活着的实录修法，上游 v2.0.1 同款）。入口根也是死页 = 主会话真死，如实返回。 */
+async function reenterXkRoot(): Promise<boolean> {
+  try {
+    const html = await fetchPageRaw(session.BASE + '/');
+    const ok = !isXkDeadHtml(html);
+    console.log(TAG, 'webvpn 重进入口换票:', ok ? '成功，重试原请求' : '入口根也是死页，主会话真死，需重新登录');
+    return ok;
+  } catch (e) {
+    console.warn(TAG, 'webvpn 重进入口失败:', e);
+    return false;
+  }
 }
 
 // ─── 启动编排 ─────────────────────────────────────────────────
@@ -263,8 +279,7 @@ export function clearBanner() {
   banner.kind = 'none';
 }
 
-// 版本号/构建显示
-export { CUR_VER };
+// 版本号/构建显示：curVer() 由 core/constants 单源导出（Banner 等直接引用）
 
 // ─── 志愿：launch 后台块 ─────────────────────────────────────
 import { fetchVolForPool, startVolAutoSync } from './volunteer.svelte.ts';

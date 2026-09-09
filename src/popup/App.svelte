@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { CUR_VER, BUILD } from '../lib/core/constants';
+  import { curVer, BUILD } from '../lib/core/constants';
 
   let status = $state('检测中…');
   let ok = $state(false);
@@ -49,7 +49,7 @@
       <span class="lp">(</span><span class="word"><i>O</i><i>n</i><i>e</i></span><span></span><span class="lp"> </span><span class="tu">T</span><span class="tu">H</span><span class="tu">U</span><span class="lp">)</span>
     </span>
     <span style="font-size:14px;font-weight:700;letter-spacing:.05em;">NextTHUxk</span>
-    <span style="margin-left:auto;font-size:9px;color:rgba(31,35,41,.4);">v{CUR_VER} · {BUILD}</span>
+    <span style="margin-left:auto;font-size:9px;color:rgba(31,35,41,.4);">v{curVer()} · {BUILD}</span>
   </div>
 
   <div

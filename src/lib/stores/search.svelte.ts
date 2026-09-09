@@ -46,6 +46,7 @@ export const search = $state({
   browseHasMore: false,
   jumpCode: '',
   jumpSeq: '',
+  jumpTeacher: '',
   lastHit: { code: '', seq: '' },
   scrollSeq: 0,
   loadAllNonce: 0,
@@ -312,7 +313,7 @@ export function loadAll(): void {
         search.incomplete = !!(res.totalRows && (res.rows || []).length < res.totalRows);
         if (res.totalPages) search.totalPages = res.totalPages;
         if (res.totalRows) search.totalRows = res.totalRows;
-        search.error = res.pageKind === 'unknown' ? '教务返回异常页，可能需退出重新登录' : '';
+        search.error = res.pageKind === 'unknown' ? '教务返回异常页——WebVPN/教务会话可能已失效，请退出重新登录' : '';
       }
     } catch (e) {
       console.warn(TAG, 'load all:', e);
@@ -388,7 +389,7 @@ export async function runServerQuery(): Promise<void> {
         search.incomplete = queryMode && !!(res.totalRows && (res.rows || []).length < res.totalRows);
         search.error =
           res.pageKind === 'unknown'
-            ? '教务返回异常页' + (res.htmlHead ? '（' + String(res.htmlHead).slice(0, 80) + '…）' : '') + '，可能需退出重新登录'
+            ? '教务返回异常页' + (res.htmlHead ? '（' + String(res.htmlHead).slice(0, 80) + '…）' : '') + '——WebVPN/教务会话可能已失效，请退出重新登录'
             : res.pageKind === 'empty'
               ? ''
               : '';
@@ -426,8 +427,23 @@ export function browseGoto(page: number): void {
 }
 
 // ─── 跳转定位（课表/草稿 → 左侧搜索定位高亮） ─────────────────
+// 身份仲裁（上游 #33「课序会骗人」同款分层）：课序会陈旧/缺位，教师才是最高身份。
+// 匹配序：课号+课序+教师 → 课号+教师（唯一直认）→ 课号+课序（旧行为）→ 放弃高亮不冒认。
 
-export function jumpTo(code: string, seq: string): void {
+/** 教师归一（去空白+小写） */
+function normTeacher(s: string | undefined | null): string {
+  return (s || '').toLowerCase().replace(/\s+/g, '');
+}
+
+/** 教师命中：行教师含查询教师即可（多师行「刘烨、王洪川」含「刘烨」）；
+ *  反向包含不做——查询串含多师时防「王洪川」单师行误中 */
+function teacherHit(r: Course, teacher: string): boolean {
+  if (!teacher) return false;
+  const t = normTeacher(r.teacher);
+  return !!t && (t === teacher || t.includes(teacher));
+}
+
+export function jumpTo(code: string, seq: string, teacher?: string): void {
   search.chip = 'all';
   for (const k of Object.keys(search.server)) search.server[k as keyof typeof search.server] = '';
   for (const k of Object.keys(search.local)) search.local[k as keyof typeof search.local] = '';
@@ -435,6 +451,7 @@ export function jumpTo(code: string, seq: string): void {
   search.q = code;
   search.jumpCode = code;
   search.jumpSeq = seq || '0';
+  search.jumpTeacher = teacher || '';
   search.serverSig = '';
   search.rows = null;
   scheduleServerQuery(true);
@@ -444,14 +461,26 @@ export async function highlightJumpTarget(): Promise<void> {
   const code = search.jumpCode;
   if (!code) return;
   const seq = normSeq(search.jumpSeq || '0');
+  const teacher = normTeacher(search.jumpTeacher);
   let rows = search.rows || [];
-  const findRow = () => {
+  const findTiered = (): { idx: number; row: Course | null } => {
     const q = search.q.toLowerCase();
     const src = q ? rows.filter(c => entryMatchesQ(c, q)) : rows;
-    return src.findIndex(r => String(r.code) === String(code) && normSeq(r.seq || '0') === seq);
+    const sameCode = src.filter(r => String(r.code) === String(code));
+    // ① 课号+课序+教师 全信号
+    let row = sameCode.find(r => normSeq(r.seq || '0') === seq && teacherHit(r, teacher)) || null;
+    // ② 课号+教师：唯一直认；同师多课须课序在师内判得出，判不出不冒认
+    if (!row && teacher) {
+      const hits = sameCode.filter(r => teacherHit(r, teacher));
+      if (hits.length === 1) row = hits[0]!;
+      else if (hits.length > 1) row = hits.find(r => normSeq(r.seq || '0') === seq) || null;
+    }
+    // ③ 课号+课序（旧行为兜底）
+    if (!row) row = sameCode.find(r => normSeq(r.seq || '0') === seq) || null;
+    return row ? { idx: src.indexOf(row), row } : { idx: -1, row: null };
   };
-  let idx = findRow();
-  if (idx < 0 && search.incomplete && search.totalPages >= 2 && search.totalPages <= 25 && !search.loadingAll) {
+  let hit = findTiered();
+  if (hit.idx < 0 && search.incomplete && search.totalPages >= 2 && search.totalPages <= 25 && !search.loadingAll) {
     console.log(TAG, '跳转目标未落在已探测页，自动补齐全量（共', search.totalRows, '行 /', search.totalPages, '页）:', code + '_' + seq);
     const sigAt = search.serverSig;
     try {
@@ -463,14 +492,16 @@ export async function highlightJumpTarget(): Promise<void> {
       if ((res.rows || []).length) mergeRows(res.rows);
       search.incomplete = false;
       rows = search.rows || [];
-      idx = findRow();
+      hit = findTiered();
     } catch {
       /* fail-soft */
     }
   }
   search.jumpCode = '';
-  if (idx < 0) return;
-  search.uiPage = Math.floor(idx / PAGE_SIZE) + 1;
-  search.lastHit = { code, seq };
+  search.jumpTeacher = '';
+  if (hit.idx < 0 || !hit.row) return; // 诚实缺省：判不出不高亮，绝不冒认同名第一门
+  search.uiPage = Math.floor(hit.idx / PAGE_SIZE) + 1;
+  // lastHit 存行原始 seq：高亮选择器按 data-seq={c.seq} 原样匹配（归一化 '1' 会失配 '01'）
+  search.lastHit = { code, seq: hit.row.seq || '0' };
   search.scrollSeq++;
 }
