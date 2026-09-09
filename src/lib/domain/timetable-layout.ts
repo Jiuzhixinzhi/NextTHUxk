@@ -19,6 +19,8 @@ export interface PreviewBlock {
   bg: string;
   origin: string;
   manual: boolean;
+  /** 占用块专属：同日与任一课程块时间相交 → 渲染为全宽覆盖层（不拦截课程交互） */
+  overlap?: boolean;
   id?: number;
   code?: string;
   seq?: string;
@@ -55,6 +57,7 @@ interface RawBlock {
   probLabel: string;
   bg: string;
   manual: boolean;
+  overlap?: boolean;
   id?: number;
   code?: string;
   seq?: string;
@@ -115,10 +118,10 @@ export function layoutPreview(
       undet.push({ label: lbl, code: c.code, seq: c.seq || '0', credits: c.credits || 0, manual: (c as ManualEvent).manual === true, id: (c as ManualEvent).id });
     }
   });
-  // 同日重叠分道（簇制）
+  // 同日重叠分道（簇制）：课程与占用各自聚类——占用不挤占课程分道（重叠时渲染为全宽覆盖层）
   const laneOf = new Map<string, { lane: number; lanes: number }>();
-  for (let day = 1; day <= 7; day++) {
-    const list = raw.filter(b => b.day === day).sort((a, b) => a.begin - b.begin || a.end - b.end);
+  const clusterOf = (list: RawBlock[]): void => {
+    list.sort((a, b) => a.begin - b.begin || a.end - b.end);
     let cluster: RawBlock[] = [];
     let clusterEnd = -1;
     const flush = () => {
@@ -131,6 +134,11 @@ export function layoutPreview(
         } else ends[lane] = b.end;
         laneOf.set(b.key, { lane, lanes: ends.length });
       }
+      // 二次遍历统一簇内 lanes：首块分配时 ends.length 尚未收满（v2 render.js 同款，重构时曾丢失）
+      for (const b of cluster) {
+        const e = laneOf.get(b.key);
+        if (e) laneOf.set(b.key, { lane: e.lane, lanes: ends.length });
+      }
       cluster = [];
       clusterEnd = -1;
     };
@@ -140,6 +148,15 @@ export function layoutPreview(
       clusterEnd = Math.max(clusterEnd, b.end);
     }
     flush();
+  };
+  for (let day = 1; day <= 7; day++) {
+    const list = raw.filter(b => b.day === day);
+    clusterOf(list.filter(b => !b.manual));
+    clusterOf(list.filter(b => b.manual));
+  }
+  // 占用 × 课程 同日时间相交 → 覆盖层标记（begin/end 分钟相交即开区间判定）
+  for (const b of raw) {
+    if (b.manual) b.overlap = raw.some(o => !o.manual && o.day === b.day && o.begin < b.end && b.begin < o.end);
   }
   const PX = PV_PX_PER_MIN;
   let A0 = PV_AXIS_BEGIN;
