@@ -73,6 +73,36 @@ export function mergeWindow(hist: VolHistMap, incoming: VolHistMap, max = MAX_HI
   return changed;
 }
 
+/** 完整历史序列并入（备份导入场景）：逐点委托 mergeWindow（按 t 插入 / 同窗替换 / 幂等 / 截断）。
+ *  与 mergeWindow 的区别：incoming 每 key 可含多点完整序列（mergeWindow 只消费首点——快照场景）。
+ *  返回有新增/更新的课数。 */
+export function mergeHistSeries(hist: VolHistMap, incoming: VolHistMap, max = MAX_HIST_WINDOWS): number {
+  let changedKeys = 0;
+  for (const k of Object.keys(incoming)) {
+    const pts = incoming[k]!;
+    let changed = false;
+    for (const p of pts) {
+      if (mergeWindow(hist, { [k]: [p] }, max)) changed = true;
+    }
+    if (changed) changedKeys++;
+  }
+  return changedKeys;
+}
+
+/** 导入/外部来源的历史 map 结构收敛：坏条目跳过、字段归一、超限截断（保留最近窗口） */
+export function sanitizeHistMap(raw: VolHistMap): VolHistMap {
+  const out: VolHistMap = {};
+  for (const k of Object.keys(raw || {})) {
+    const pts = raw[k];
+    if (!Array.isArray(pts)) continue;
+    const ok = pts
+      .filter(p => p && Number.isFinite(Number(p.t)) && Number(p.t) > 0)
+      .map(p => ({ t: Number(p.t), cap: Number(p.cap) || 0, vr: String(p.vr || ''), vx: String(p.vx || ''), vo: String(p.vo || ''), vs: String(p.vs || '') }));
+    if (ok.length) out[k] = ok.slice(-MAX_HIST_WINDOWS);
+  }
+  return out;
+}
+
 /** 快照点 → 该 (类型,志愿) 概率（构造伪课程委托 calcProb，口径与卡片一致） */
 export function probAt(p: VolPoint, flag: Flag, zy: number): ProbResult {
   const pseudo: Course = {

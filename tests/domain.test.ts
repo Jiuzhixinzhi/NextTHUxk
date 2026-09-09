@@ -108,6 +108,24 @@ describe('冲突检测（区间重叠）', () => {
   });
 });
 
+describe('spansOf（manual 自由钟点）', () => {
+  it('manual 走 begin/end 钟点分支，不经大节解析', () => {
+    const s = spansOf({ manual: true, day: 3, begin: '18:30', end: '21:00', time: '' });
+    expect(s).toEqual([{ dayN: 3, begin: 18 * 60 + 30, end: 21 * 60, when: '18:30-21:00', week: '' }]);
+  });
+
+  it('manual 起止倒置/缺日 → 空区间', () => {
+    expect(spansOf({ manual: true, day: 3, begin: '21:00', end: '18:30', time: '' })).toEqual([]);
+    expect(spansOf({ manual: true, day: 0, begin: '18:30', end: '21:00', time: '' })).toEqual([]);
+  });
+
+  it('非 manual 不受 begin/end 干扰（仍走大节解析）', () => {
+    const s = spansOf({ time: '1-2(1-16周)', begin: '18:30', end: '21:00' });
+    expect(s).toHaveLength(1);
+    expect(s[0]!.when).toBe('3-4节');
+  });
+});
+
 describe('概率模型', () => {
   const makeCourse = (volRequired: string, cap: number, applied: number) => ({
     code: 'x',

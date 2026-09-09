@@ -1,34 +1,53 @@
 // ═══════════════════════════════════════════════════════════════
-// NextTHUxk — 一键备份（统一导出/导入 JSON：草稿 + 自定义占用）
-// v3：backupVer=2（无暂存）；导入兼容 v1（stageCart 并入活跃草稿）。
+// NextTHUxk — 一键备份（统一导出/导入 JSON：草稿 + 自定义占用 + 概率缓存）
+// v4：backupVer=3（+probHist 趋势历史 / volCache 志愿缓存）；导入兼容 v1-3。
 // ═══════════════════════════════════════════════════════════════
 import { CUR_VER } from '../core/constants';
 import { K, store } from '../storage/store';
-import type { Draft, ManualEvent } from '../domain/types';
+import type { Draft, ManualEvent, VolDatum } from '../domain/types';
+import { mergeHistSeries, sanitizeHistMap, type VolHistMap } from '../domain/probhist';
 import { showToast } from './toast.svelte.ts';
 import { confirmDialog } from './modal.svelte.ts';
 import { draftStore, loadDrafts, importJson } from './drafts.svelte.ts';
 import { session } from './session.svelte.ts';
+import { search } from './search.svelte.ts';
+import { probHist } from './probhist.svelte.ts';
+import { mergeImportedVolCache, vol } from './volunteer.svelte.ts';
+import { volSession } from '../api/volunteers';
+import { volWindowStart } from '../update/check';
 import { normSeq } from '../core/utils';
 
-export async function draftCounts(): Promise<{ drafts: number; manual: number }> {
-  return { drafts: draftStore.drafts.length, manual: session.manualEvents.length };
+export async function draftCounts(): Promise<{ drafts: number; manual: number; hist: number }> {
+  return { drafts: draftStore.drafts.length, manual: session.manualEvents.length, hist: Object.keys(probHist.map).length };
 }
 
 export async function backupExport(): Promise<void> {
   const manualEvents = session.manualEvents;
-  if (!draftStore.drafts.length && !manualEvents.length) {
-    showToast(false, '没有可备份的数据（草稿 / 占用均为空）');
+  // 概率缓存随备份走（$state Proxy 先深拷贝，勿直传序列化）
+  const hist = probHist.sem === session.SEM ? probHist.map : {};
+  const histOk = !!session.SEM && !!Object.keys(hist).length;
+  const volOk = !!session.SEM && !!Object.keys(vol.map).length;
+  if (!draftStore.drafts.length && !manualEvents.length && !histOk && !volOk) {
+    showToast(false, '没有可备份的数据（草稿 / 占用 / 概率缓存均为空）');
     return;
   }
   const data = {
     app: 'NextTHUxk',
-    backupVer: 2,
+    backupVer: 3,
     ver: CUR_VER,
     sem: session.SEM || '',
     ts: Date.now(),
     drafts: JSON.parse(JSON.stringify(draftStore.drafts)),
-    manualEvents,
+    manualEvents: JSON.parse(JSON.stringify(manualEvents)),
+    probHist: histOk ? { sem: session.SEM, map: JSON.parse(JSON.stringify(hist)) } : undefined,
+    volCache: volOk
+      ? {
+          sem: session.SEM,
+          windowStart: volWindowStart().getTime(),
+          map: JSON.parse(JSON.stringify(vol.map)),
+          depts: JSON.parse(JSON.stringify(volSession.depts)),
+        }
+      : undefined,
   };
   const d = new Date();
   const pad = (n: number) => String(n).padStart(2, '0');
@@ -44,7 +63,10 @@ export async function backupExport(): Promise<void> {
     a.remove();
     URL.revokeObjectURL(a.href);
   }, 1000);
-  showToast(true, '备份已下载：草稿 ' + draftStore.drafts.length + ' 份 · 占用 ' + manualEvents.length + ' 条');
+  const extras: string[] = [];
+  if (histOk) extras.push('趋势' + Object.keys(hist).length + '课');
+  if (volOk) extras.push('志愿' + Object.keys(vol.map).length + '行');
+  showToast(true, '备份已下载：草稿 ' + draftStore.drafts.length + ' 份 · 占用 ' + manualEvents.length + ' 条' + (extras.length ? ' · ' + extras.join(' · ') : ''));
 }
 
 export async function backupImport(jsonStr: string): Promise<void> {
@@ -56,13 +78,17 @@ export async function backupImport(jsonStr: string): Promise<void> {
       drafts?: Draft[];
       manualEvents?: ManualEvent[];
       stageCart?: Draft['courses'];
+      probHist?: { sem?: string; map?: VolHistMap };
+      volCache?: { sem?: string; windowStart?: number; map?: Record<string, VolDatum>; depts?: Record<string, number> };
     };
-    if (!data || data.app !== 'NextTHUxk' || (Number(data.backupVer) !== 1 && Number(data.backupVer) !== 2)) {
+    if (!data || data.app !== 'NextTHUxk' || (Number(data.backupVer) !== 1 && Number(data.backupVer) !== 2 && Number(data.backupVer) !== 3)) {
       throw new Error('不是 NextTHUxk 备份文件（app/backupVer 校验失败）');
     }
     const draftRows = Array.isArray(data.drafts) ? data.drafts : [];
     const manualRows = Array.isArray(data.manualEvents) ? data.manualEvents : [];
-    if (!draftRows.length && !manualRows.length && !(Array.isArray(data.stageCart) && data.stageCart.length)) {
+    const histIn = data.probHist && data.probHist.map && Object.keys(data.probHist.map).length ? data.probHist : null;
+    const volIn = data.volCache && data.volCache.map && Object.keys(data.volCache.map).length ? data.volCache : null;
+    if (!draftRows.length && !manualRows.length && !histIn && !volIn && !(Array.isArray(data.stageCart) && data.stageCart.length)) {
       throw new Error('备份文件中没有可导入的数据');
     }
     if (data.sem && session.SEM && data.sem !== session.SEM) {
@@ -138,16 +164,69 @@ export async function backupImport(jsonStr: string): Promise<void> {
         /* fail-soft */
       }
     }
+    // 4) 概率趋势历史：备份学期与当前一致才并入（逐点合并：按 t 排序去重 / 同窗替换 / 60 窗口截断）
+    let histAdd = 0;
+    let histSkipSem = false;
+    let histNotReady = false;
+    if (histIn) {
+      if (String(histIn.sem || data.sem || '') !== session.SEM) {
+        histSkipSem = true;
+      } else {
+        if (!probHist.ready) await waitProbHistReady();
+        if (!probHist.ready) {
+          histNotReady = true;
+        } else if (probHist.sem === session.SEM) {
+          const incoming = sanitizeHistMap(histIn.map!);
+          if (Object.keys(incoming).length) {
+            histAdd = mergeHistSeries(probHist.map, incoming);
+            if (histAdd) {
+              try {
+                await store.set(K.probHist, { sem: session.SEM, map: JSON.parse(JSON.stringify(probHist.map)) });
+              } catch {
+                /* fail-soft */
+              }
+            }
+          }
+        }
+      }
+    }
+    // 5) 志愿缓存：同学期且同检查点窗口才并入（跨学期/跨窗口数据陈旧，展示会失真——明确跳过）
+    let volAdd = -1;
+    let volSkipSem = false;
+    if (volIn) {
+      if (String(volIn.sem || data.sem || '') !== session.SEM) {
+        volSkipSem = true;
+      } else {
+        volAdd = mergeImportedVolCache(
+          session.SEM,
+          Number(volIn.windowStart) || 0,
+          volIn.map!,
+          volIn.depts || {},
+          session.allCourses.concat(search.rows || []),
+        );
+      }
+    }
     const parts: string[] = [];
     if (stageAdded) parts.push('暂存并入+' + stageAdded);
     if (dAdd) parts.push('草稿新增' + dAdd);
     if (dRep) parts.push('草稿替换' + dRep);
     if (dSkip) parts.push('草稿跳过' + dSkip);
     if (mAdd) parts.push('占用+' + mAdd);
+    if (histAdd) parts.push('趋势历史+' + histAdd + '课');
+    else if (histSkipSem) parts.push('趋势历史学期不符（跳过）');
+    else if (histNotReady) parts.push('趋势历史未就绪（跳过）');
+    if (volAdd > 0) parts.push('志愿缓存+' + volAdd + '行');
+    else if (volSkipSem) parts.push('志愿缓存学期不符（跳过）');
+    else if (volIn && volAdd < 0) parts.push('志愿缓存窗口不符（跳过）');
     showToast(true, parts.length ? '备份导入完成：' + parts.join(' · ') : '备份导入完成：无新增（数据均已存在）');
     void normSeq;
     void loadDrafts;
   } catch (e) {
     showToast(false, '导入失败: ' + (e instanceof Error ? e.message : String(e)));
   }
+}
+
+/** 水合竞态保险：probHist.ready 置位前轮询等待（≤3s） */
+async function waitProbHistReady(): Promise<void> {
+  for (let i = 0; i < 60 && !probHist.ready; i++) await new Promise(r => setTimeout(r, 50));
 }

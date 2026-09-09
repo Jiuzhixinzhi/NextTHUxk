@@ -4,10 +4,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_HIST_WINDOWS,
+  mergeHistSeries,
   mergeWindow,
   probAt,
   probSeries,
   probYDomain,
+  sanitizeHistMap,
   snapshotVolMap,
   sparkPath,
   trendDelta,
@@ -67,6 +69,78 @@ describe('mergeWindow（窗口合并）', () => {
     expect(hist['k']).toHaveLength(MAX_HIST_WINDOWS);
     expect(hist['k']![0]!.t).toBe(5 * 100);
     expect(hist['k']![hist['k']!.length - 1]!.t).toBe((MAX_HIST_WINDOWS + 4) * 100);
+  });
+});
+
+describe('mergeHistSeries（备份导入：完整序列逐点并入）', () => {
+  it('多点序列全量并入（区别于 mergeWindow 只取首点），返回有变化课数', () => {
+    const hist: VolHistMap = {};
+    const n = mergeHistSeries(hist, { k1: [W(100, 30, '(1)1,2,3'), W(200, 30, '(1)2,2,3'), W(300, 30, '(1)3,2,3')], k2: [W(150, 20, '(1)5,5,5')] });
+    expect(n).toBe(2);
+    expect(hist['k1']!.map(p => p.t)).toEqual([100, 200, 300]);
+    expect(hist['k2']).toHaveLength(1);
+  });
+
+  it('与本地历史合并：乱序按 t 插入、同窗替换、无变化课不计入', () => {
+    const hist: VolHistMap = { k1: [W(150, 30, '(1)9,9,9')], k2: [W(100, 30, '(1)1,1,1')] };
+    const n = mergeHistSeries(hist, {
+      k1: [W(100, 30, '(1)1,2,3'), W(150, 30, '(1)8,8,8')], // 插入 + 同窗替换
+      k2: [W(100, 30, '(1)1,1,1')], // 完全相同 → 幂等
+    });
+    expect(n).toBe(1);
+    expect(hist['k1']!.map(p => p.t)).toEqual([100, 150]);
+    expect(hist['k1']![1]!.vr).toBe('(1)8,8,8');
+    expect(hist['k2']).toHaveLength(1);
+  });
+
+  it('超上限截断（保留最近窗口）', () => {
+    const hist: VolHistMap = {};
+    const pts: VolPoint[] = [];
+    for (let i = 0; i < MAX_HIST_WINDOWS + 8; i++) pts.push(W((i + 1) * 100, 30, '(1)1,1,1'));
+    mergeHistSeries(hist, { k: pts });
+    expect(hist['k']).toHaveLength(MAX_HIST_WINDOWS);
+    expect(hist['k']![0]!.t).toBe(9 * 100);
+    expect(hist['k']![hist['k']!.length - 1]!.t).toBe((MAX_HIST_WINDOWS + 8) * 100);
+  });
+
+  it('空入参 → 0', () => {
+    expect(mergeHistSeries({}, {})).toBe(0);
+    expect(mergeHistSeries({ k: [W(100, 30)] }, { k: [] })).toBe(0);
+  });
+});
+
+describe('sanitizeHistMap（导入结构收敛）', () => {
+  it('坏条目跳过、字段归一、正常条目保留', () => {
+    const out = sanitizeHistMap({
+      k1: [
+        W(100, 30, '(1)1,2,3'),
+        null as never,
+        { t: 'NaN-ish' } as never,
+        { t: null } as never,
+        { t: '' } as never,
+        { t: false } as never,
+        { t: '200', cap: '40', vr: 5, vx: '', vo: '', vs: '' } as never,
+      ],
+      bad: 'not-array' as never,
+      empty: [] as VolPoint[],
+    });
+    expect(Object.keys(out)).toEqual(['k1']);
+    expect(out['k1']).toHaveLength(2);
+    expect(out['k1']![0]).toEqual(W(100, 30, '(1)1,2,3'));
+    expect(out['k1']![1]).toEqual(W(200, 40, '5', '', '', ''));
+  });
+
+  it('超上限截断（保留最近窗口）', () => {
+    const pts: VolPoint[] = [];
+    for (let i = 0; i < MAX_HIST_WINDOWS + 10; i++) pts.push(W(i * 100, 30, '(1)1,1,1'));
+    const out = sanitizeHistMap({ k: pts });
+    expect(out['k']).toHaveLength(MAX_HIST_WINDOWS);
+    expect(out['k']![0]!.t).toBe(10 * 100);
+  });
+
+  it('空入参 → 空', () => {
+    expect(sanitizeHistMap(null as never)).toEqual({});
+    expect(sanitizeHistMap({})).toEqual({});
   });
 });
 

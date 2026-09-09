@@ -539,7 +539,13 @@ function deptOfCourseFallback(c: Course): string {
 export async function addManualEvent(name: string, day: number, begin: string, end: string): Promise<void> {
   const now = Date.now();
   session.manualEvents.push({ id: now, name, code: 'manual-' + now, seq: '0', day, begin, end, time: '', manual: true, credits: 0 });
-  await store.set(K.manualEvents, session.manualEvents).catch(() => {});
+  // $state Proxy 不能直传 storage（序列化失败会静默丢持久化）——与全库惯例一致先深拷贝
+  try {
+    await store.set(K.manualEvents, JSON.parse(JSON.stringify(session.manualEvents)));
+  } catch (e) {
+    showXkResult({ ok: false, msg: '占用保存失败（重启后将丢失）：' + ((e as Error).message || String(e)) });
+    return;
+  }
   showXkResult({ ok: true, msg: `已添加「${name}」（周${'一二三四五六日'[day - 1]} ${begin}-${end}）` });
 }
 
@@ -548,7 +554,12 @@ export async function removeManualEvent(id: number): Promise<void> {
   if (idx < 0) return;
   const name = session.manualEvents[idx]!.name;
   session.manualEvents.splice(idx, 1);
-  await store.set(K.manualEvents, session.manualEvents).catch(() => {});
+  try {
+    await store.set(K.manualEvents, JSON.parse(JSON.stringify(session.manualEvents)));
+  } catch (e) {
+    showXkResult({ ok: false, msg: '占用删除保存失败（重启后或恢复）：' + ((e as Error).message || String(e)) });
+    return;
+  }
   showXkResult({ ok: true, msg: '已删除「' + name + '」' });
 }
 

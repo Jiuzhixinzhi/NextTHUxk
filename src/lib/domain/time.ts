@@ -198,7 +198,7 @@ export function spansOf(
   pvToMinFn = pvToMin,
 ): { dayN: number; begin: number; end: number; when: string; week: string }[] {
   const out: { dayN: number; begin: number; end: number; when: string; week: string }[] = [];
-  if (c.manual && c.begin && c.end && String(c.day) && pvToMinFn(c.begin) < pvToMinFn(c.end)) {
+  if (c.manual && c.begin && c.end && Number(c.day) >= 1 && pvToMinFn(c.begin) < pvToMinFn(c.end)) {
     out.push({ dayN: Number(c.day), begin: pvToMinFn(c.begin), end: pvToMinFn(c.end), when: c.begin + '-' + c.end, week: '' });
     return out;
   }
