@@ -10,7 +10,7 @@ import { knoteLoad, makeKnoteRemember, type KnoteMap } from '../storage/knote';
 import { ensureSiteIdentity } from '../site/webvpn';
 import { fetchPageRaw, setWebvpnReenter } from '../net/http';
 import { fetchTrainingPlan } from '../api/plan';
-import { isXkDeadHtml, serverSearch } from '../api/search';
+import { isSsoLoginHtml, isXkDeadHtml, serverSearch } from '../api/search';
 import {
   applyLevelMap,
   backfillCandidateMeta,
@@ -33,7 +33,7 @@ import { clearCardExpansions } from './uicards.svelte.ts';
 import { promptDialog, zyConfirm } from './modal.svelte.ts';
 import { vol, volCacheHydrate, volCachePersist, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
 import { probHistHydrate } from './probhist.svelte.ts';
-import { emitServerRowsMerged, emitLaunchDone, emitSelectedChanged } from './bus.svelte.ts';
+import { emitServerRowsMerged, emitLaunchDone, emitSelectedChanged, fgBusy, launchSettled } from './bus.svelte.ts';
 import { checkUpdate } from '../update/check';
 import { ensureIndex, tbAttach, setOnIndexChange } from '../reviews/reviews';
 import { deptOfCourse } from '../api/dept';
@@ -112,7 +112,8 @@ export async function bootSite(): Promise<void> {
 async function reenterXkRoot(): Promise<boolean> {
   try {
     const html = await fetchPageRaw(session.BASE + '/');
-    const ok = !isXkDeadHtml(html);
+    // SSO 登录页也算「入口根已死」：换票救不了（主会话真没了），不再白跑重进
+    const ok = !isXkDeadHtml(html) && !isSsoLoginHtml(html);
     console.log(TAG, 'webvpn 重进入口换票:', ok ? '成功，重试原请求' : '入口根也是死页，主会话真死，需重新登录');
     return ok;
   } catch (e) {
@@ -619,8 +620,20 @@ const _bfStatus: Record<string, string> = {};
 let _bfScanP: Promise<Course[]> | null = null;
 let _selBfLogged = false;
 
+/** 后台补拉前等待前台空闲（启动落定 + 无前台查询在途）——上游 PR #46 启动门控。
+ *  浏览模式翻页靠服务端会话游标，后台 kkxxSearch 并发会污染（实锤用户报）。 */
+async function waitForegroundIdle(maxMs = 30000): Promise<boolean> {
+  const t0 = Date.now();
+  while (!launchSettled() || fgBusy()) {
+    if (Date.now() - t0 > maxMs) return false;
+    await sleep(150);
+  }
+  return true;
+}
+
 export async function backfillSelTimes(): Promise<void> {
   if (!session.isZhjwxk && !session.isWebvpn) return;
+  if (!(await waitForegroundIdle())) return;
   const tried = _selTried;
   const sel = session.allCourses.filter(c => c.selected && !c.isCandidate);
   const unparsed = sel.filter(r => parseTimeSlots(r.time || '').length === 0 && clockRangesOf(r.note || r.xkTextNote || '', r.time || '').length === 0);
@@ -656,6 +669,8 @@ export async function backfillSelTimes(): Promise<void> {
               _bfScanP = (async () => {
                 const scanned: Course[] = [];
                 for (let p = 1; p <= 10; p++) {
+                  // 前台接手浏览翻页 → 让路（服务端会话游标敏感）；下次回填再补
+                  if (fgBusy()) break;
                   try {
                     const res3 = await serverSearch(ctx(), { page: p });
                     const rs = res3.rows || [];

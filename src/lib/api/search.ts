@@ -10,12 +10,16 @@ import { fetchPage, fetchPost } from '../net/http';
 import { gbkPercentEncode } from '../net/gbk';
 import { creditsOf } from '../domain/credits';
 
+/** SSO 统一认证登录页（上游 #38 死页细分之一）：主会话真没了，换票/重进救不了，
+ *  只会再次 302。与会话超时壳页是两种病——后者可自愈，前者须重新登录。 */
+export function isSsoLoginHtml(html: string): boolean {
+  return !!html && (html.includes('do/off/ui/auth/login') || html.includes('passLogin') || html.includes('电子身份服务系统'));
+}
+
 export function isXkDeadHtml(html: string): boolean {
   return (
     html.includes('accessDenied') ||
     html.includes('用户登陆超时或访问内容不存在。请重试') ||
-    html.includes('电子身份服务系统') ||
-    html.includes('do/off/ui/auth/login') ||
     html.includes('__vpn_app_hostname_data') ||
     html.includes('__vpn_hostname_data')
   );
@@ -114,6 +118,9 @@ export async function serverSearch(ctx: Ctx, o: SearchOpts = {}): Promise<Server
   } catch (e) {
     return { rows: [], pageKind: 'unknown', htmlHead: String(e instanceof Error ? e.message : e) };
   }
+  if (isSsoLoginHtml(html)) {
+    return { rows: [], pageKind: 'sso', htmlHead: '统一认证登录页（主会话已注销）' };
+  }
   if (isXkDeadHtml(html)) {
     return { rows: [], pageKind: 'unknown', htmlHead: '会话死页（' + html.replace(/<[^>]+>/g, ' ').trim().slice(0, 80) + '）' };
   }
@@ -180,7 +187,7 @@ export async function tabSearchByKch(ctx: Ctx, kch: string): Promise<Course[]> {
   for (const tab of tabs) {
     try {
       let fh = await fetchPage(BASE + '/xkBks.vxkBksXkbBs.do?m=' + tab.m + '&p_xnxq=' + SEM + '&tokenPriFlag=' + tab.flag + '&p_kch=' + encodeURIComponent(kch) + '&_t=' + Date.now());
-      if (isXkDeadHtml(fh)) continue;
+      if (isXkDeadHtml(fh) || isSsoLoginHtml(fh)) continue;
       if (!/gridData\w*\s*=/.test(fh)) {
         const token = (fh.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';
         if (!token) continue;
@@ -219,23 +226,38 @@ export async function serverSearchStorm(ctx: Ctx, o: SearchOpts = {}): Promise<S
   if (probeTo > 1) {
     const merged = new Map<string, Course>();
     rows.forEach(r => merged.set(r.code + '_' + (r.seq || '0'), r));
+    const mergePage = (list: Course[]): void => {
+      list.forEach(row => {
+        const k = row.code + '_' + (row.seq || '0');
+        if (!merged.has(k)) {
+          merged.set(k, row);
+          rows.push(row);
+        }
+      });
+    };
     const pages: number[] = [];
     for (let p = 2; p <= probeTo; p++) pages.push(p);
-    await runPool(pages, 5, async (p, idx) => {
-      await sleep(30 * (idx % 5));
-      try {
-        const r = await serverSearch(ctx, { ...o, page: p });
-        (r.rows || []).forEach(row => {
-          const k = row.code + '_' + (row.seq || '0');
-          if (!merged.has(k)) {
-            merged.set(k, row);
-            rows.push(row);
-          }
-        });
-      } catch (e) {
-        console.warn(TAG, 'server search page', p, e);
-      }
-    });
+    const failed: number[] = [];
+    const runPages = async (ps: number[], concurrency: number, staggerMs: number): Promise<void> => {
+      await runPool(ps, concurrency, async (p, idx) => {
+        await sleep(staggerMs * (idx % concurrency));
+        try {
+          const r = await serverSearch(ctx, { ...o, page: p });
+          mergePage(r.rows || []);
+        } catch (e) {
+          failed.push(p);
+          console.warn(TAG, 'server search page', p, e);
+        }
+      });
+    };
+    await runPages(pages, 5, 30);
+    // 失败页重试（上游 ad46dd3 同款：旧版逐页失败静默蒸发，「加载全部」47/427 只装下零头）：
+    // 第二轮单并发慢速——顽固页多半被持续限流，隔 700ms 逐个再给一次机会
+    if (failed.length) {
+      console.warn(TAG, '翻页失败重试（单并发慢速）:', failed.join(','));
+      const retry = failed.splice(0, failed.length);
+      await runPages(retry, 1, 700);
+    }
   }
   // 教师名兜底：课名 0 行且非纯数字 → 换教师通道重试一次
   if (!rows.length && o.kcm && o.kcm.trim() && !/^\d+$/.test(o.kcm.trim()) && !o.teacher) {
