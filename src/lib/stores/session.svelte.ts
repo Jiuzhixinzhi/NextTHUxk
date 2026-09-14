@@ -33,7 +33,7 @@ import { clearCardExpansions } from './uicards.svelte.ts';
 import { promptDialog, zyConfirm } from './modal.svelte.ts';
 import { vol, volCacheHydrate, volCachePersist, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
 import { probHistHydrate } from './probhist.svelte.ts';
-import { emitServerRowsMerged, emitLaunchDone, emitSelectedChanged, fgBusy, launchSettled } from './bus.svelte.ts';
+import { emitServerRowsMerged, emitLaunchDone, emitSelectedChanged, fgBusy, launchSettled, markLaunchStart } from './bus.svelte.ts';
 import { checkUpdate } from '../update/check';
 import { ensureIndex, tbAttach, setOnIndexChange } from '../reviews/reviews';
 import { deptOfCourse } from '../api/dept';
@@ -130,6 +130,7 @@ export async function launch(): Promise<void> {
     return;
   }
   session.launching = true;
+  markLaunchStart();
   session.open = true;
   session.fetchWarn = '';
   try {
@@ -618,6 +619,7 @@ export async function removeManualEvent(id: number): Promise<void> {
 const _selTried = new Map<string, number>();
 const _bfStatus: Record<string, string> = {};
 let _bfScanP: Promise<Course[]> | null = null;
+let _bfScanAborted = false;
 let _selBfLogged = false;
 
 /** 后台补拉前等待前台空闲（启动落定 + 无前台查询在途）——上游 PR #46 启动门控。
@@ -645,32 +647,44 @@ export async function backfillSelTimes(): Promise<void> {
     }
     return;
   }
-  need.forEach(r => {
-    const k = r.code + '_' + (r.seq || '0');
-    tried.set(k, (tried.get(k) || 0) + 1);
-  });
-  need.forEach(r => {
-    _bfStatus[r.code] = '查询中';
-  });
   console.log(TAG, '已选时间回填: 查 ' + need.map(r => r.code + '_' + (r.seq || '0')).join(','));
   const outcome: string[] = [];
   for (let i = 0; i < need.length; i += 5) {
     await Promise.all(
       need.slice(i, i + 5).map(async r => {
+        const k = r.code + '_' + (r.seq || '0');
         try {
+          // 前台占用则不发起后台请求（服务端会话游标敏感，上游 PR #46）；不消耗 2 次预算
+          if (fgBusy()) {
+            outcome.push(r.code + '⊘前台占用跳过');
+            _bfStatus[r.code] = '⊘前台占用跳过';
+            return;
+          }
+          tried.set(k, (tried.get(k) || 0) + 1);
+          _bfStatus[r.code] = '查询中';
           let res = await serverSearch(ctx(), { kch: r.code });
           let rows = res.rows || [];
-          if (!rows.length && r.name) {
+          if (!rows.length && r.name && !fgBusy()) {
             const byName = await serverSearch(ctx(), { kcm: r.name });
             rows = byName.rows || [];
           }
+          if (!rows.length && fgBusy()) {
+            // 前台中途接手：停止后续请求，交由下次回填补
+            outcome.push(r.code + '⊘前台占用跳过');
+            _bfStatus[r.code] = '⊘前台占用跳过';
+            return;
+          }
           if (!rows.length) {
             if (!_bfScanP) {
+              _bfScanAborted = false;
               _bfScanP = (async () => {
                 const scanned: Course[] = [];
                 for (let p = 1; p <= 10; p++) {
                   // 前台接手浏览翻页 → 让路（服务端会话游标敏感）；下次回填再补
-                  if (fgBusy()) break;
+                  if (fgBusy()) {
+                    _bfScanAborted = true;
+                    break;
+                  }
                   try {
                     const res3 = await serverSearch(ctx(), { page: p });
                     const rs = res3.rows || [];
@@ -684,7 +698,13 @@ export async function backfillSelTimes(): Promise<void> {
                 return scanned;
               })();
             }
-            rows = (await _bfScanP).filter(c => c.code === r.code);
+            const scanned = await _bfScanP;
+            if (_bfScanAborted) {
+              // 中断的半份扫描不缓存，下次回填可重建
+              _bfScanP = null;
+              _bfScanAborted = false;
+            }
+            rows = scanned.filter(c => c.code === r.code);
           }
           // 三段匹配挑对班（归一课序 → 同课同师 → 首行）：同课号多班直接取首行会借错时间
           const hit = matchPoolRow(rows.filter(c => String(c.code) === String(r.code)), r.seq, r.teacher);
@@ -715,6 +735,7 @@ export function resetBfBudget(): void {
   _selTried.clear();
   _bfStatus._ = '';
   _bfScanP = null;
+  _bfScanAborted = false;
   _selBfLogged = false;
 }
 

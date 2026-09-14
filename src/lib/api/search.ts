@@ -90,6 +90,36 @@ export interface SearchOpts {
   forceAll?: boolean;
 }
 
+// ─── 会话游标（上游 PR #46 同款核心：会话键 + 显式 reset）────────
+// kkxxSearch 依赖服务端会话记住「当前查询」，浏览翻页（无参 page=N）延续上次结果集。
+// 后台补拉并发请求会改写该会话 → 前台翻页拿错页。此处在「查询签名变化」时先裸发一次
+// kkxxSearch 重建会话，使每次查询都从确定基线开始（即使被扰动也能自愈）。
+let _searchSessionKey = '';
+
+function sessionKeyOf(ctx: Ctx, o: SearchOpts): string {
+  return JSON.stringify([
+    ctx.SEM,
+    ctx.BASE,
+    (o.kch || '').trim(),
+    (o.kcm || '').trim(),
+    (o.teacher || '').trim(),
+    o.department || '',
+    o.weekday || '',
+    o.section || '',
+    o.grade || '',
+    o.rxklxm || '',
+    o.kctsm || '',
+    !!o.onlyAvailable,
+    !!o.gradAvail,
+  ]);
+}
+
+/** 裸发一次 kkxxSearch 重置服务端会话（不带筛选参数、不带 page） */
+async function resetSearchSession(ctx: Ctx): Promise<void> {
+  const { SEM, BASE } = ctx;
+  await fetchPage(BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + encodeURIComponent(SEM) + '&_t=' + Date.now());
+}
+
 /** 单页服务端搜索（pageKind：ok=有行；empty=结果页但 0 行；unknown=异常页） */
 export async function serverSearch(ctx: Ctx, o: SearchOpts = {}): Promise<ServerSearchResult> {
   const { SEM, BASE } = ctx;
@@ -112,9 +142,13 @@ export async function serverSearch(ctx: Ctx, o: SearchOpts = {}): Promise<Server
   if (o.onlyAvailable) parts.push('p_bkskyl_ig=0');
   if (o.gradAvail) parts.push('p_yjskyl_ig=0');
   const url = BASE + '/xkBks.vxkBksJxjhBs.do?' + parts.join('&') + '&_t=' + Date.now();
+  const key = sessionKeyOf(ctx, o);
+  const needReset = key !== _searchSessionKey;
   let html: string;
   try {
+    if (needReset) await resetSearchSession(ctx);
     html = await fetchPage(url);
+    if (needReset && !isSsoLoginHtml(html) && !isXkDeadHtml(html)) _searchSessionKey = key;
   } catch (e) {
     return { rows: [], pageKind: 'unknown', htmlHead: String(e instanceof Error ? e.message : e) };
   }

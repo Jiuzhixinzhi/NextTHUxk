@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { Course, Flag } from '../../lib/domain/types';
   import { ZY_LIMITS } from '../../lib/core/constants';
-  import { allowedFlags, baseFlag, canAdjustZy, flagName, typeCodeToFlag } from '../../lib/domain/flags';
+  import { allowedFlags, entryBaseFlag, canAdjustZy, flagName, typeCodeToFlag } from '../../lib/domain/flags';
   import { capacityStatus, cascadeOf, currentProbMeta, lockedOf, probGridData, volColor } from '../../lib/domain/probability';
   import { ORIGIN_COLORS, originOf, parseTimeSlots } from '../../lib/domain/time';
   import { deptCodeFromCode, deptNameOf } from '../../lib/api/dept';
@@ -19,7 +19,7 @@
   let { course }: { course: Course } = $props();
 
   let busy = $state(false);
-  let selFlag = $state<string>(baseFlag(course));
+  let selFlag = $state<string>(entryBaseFlag(course));
   let selZy = $state<number>(3);
   let chainFull = $state(false);
 
@@ -466,7 +466,7 @@
         >
       {:else}
         <select class="nx-type-select" value={selFlag} onchange={(e) => (selFlag = (e.currentTarget as HTMLSelectElement).value)}>
-          {#each allowedFlags(baseFlag(course)) as f}
+          {#each allowedFlags(entryBaseFlag(course)) as f}
             <option value={f}>{flagName(f)}</option>
           {/each}
         </select>

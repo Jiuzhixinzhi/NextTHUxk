@@ -3,7 +3,7 @@
 // 草稿 = 可直接编辑的命名方案集合，活跃草稿 = 当前编辑目标。
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Draft, DraftCourse, Flag } from './types';
-import { allowedFlags, baseFlag, typeCodeToFlag } from './flags';
+import { allowedFlags, baseFlag, entryBaseFlag, typeCodeToFlag } from './flags';
 import { normSeq } from '../core/utils';
 
 export function draftCourseFrom(c: Course, flag: Flag, zy: number, fallbackFlag: Flag = 'rx'): DraftCourse {
@@ -16,7 +16,7 @@ export function draftCourseFrom(c: Course, flag: Flag, zy: number, fallbackFlag:
     credits: c.credits || 0,
     flag,
     zy: parseInt(String(zy), 10) || 3,
-    baseFlag: baseFlag(c) || fallbackFlag,
+    baseFlag: entryBaseFlag(c) || fallbackFlag,
     note: c.note || c.xkTextNote || '', // 外校真实时间载体
   };
 }
@@ -24,7 +24,7 @@ export function draftCourseFrom(c: Course, flag: Flag, zy: number, fallbackFlag:
 /** 已选行 → 草稿条目（typeCode 含体育；zy 兜底 3；flag 必须落在 baseFlag 允许集内，
  *  否则 typeCode 缺失时 typeCodeToFlag 兜底 'bx' 会与 baseFlag='rx' 失配，下拉框渲染成空白） */
 export function draftCourseFromSelected(c: Course): DraftCourse {
-  const bf = baseFlag(c);
+  const bf = entryBaseFlag(c);
   const f = typeCodeToFlag(c.typeCode);
   return {
     code: c.code,

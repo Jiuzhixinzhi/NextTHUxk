@@ -55,6 +55,7 @@ export const search = $state({
   serverSig: '' as string,
   optsSnapshot: null as SearchOpts | null,
   browseHasMore: false,
+  browseRestore: null as null | { page: number; rows: Course[] | null; totalPages: number; totalRows: number; browseHasMore: boolean },
   jumpCode: '',
   jumpSeq: '',
   jumpTeacher: '',
@@ -304,11 +305,25 @@ export function setLocalField(k: 'conflict' | 'credits' | 'reviews' | 'sort' | '
   search.uiPage = 1;
 }
 
+/** 浏览跳页前快照当前页（分页错配时回滚，上游 PR #46 同款）；仅首次进入浏览跳页时快照 */
+function beginBrowseNavigate(page: number): void {
+  if (!search.browseRestore) {
+    search.browseRestore = {
+      page: search.browsePage || 1,
+      rows: search.rows,
+      totalPages: search.totalPages,
+      totalRows: search.totalRows,
+      browseHasMore: search.browseHasMore,
+    };
+  }
+  search.browsePage = Math.max(1, page);
+  search.serverSig = '';
+  scheduleServerQuery(true);
+}
+
 export function gotoPage(n: number): void {
   if (!isSearchMode()) {
-    search.browsePage = Math.max(1, n);
-    search.serverSig = '';
-    scheduleServerQuery(true);
+    beginBrowseNavigate(n);
     return;
   }
   search.uiPage = Math.min(Math.max(1, n), Math.max(1, totalPagesNow()));
@@ -401,14 +416,43 @@ export async function runServerQuery(): Promise<void> {
             }
           }
         }
-        applyMarks(res.rows || []);
-        search.rows = res.rows || [];
-        search.browseHasMore = res.pageKind === 'ok' && (res.rows || []).length > 0;
-        if ((res.rows || []).length) mergeRows(res.rows);
-        search.totalPages = res.totalPages || 0;
-        search.totalRows = res.totalRows || 0;
-        search.incomplete = queryMode && !!(res.totalRows && (res.rows || []).length < res.totalRows);
-        search.error = pageError(res);
+        // 浏览模式分页错配检测/回滚（上游 PR #46 同款）：请求页 > 服务端 totalPages
+        // = 会话游标被扰动 → 重试一次，仍错则恢复原页并报错
+        let browseBroken = false;
+        if (!queryMode) {
+          const requestedPage = opts.page || 1;
+          const mismatch = (r: ServerSearchResult): boolean => {
+            const rtp = r.totalPages || 0;
+            return requestedPage > 1 && rtp > 0 && requestedPage > rtp;
+          };
+          if (mismatch(res)) {
+            console.warn(TAG, '浏览分页错配:', requestedPage, '/', res.totalPages, '重试一次');
+            res = await withForeground(() => serverSearch(toCtx(), Object.assign({}, opts, { page: requestedPage })));
+            browseBroken = mismatch(res);
+          }
+        }
+        if (browseBroken) {
+          const rb = search.browseRestore;
+          if (rb) {
+            search.browsePage = rb.page;
+            search.rows = rb.rows;
+            search.totalPages = rb.totalPages;
+            search.totalRows = rb.totalRows;
+            search.browseHasMore = rb.browseHasMore;
+          }
+          search.browseRestore = null;
+          search.error = '教务返回分页异常，已保留原页码';
+        } else {
+          if (!queryMode) search.browseRestore = null;
+          applyMarks(res.rows || []);
+          search.rows = res.rows || [];
+          search.browseHasMore = res.pageKind === 'ok' && (res.rows || []).length > 0;
+          if ((res.rows || []).length) mergeRows(res.rows);
+          search.totalPages = res.totalPages || 0;
+          search.totalRows = res.totalRows || 0;
+          search.incomplete = queryMode && !!(res.totalRows && (res.rows || []).length < res.totalRows);
+          search.error = pageError(res);
+        }
       } catch (e) {
         console.warn(TAG, 'server search scheduled:', e);
         search.rows = search.rows || [];
@@ -439,9 +483,7 @@ export async function runServerQuery(): Promise<void> {
 
 /** 浏览模式跳页 */
 export function browseGoto(page: number): void {
-  search.browsePage = Math.max(1, page);
-  search.serverSig = '';
-  scheduleServerQuery(true);
+  beginBrowseNavigate(page);
 }
 
 // ─── 跳转定位（课表/草稿 → 左侧搜索定位高亮） ─────────────────

@@ -11,6 +11,7 @@ import { normSeq, keyOf } from '../src/lib/core/utils';
 import { checkPlanCoverage } from '../src/lib/domain/plancov';
 import { creditsOf } from '../src/lib/domain/credits';
 import { matchPoolRow, teacherHit } from '../src/lib/domain/match';
+import { entryBaseFlag } from '../src/lib/domain/flags';
 
 describe('parseTimeSlots', () => {
   it('解析标准大节（教务时间串 = 周X-第几节）', () => {
@@ -479,6 +480,19 @@ describe('priProb / probGridData 优先任选档', () => {
     expect(rx.cells[0]!.pri).toBe(true);
     expect(rx.cells[0]!.zy).toBe(0);
     expect(rx.cells).toHaveLength(4);
+  });
+});
+
+describe('entryBaseFlag 入稿类型', () => {
+  it('候补行无 attr 时按 typeCode 推导（不再一律回落任选）', () => {
+    expect(entryBaseFlag({ code: '1', name: 'x', typeCode: '006' } as never)).toBe('bx');
+    expect(entryBaseFlag({ code: '1', name: 'x', typeCode: '008' } as never)).toBe('xx');
+    expect(entryBaseFlag({ code: '1', name: 'x', typeCode: '007' } as never)).toBe('rx');
+  });
+  it('attr 优先；体育/无信号兜底', () => {
+    expect(entryBaseFlag({ code: '1', name: 'x', attr: '限选', typeCode: '006' } as never)).toBe('xx');
+    expect(entryBaseFlag({ code: '1', name: 'x', typeLabel: '体育' } as never)).toBe('ty');
+    expect(entryBaseFlag({ code: '1', name: 'x' } as never)).toBe('rx');
   });
 });
 

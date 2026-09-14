@@ -26,6 +26,16 @@ export function isSportsCourse(course: Course | null | undefined): boolean {
 
 export const baseFlag = (course: Course): Flag => (isSportsCourse(course) ? 'ty' : courseFlag(course));
 
+/** 入稿（草稿/暂存）类型：优先页面 attr，缺失时按 typeCode 推导。
+ *  候补行常无 attr（dlSearch/kbSearch 不标列），直接用 baseFlag 会回落任选，
+ *  把必修/限选候补存成任选、提交时选错类型。 */
+export function entryBaseFlag(course: Course): Flag {
+  if (isSportsCourse(course)) return 'ty';
+  if ((course.attr || '').trim()) return courseFlag(course);
+  if (course.typeCode) return typeCodeToFlag(course.typeCode);
+  return courseFlag(course); // attr/typeCode 均缺：沿用旧语义（rx 兜底）
+}
+
 export function allowedFlags(bf: Flag): Flag[] {
   if (bf === 'ty') return ['ty'];
   if (bf === 'bx') return ['bx', 'xx', 'rx'];

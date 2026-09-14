@@ -396,8 +396,10 @@ export async function promote(draft: Draft): Promise<void> {
     );
     if (!ok) return;
     const ctx = { SEM: session.SEM, BASE: session.BASE, isZhjwxk: session.isZhjwxk, isZhjw: session.isZhjw, isWebvpn: session.isWebvpn };
-    // 顺序铁律：先选后退（上游 v2.1.1 差分提交同款）——最坏情况回到提交前原状可重试，
-    // 永不出现半张课表。旧版先退后选：退课中断时课已永久丢失。
+    // 顺序铁律：先选后退（上游 v2.1.1 差分提交同款）——无冲突差量下最坏回到提交前
+    // 原状可重试，永不出现半张课表。旧版先退后选：退课中断时课已永久丢失。
+    // 边界：若新增课与待退课时间/志愿名额冲突，新增可能被拒→整单中止且未退，
+    // 用户调整草稿后重试即可（不产生半张课表，仍是安全侧）。
     for (let i = 0; i < toAdd.length; i++) {
       const c = toAdd[i]!;
       showToast(false, '新选差量 ' + (i + 1) + '/' + toAdd.length + ': ' + c.name);

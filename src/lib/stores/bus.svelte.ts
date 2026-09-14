@@ -45,6 +45,11 @@ export function launchSettled(): boolean {
   return _launchSettled;
 }
 
+/** 新一轮 launch 开始：复位落定标记（切学期/重开工作台时后台补拉闸门不得沿用旧值） */
+export function markLaunchStart(): void {
+  _launchSettled = false;
+}
+
 // ─── 前台查询占用（kkxxSearch 服务端会话游标敏感） ────────────────
 // 浏览模式翻页靠服务端会话游标（无参 page=N 延续上次结果集）；后台补拉若并发
 // 发 kkxxSearch 会污染游标（上游 PR #46 串行队列+会话键的等价闸门）。前台进出
