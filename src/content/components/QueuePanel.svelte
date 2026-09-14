@@ -8,6 +8,13 @@
   import { entryBaseFlag } from '../../lib/domain/flags';
   import { keyOf } from '../../lib/core/utils';
 
+  // 过滤已转正选（陈旧候补行）：候选表在候补成功转正后可能仍返回该课，避免队列与已选重复
+  const queueList = $derived.by(() =>
+    session.candidateCourses.filter(
+      (c) => !session.allCourses.some((p) => p.selected && keyOf(p.code, p.seq) === keyOf(c.code, c.seq)),
+    ),
+  );
+
   async function onDrop(code: string, seq: string) {
     const c = session.candidateCourses.find((x) => keyOf(x.code, x.seq) === keyOf(code, seq));
     if (!(await confirmDialog('退出候补队列「' + (c?.name || code) + '」？', ''))) return;
@@ -22,12 +29,12 @@
   }
 </script>
 
-{#if session.candidateCourses.length}
+{#if queueList.length}
   <div class="nx-sec">
     <div class="nx-sec-title">
-      候选队列 <span style="font-size:11px;color:var(--nx-amber);font-weight:400;">{session.candidateCourses.length} 门</span>
+      候选队列 <span style="font-size:11px;color:var(--nx-amber);font-weight:400;">{queueList.length} 门</span>
     </div>
-    {#each session.candidateCourses as c, i (keyOf(c.code, c.seq) + '_' + i)}
+    {#each queueList as c, i (keyOf(c.code, c.seq) + '_' + i)}
       <div class="nx-stage-item" style="flex-direction:column;align-items:stretch;gap:2px;">
         <div class="flex items-center gap-1.5">
           <span

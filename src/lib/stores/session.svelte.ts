@@ -55,6 +55,8 @@ export const session = $state({
   isWebvpn: false,
   allCourses: [] as Course[],
   candidateCourses: [] as Course[],
+  /** 本轮候补名单是否权威取得（fetchCandidateCourses.ok）：决定草稿排队标记清理与提交过滤可否信任 */
+  candidateFetchOk: false,
   levelMap: {} as Record<string, LevelInfo>,
   planData: [] as PlanCourse[],
   queueDataMap: {} as Record<string, QueueDatum>,
@@ -166,10 +168,10 @@ export async function launch(): Promise<void> {
     session.allCourses = pool;
     applyLevelMap(pool, session.levelMap, session.planData);
     // 阶段2：候补/方案/等级/属性并行到货后增量并入池（已选首屏不被拖慢）
-    const [candCourses, planFresh, level, catAttrs] = await Promise.all([
+    const [candRes, planFresh, level, catAttrs] = await Promise.all([
       fetchCandidateCourses(ctx()).catch(e => {
         console.warn(TAG, 'candidates:', e);
-        return [];
+        return { rows: [], ok: false };
       }),
       session.planData.length ? Promise.resolve<PlanCourse[]>([]) : fetchTrainingPlan(ctx()).catch(e => {
         console.warn(TAG, 'plan:', e);
@@ -186,9 +188,10 @@ export async function launch(): Promise<void> {
     ]);
     session.levelMap = Object.assign({}, level, catAttrs);
     if (!session.planData.length) session.planData = planFresh || [];
-    session.candidateCourses = candCourses;
-    if (candCourses.length) {
-      await backfillCandidateMeta(ctx(), candCourses).catch(e => console.warn(TAG, 'cand meta:', e));
+    session.candidateCourses = candRes.rows;
+    session.candidateFetchOk = candRes.ok;
+    if (candRes.rows.length) {
+      await backfillCandidateMeta(ctx(), candRes.rows).catch(e => console.warn(TAG, 'cand meta:', e));
     }
     session.candidateCourses.forEach(c => {
       if (!session.allCourses.some(p => keyOf(p.code, p.seq) === keyOf(c.code, c.seq))) session.allCourses.push({ ...c, isCandidate: true });
@@ -387,9 +390,12 @@ export async function refreshSelected(withModal = true): Promise<void> {
   applyLevelMap(session.allCourses, session.levelMap, session.planData);
   await resolveCourseZy(session.allCourses, selMap, withModal).catch(() => {});
   try {
-    session.candidateCourses = await fetchCandidateCourses(ctx());
+    const cr = await fetchCandidateCourses(ctx());
+    session.candidateCourses = cr.rows;
+    session.candidateFetchOk = cr.ok;
   } catch {
-    /* 保持现有候补数据不变 */
+    /* 保持现有候补数据不变；标记置不可信，避免 promote 依据过期名单 */
+    session.candidateFetchOk = false;
   }
   const candKeys = new Set(session.candidateCourses.map(c => c.code + '_' + String(c.seq || '0')));
   session.allCourses.forEach(c => {
@@ -422,7 +428,9 @@ export async function syncQueueAndVol(): Promise<void> {
   const qResult = await fetchQueueData(ctx(), session.allCourses);
   session.queueDataMap = qResult.map;
   session.isQueuePhase = qResult.phase;
-  session.candidateCourses = await fetchCandidateCourses(ctx());
+  const cr = await fetchCandidateCourses(ctx());
+  session.candidateCourses = cr.rows;
+  session.candidateFetchOk = cr.ok;
   // 检查点同步（定时器触发）：候补回填过前台闸门，避免与浏览翻页并发 kkxxSearch
   if (session.candidateCourses.length) await backfillCandidateMeta(ctx(), session.candidateCourses, fgBusy).catch(() => {});
   const candKeys = new Set(session.candidateCourses.map(c => c.code + '_' + String(c.seq || '0')));
@@ -615,7 +623,7 @@ export async function removeManualEvent(id: number): Promise<void> {
   showXkResult({ ok: true, msg: '已删除「' + name + '」' });
 }
 
-// ─── 已选时间回填（外校课时间在说明列，后台静默）───────────────
+// ─── 已选元数据回填（外校课时间在说明列；学分列位漂移时按课号补齐）────
 
 const _selTried = new Map<string, number>();
 const _bfStatus: Record<string, string> = {};
@@ -639,16 +647,18 @@ export async function backfillSelTimes(): Promise<void> {
   if (!(await waitForegroundIdle())) return;
   const tried = _selTried;
   const sel = session.allCourses.filter(c => c.selected && !c.isCandidate);
-  const unparsed = sel.filter(r => parseTimeSlots(r.time || '').length === 0 && clockRangesOf(r.note || r.xkTextNote || '', r.time || '').length === 0);
-  const need = unparsed.filter(r => (tried.get(r.code + '_' + (r.seq || '0')) || 0) < 2);
+  const needsTime = (r: Course): boolean => parseTimeSlots(r.time || '').length === 0 && clockRangesOf(r.note || r.xkTextNote || '', r.time || '').length === 0;
+  const unparsed = sel.filter(needsTime);
+  // 触发范围：时间解析不出 或 学分缺失（WL 已选表列位漂移致 credits=0，用户报形势与政策）
+  const need = sel.filter(r => needsTime(r) || !r.credits).filter(r => (tried.get(r.code + '_' + (r.seq || '0')) || 0) < 2);
   if (!need.length) {
     if (unparsed.length && !_selBfLogged) {
       _selBfLogged = true;
-      console.log(TAG, '已选时间回填: 无可查——' + unparsed.length + ' 门解析不出（' + unparsed.map(r => r.code + '_' + (r.seq || '0') + ' time=[' + (r.time || '') + '] note=[' + ((r.note || r.xkTextNote) || '') + ']').join(' ; ') + '）');
+      console.log(TAG, '已选元数据回填: 无可查（' + unparsed.length + ' 门时间解析不出已用尽预算）');
     }
     return;
   }
-  console.log(TAG, '已选时间回填: 查 ' + need.map(r => r.code + '_' + (r.seq || '0')).join(','));
+  console.log(TAG, '已选元数据回填: 查 ' + need.map(r => r.code + '_' + (r.seq || '0')).join(','));
   const outcome: string[] = [];
   for (let i = 0; i < need.length; i += 5) {
     await Promise.all(
@@ -725,7 +735,7 @@ export async function backfillSelTimes(): Promise<void> {
     );
     if (i + 5 < need.length) await sleep(60);
   }
-  console.log(TAG, '已选时间回填结果:', outcome.join(' , ') || '无');
+  console.log(TAG, '已选元数据回填结果:', outcome.join(' , ') || '无');
   if (session.allCourses.length && _bfStatus && Object.keys(_bfStatus).length) console.log('');
 }
 
@@ -750,6 +760,7 @@ export async function changeSemester(newSem: string): Promise<void> {
   await store.set(K.staticData, null).catch(() => {});
   session.allCourses = [];
   session.candidateCourses = [];
+  session.candidateFetchOk = false;
   session.planData = [];
   session.levelMap = {};
   session.queueDataMap = {};
