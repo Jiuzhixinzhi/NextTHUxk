@@ -10,6 +10,7 @@ import { pickDecoded } from '../net/decode';
 import { gbkPercentEncode } from '../net/gbk';
 import { isSportsCourse } from '../domain/flags';
 import { creditsOf } from '../domain/credits';
+import { matchPoolRow } from '../domain/match';
 import { serverSearch } from './search';
 
 // ─── 已选课程 ─────────────────────────────────────────────────
@@ -210,7 +211,8 @@ export async function backfillCandidateMeta(ctx: Ctx, candidates: Course[]): Pro
     await sleep(30);
     try {
       const r = await serverSearch(ctx, { kch: c.code });
-      const hit = (r.rows || []).find(x => String(x.seq || '0') === String(c.seq || '0')) || (r.rows || [])[0];
+      const same = (r.rows || []).filter(x => String(x.code) === String(c.code));
+      const hit = matchPoolRow(same.length ? same : (r.rows || []), c.seq, c.teacher);
       if (hit) {
         c.credits = hit.credits || 0;
         c.capacity = hit.capacity || 0;

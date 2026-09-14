@@ -25,6 +25,7 @@ import { applyVolunteer, volSession } from '../api/volunteers';
 import { dropCourse, submitCourse, changeVolunteer } from '../api/write';
 import { attachScores, ensureScores } from '../api/scores';
 import { typeCodeToFlag } from '../domain/flags';
+import { matchPoolRow } from '../domain/match';
 import { parseTimeSlots, clockRangesOf } from '../domain/time';
 import { checkPlanCoverage } from '../domain/plancov';
 import { showXkResult } from './toast.svelte.ts';
@@ -649,8 +650,8 @@ export async function backfillSelTimes(): Promise<void> {
             }
             rows = (await _bfScanP).filter(c => c.code === r.code);
           }
-          let hit = rows.find(c => c.code === r.code && String(c.seq || '0') === String(r.seq || '0'));
-          if (!hit) hit = rows.find(c => c.code === r.code);
+          // 三段匹配挑对班（归一课序 → 同课同师 → 首行）：同课号多班直接取首行会借错时间
+          const hit = matchPoolRow(rows.filter(c => String(c.code) === String(r.code)), r.seq, r.teacher);
           if (hit) {
             mergeRows([hit]);
             outcome.push(r.code + '✓');

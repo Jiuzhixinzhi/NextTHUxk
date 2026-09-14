@@ -3,49 +3,56 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, ManualEvent } from './types';
 import { clockRangesOf, parseTimeSlots } from './time';
-import { normSeq } from '../core/utils';
+import { keyOf } from '../core/utils';
+import { matchPoolRow } from './match';
 
 const parses = (c: Course) =>
   parseTimeSlots(c.time || '').length > 0 || clockRangesOf(c.note || c.xkTextNote || '', c.time || '').length > 0;
 
 /** OneTHU buildRows join：已选/候补/草稿行时间解析不出 → 当场按课号借池行的
  *  note/time 合成预览行（池里有目录行立即能用；不再依赖回填时序）。
+ *  借源走三段匹配（归一课序 → 同课同师 → 首行兜底）——同课号多班直接借首行会
+ *  让不同时间的课在预览课表挤进同一格（上游 d28bdb5 同款）。
  *  输出按 keyOf 去重（防池内 '01'/'1' 双写法重复行）。 */
 export function previewJoinRows(rows: Course[], pool: Course[], knote: Record<string, { note: string; time: string }>): Course[] {
-  const catByCode = new Map<string, Course>();
-  const fallbackByCode = new Map<string, Course>();
+  const parseableByCode = new Map<string, Course[]>();
+  const anyByCode = new Map<string, Course[]>();
   for (const c of pool) {
+    if (!c.code) continue;
+    const any = anyByCode.get(c.code) || [];
+    any.push(c);
+    anyByCode.set(c.code, any);
     if (parses(c)) {
-      if (!catByCode.has(c.code)) catByCode.set(c.code, c);
-    } else if ((c.note || c.xkTextNote) && !fallbackByCode.has(c.code)) {
-      fallbackByCode.set(c.code, c);
+      const pa = parseableByCode.get(c.code) || [];
+      pa.push(c);
+      parseableByCode.set(c.code, pa);
     }
   }
   const seen = new Set<string>();
   const out: Course[] = [];
   for (const s of rows) {
-    if (seen.has(s.code + '_' + normSeq(s.seq))) continue;
-    seen.add(s.code + '_' + normSeq(s.seq));
+    if (seen.has(keyOf(s.code, s.seq))) continue;
+    seen.add(keyOf(s.code, s.seq));
     if (parses(s)) {
       out.push(s);
       continue;
     }
-    const c0 = catByCode.get(s.code) || fallbackByCode.get(s.code);
-    const knoteHit =
-      c0 ||
-      (knote[s.code + '_' + (s.seq || '0')] as Course | undefined) ||
-      (Object.keys(knote)
-        .map(k => knote[k] && k.indexOf(s.code + '_') === 0 ? (knote[k] as Course) : null)
-        .filter(Boolean)[0] as Course | undefined);
-    if (!knoteHit) {
+    // 只借同课号行：优先可解析行（能提供时间），走三段匹配挑对班
+    const poolRows = parseableByCode.get(s.code) || anyByCode.get(s.code) || [];
+    let hit: Course | undefined = matchPoolRow(poolRows, s.seq, s.teacher);
+    if (!hit) {
+      const knoteKey = Object.keys(knote).find(k => k.indexOf(s.code + '_') === 0);
+      hit = (knote[s.code + '_' + (s.seq || '0')] as Course | undefined) || (knoteKey ? (knote[knoteKey] as Course | undefined) : undefined);
+    }
+    if (!hit) {
       out.push(s);
       continue;
     }
     out.push(
       Object.assign({}, s, {
-        time: parseTimeSlots(s.time || '').length ? s.time : (knoteHit.time || s.time || ''),
-        note: knoteHit.note || s.note || '',
-        xkTextNote: (knoteHit.note || s.xkTextNote || '') as string,
+        time: parseTimeSlots(s.time || '').length ? s.time : (hit.time || s.time || ''),
+        note: hit.note || s.note || '',
+        xkTextNote: (hit.note || s.xkTextNote || '') as string,
       }),
     );
   }
