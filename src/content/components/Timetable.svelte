@@ -23,15 +23,15 @@
       if (manual) return { color: '#8b5cf6', probLabel: '自定义', bg: 'rgba(139,92,246,.14)' };
       const cc = c as Course;
       const isSelectedView = draftStore.preview.kind === 'selected';
+      const poolRow = session.allCourses.find((x) => keyOf(x.code, x.seq) === keyOf(cc.code, cc.seq));
       let prob: { color: string; label: string; bg: string } | null = null;
       if (!session.isQueuePhase) {
         if (isSelectedView && cc.zy) {
           const p = calcProb(cc, typeCodeToFlag(cc.typeCode), cc.zy);
           if (p.prob >= 0) prob = { color: p.color, label: p.percentLabel || p.label, bg: probBg(p.color) };
         } else if (!isSelectedView && cc.flag && cc.zy) {
-          const ac = session.allCourses.find((x) => keyOf(x.code, x.seq) === keyOf(cc.code, cc.seq));
-          if (ac) {
-            const p = calcProb(ac, cc.flag, cc.zy);
+          if (poolRow) {
+            const p = calcProb(poolRow, cc.flag, cc.zy);
             if (p.prob >= 0) prob = { color: p.color, label: p.percentLabel || p.label, bg: probBg(p.color) };
           }
         }
@@ -39,7 +39,10 @@
       const cand = session.candidateCourses.find((x) => keyOf(x.code, x.seq) === keyOf(cc.code, cc.seq));
       const qd = session.queueDataMap[keyOf(cc.code, cc.seq)];
       const qdArg = qd ? { qRemaining: qd.qRemaining, qQueue: qd.qQueue, qCapacity: qd.qCapacity } : {};
-      const meta = previewBlockMeta(cc, session.isQueuePhase, isSelectedView, qdArg as Record<string, { qRemaining: number; qQueue: number; qCapacity: number }>, cand, prob);
+      // 按行判定（非视图标志）：优先池行实时态，池行缺失时退回候选表/草稿快照
+      const liveSelected = !!poolRow && !!poolRow.selected;
+      const liveQueued = poolRow ? !poolRow.selected && !!poolRow.isCandidate : !!cand || cc.isCandidate || (cc as { queued?: boolean }).queued === true;
+      const meta = previewBlockMeta(cc, session.isQueuePhase, liveSelected, !!liveQueued, qdArg as Record<string, { qRemaining: number; qQueue: number; qCapacity: number }>, cand, prob);
       return { color: meta.color, probLabel: meta.label, bg: meta.bg };
     });
   });

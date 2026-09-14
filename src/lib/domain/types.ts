@@ -79,6 +79,8 @@ export interface DraftCourse {
   flag: Flag;
   zy: number;
   baseFlag: Flag;
+  /** 载入时该课班正处候补（排队中）：不参与差量提交，退队走候选队列/卡片 */
+  queued?: boolean;
 }
 
 /** 草稿：命名课表方案快照（可直接编辑） */

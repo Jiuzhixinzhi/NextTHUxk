@@ -187,34 +187,66 @@ export function parseDlRows(html: string): Course[] {
   return out;
 }
 
-export async function fetchCandidateCourses(ctx: Ctx): Promise<Course[]> {
-  if (!ctx.isZhjwxk) return [];
+/** 候补名单抓取结果：ok=false 表示未取得权威完整名单（dlSearch 失败/翻页丢失/超页截断），
+ *  调用方不可据此清理草稿排队标记或过滤提交差量（合法空表 ok=true） */
+export interface CandidateFetchResult {
+  rows: Course[];
+  ok: boolean;
+}
+
+export async function fetchCandidateCourses(ctx: Ctx): Promise<CandidateFetchResult> {
+  if (!ctx.isZhjwxk) return { rows: [], ok: false };
   const { SEM, BASE } = ctx;
   try {
-    let dual: { gbk: string; utf8: string } | null = null;
-    try {
-      dual = await fetchPageDual(BASE + '/xkBks.vxkBksXkbBs.do?m=dlSearch&p_xnxq=' + SEM);
-    } catch (e) {
-      console.warn(TAG, 'dlSearch failed (' + (e instanceof Error ? e.message : e) + ') → 课表兜底');
+    const dual = await fetchPageDual(BASE + '/xkBks.vxkBksXkbBs.do?m=dlSearch&p_xnxq=' + SEM).catch((e: unknown) => {
+      console.warn(TAG, 'dlSearch failed (' + (e instanceof Error ? e.message : e) + ' → 课表兜底');
+      return null;
+    });
+    if (dual && dual.gbk.includes('accessDenied') && dual.utf8.includes('accessDenied')) return { rows: [], ok: false };
+    // 双解码择优（pickDecoded 同款：行数多者胜，平分回退 gbk）；此处保留胜出原文以取 token/共X页
+    const gRows = dual ? parseDlRows(dual.gbk) : [];
+    const uRows = dual ? parseDlRows(dual.utf8) : [];
+    const candidates = uRows.length > gRows.length ? uRows : gRows;
+    const html0 = dual ? (uRows.length > gRows.length ? dual.utf8 : dual.gbk) : '';
+    // 防御性翻页：候补表分页时单 GET 首页会静默丢行（镜像 fetchCategoryAttrs 的 token POST；
+    // 单页者 totalPages=1，零额外请求）
+    const token = (html0.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';
+    const rawPages = parseInt((html0.match(/共\s*(\d+)\s*页/) || [])[1] || '', 10) || 1;
+    const totalPages = Math.min(rawPages, 10);
+    const capped = rawPages > totalPages;
+    let pagesDropped = false;
+    if (token && totalPages > 1) {
+      for (let p = 2; p <= totalPages; p++) {
+        try {
+          const h = await fetchPost(BASE + '/xkBks.vxkBksXkbBs.do', new URLSearchParams({ m: 'dlSearch', page: String(p), token, p_xnxq: SEM }));
+          const more = parseDlRows(h).filter(c => !candidates.some(x => x.code + '_' + normSeq(x.seq) === c.code + '_' + normSeq(c.seq)));
+          candidates.push(...more);
+          console.log(TAG, 'dlSearch 第' + p + '页: +' + more.length);
+        } catch (e) {
+          console.warn(TAG, 'dlSearch 第' + p + '页失败:', e);
+          pagesDropped = true;
+          break;
+        }
+      }
     }
-    if (dual && dual.gbk.includes('accessDenied') && dual.utf8.includes('accessDenied')) return [];
-    const candidates = dual ? pickDecoded(parseDlRows, dual) : [];
-    console.log(TAG, 'candidate courses:', candidates.length);
+    const rawRows = (html0.match(/<tr[^>]*class="trr[12]"/g) || []).length;
+    console.log(TAG, 'candidate courses:', candidates.length, '（原始表行 ' + rawRows + ' · 共 ' + rawPages + ' 页 · 丢弃 ' + Math.max(0, rawRows - candidates.length) + '）');
     if (!candidates.length) {
       try {
         const kbDual = await fetchPageDual(BASE + '/xkBks.vxkBksXkbBs.do?m=kbSearch&p_xnxq=' + SEM);
         const kbCand = pickDecoded(parseTimetableCandidates, kbDual);
         console.log(TAG, 'dlSearch empty → kbSearch candidates:', kbCand.length);
-        if (kbCand.length) return kbCand;
+        if (kbCand.length) return { rows: kbCand, ok: true };
         console.warn(TAG, 'kbSearch 0 candidates: gbk len', kbDual.gbk.length, 'utf8 len', kbDual.utf8.length, 'p_id blocks:', (kbDual.gbk.match(/p_id=/g) || []).length);
       } catch (e) {
         console.warn(TAG, 'kbSearch fallback:', e);
       }
     }
-    return candidates;
+    // ok 仅在「首页成功且翻页无丢失/未截断」时为真（权威完整名单）；否则调用方应保守处理
+    return { rows: candidates, ok: !!dual && !pagesDropped && !capped };
   } catch (e) {
     console.warn(TAG, 'candidate fetch:', e);
-    return [];
+    return { rows: [], ok: false };
   }
 }
 

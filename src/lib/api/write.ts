@@ -101,7 +101,7 @@ export async function submitCourse(ctx: Ctx, code: string, seq: string, zy: numb
       return sel.some(s => s.code === code && String(s.seq) === String(seq));
     };
     if (await pollUntil(hitSelUnknown, 700, 3)) return { ok: true, msg: '选课成功' };
-    const candUnknown = await fetchCandidatesForWrite(ctx);
+    const candUnknown = (await fetchCandidatesForWrite(ctx)).rows;
     if (candUnknown.some(s => s.code === code && String(s.seq) === String(seq))) return { ok: true, msg: '已加入候补队列' };
     return { ok: false, msg: res.msg };
   }
@@ -110,7 +110,7 @@ export async function submitCourse(ctx: Ctx, code: string, seq: string, zy: numb
     return sel.some(s => s.code === code && String(s.seq) === String(seq));
   };
   if (await pollUntil(hitSel, 700, 3)) return { ok: true, msg: '选课成功' };
-  const cand = await fetchCandidatesForWrite(ctx);
+  const cand = (await fetchCandidatesForWrite(ctx)).rows;
   const foundQueue = cand.some(s => s.code === code && String(s.seq) === String(seq));
   return foundQueue ? { ok: true, msg: '已加入候补队列' } : { ok: false, msg: '选课未生效，请确认课程类型是否正确' };
 }
@@ -122,7 +122,7 @@ export async function dropCourse(ctx: Ctx, code: string, seq: string, isQueue: b
     const res = await fetchFormSubmit(ctx, searchUrl, { m: 'dlDelete', p_xnxq: SEM, page: '', 'p_del_id': SEM + ';' + code + ';' + seq + ';' });
     if (!res.submitted) return res;
     const gone = async () => {
-      const cand = await fetchCandidatesForWrite(ctx);
+      const cand = (await fetchCandidatesForWrite(ctx)).rows;
       return !cand.some(s => s.code === code && String(s.seq) === String(seq));
     };
     if (await pollUntil(gone, 500, 3)) return { ok: true, msg: '已退出候补队列' };

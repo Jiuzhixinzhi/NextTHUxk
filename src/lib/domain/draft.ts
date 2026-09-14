@@ -18,6 +18,7 @@ export function draftCourseFrom(c: Course, flag: Flag, zy: number, fallbackFlag:
     zy: parseInt(String(zy), 10) || 3,
     baseFlag: entryBaseFlag(c) || fallbackFlag,
     note: c.note || c.xkTextNote || '', // 外校真实时间载体
+    queued: c.isCandidate && !c.selected ? true : undefined,
   };
 }
 
@@ -37,6 +38,7 @@ export function draftCourseFromSelected(c: Course): DraftCourse {
     zy: c.zy || 3,
     baseFlag: bf,
     note: c.note || c.xkTextNote || '',
+    queued: c.isCandidate && !c.selected ? true : undefined,
   };
 }
 
@@ -65,13 +67,14 @@ export function repairDraftCourse(c: DraftCourse): boolean {
 
 export interface MergeSelectedIns {
   added: number;
-  /** 已在稿且 zy 与已选侧一致（或已选侧无真实 zy），未同步 */
+  /** 已在稿且无需任何回写（zy/学分/排队态均一致，且无破损修复） */
   skipped: number;
-  /** 已在稿但 zy 被同步为已选侧真实志愿的行数 */
+  /** 已在稿但被回写的行数（志愿/学分/排队态任一变化，或顺手修复破损） */
   synced: number;
 }
 
-/** 已选整表并入草稿：按课班去重；已在稿的行以服务端真实 zy 回写（zy>0 才同步，不动 flag） */
+/** 已选整表并入草稿：按课班去重；已在稿的行以服务端真实 zy / 学分 / 排队态回写
+ *  （zy>0 才同步；学分仅在服务端 >0 时补足；flag 不动） */
 export function mergeSelectedIntoDraft(d: Draft, selected: Course[]): MergeSelectedIns {
   let added = 0,
     skipped = 0,
@@ -83,14 +86,28 @@ export function mergeSelectedIntoDraft(d: Draft, selected: Course[]): MergeSelec
     const exist = index.get(key);
     if (exist) {
       let touched = repairDraftCourse(exist);
+      let didSync = false;
       const realZy = Math.max(0, parseInt(String(row.zy), 10)) || 0;
       if (realZy > 0 && exist.zy !== realZy) {
         exist.zy = realZy;
-        synced++;
         touched = true;
-      } else if (!touched) {
-        skipped++;
+        didSync = true;
       }
+      // 学分回填同步：服务端列位漂移时草稿快照为 0，池行回填后补齐（用户报形势与政策）
+      if (row.credits && Number(row.credits) > 0 && Number(exist.credits) !== Number(row.credits)) {
+        exist.credits = Number(row.credits);
+        touched = true;
+        didSync = true;
+      }
+      // 排队态同步：正选↔候补切换（退队/转正后清标记）
+      const q = !!(row.isCandidate && !row.selected);
+      if (!!exist.queued !== q) {
+        exist.queued = q || undefined;
+        touched = true;
+        didSync = true;
+      }
+      if (didSync) synced++;
+      else if (!touched) skipped++;
       return;
     }
     const dc = draftCourseFromSelected(row);
@@ -131,6 +148,7 @@ export function draftDiff(currentSelected: Course[], draftCourses: DraftCourse[]
   const toAdd: DraftCourse[] = [];
   const addedKeys = new Set<string>();
   draftCourses.forEach(c => {
+    if (c.queued) return; // 排队中课程不参与差量提交（退队走候选队列/卡片）
     const k = c.code + '_' + normSeq(c.seq);
     const cur = curMap.get(k);
     if (cur && sameAsDraft(cur, c)) return;

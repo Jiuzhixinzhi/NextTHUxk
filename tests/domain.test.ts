@@ -399,6 +399,53 @@ describe('mergeSelectedIntoDraft（已选载入）', () => {
     expect(ins.skipped).toBe(0);
     expect(draft.courses[0]!.flag).toBe('rx');
   });
+
+  it('已在稿行学分缺失 → 按服务端回填（形势与政策 0→1）', () => {
+    const draft = makeDraft([
+      { code: 'a', seq: '01', flag: 'bx', zy: 3, name: 'A', teacher: '', time: '', credits: 0, baseFlag: 'bx' },
+    ]);
+    const row = { ...sel('a', '01', 3, '006'), credits: 1 } as never;
+    const ins = mergeSelectedIntoDraft(draft, [row]);
+    expect(draft.courses[0]!.credits).toBe(1);
+    expect(ins.synced).toBe(1);
+  });
+
+  it('候补行载入携带 queued 标记；转正后被清除', () => {
+    const queued = { ...sel('b', '01', 3), isCandidate: true, selected: false } as never;
+    const d1 = makeDraft([]);
+    mergeSelectedIntoDraft(d1, [queued]);
+    expect(d1.courses[0]!.queued).toBe(true);
+    // 转正：selected=true（isCandidate 残留）→ 清 queued
+    const promoted = { ...sel('b', '01', 3), isCandidate: true, selected: true } as never;
+    const ins = mergeSelectedIntoDraft(d1, [promoted]);
+    expect(d1.courses[0]!.queued).toBeUndefined();
+    expect(ins.synced).toBe(1);
+  });
+
+  it('draftDiff：queued 行不参与差量提交', () => {
+    const draft = makeDraft([
+      { code: 'q', seq: '01', flag: 'rx', zy: 3, name: 'Q', teacher: '', time: '', credits: 2, baseFlag: 'rx', queued: true },
+      { code: 'n', seq: '01', flag: 'rx', zy: 3, name: 'N', teacher: '', time: '', credits: 2, baseFlag: 'rx' },
+    ]);
+    const diff = draftDiff([], draft.courses);
+    expect(diff.toAdd.map(c => c.code)).toEqual(['n']);
+  });
+});
+
+describe('previewBlockMeta（WL 阶段徽章优先级）', () => {
+  it('previewBlockMeta：课余量阶段草稿视图已选课显「已选」而非已满', async () => {
+    const { previewBlockMeta } = await import('../src/lib/domain/preview');
+    const c = { code: 'a', seq: '01', name: 'A', time: '', credits: 1 } as never;
+    const m = previewBlockMeta(c, true, true, false, { a_1: { qRemaining: 0, qQueue: 3, qCapacity: 30 } }, undefined, null);
+    expect(m.label).toBe('已选');
+  });
+
+  it('previewBlockMeta：当前已选视图中的候补行仍显排队名次（不被视图标志误判已选）', async () => {
+    const { previewBlockMeta } = await import('../src/lib/domain/preview');
+    const c = { code: 'b', seq: '01', name: 'B', time: '', credits: 1, queued: true } as never;
+    const m = previewBlockMeta(c, true, false, true, { b_1: { qRemaining: 0, qQueue: 4, qCapacity: 30 } }, { myPos: 2, queueTotal: 9 } as never, null);
+    expect(m.label).toBe('排队第2/9人');
+  });
 });
 
 describe('draftCourseFromSelected / repairDraftCourse（flag 允许集约束）', () => {

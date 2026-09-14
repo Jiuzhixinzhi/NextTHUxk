@@ -249,8 +249,9 @@ export async function renameDraft(id: number): Promise<void> {
   showToast(true, '已重命名为「' + d.name + '」');
 }
 
-/** 已选/候补载入：当前已选 + 候补队列快照并入活跃草稿（按课班去重；已在稿行回写真实志愿）。
- *  排队期「存当前选课」语义（上游 PR #53 同款）：快照含候补行，排队徽章由池行状态派生。 */
+/** 已选/候补载入：当前已选 + 候补队列快照并入活跃草稿（按课班去重；已在稿行回写真实志愿/学分/排队态）。
+ *  排队期「存当前选课」语义（上游 PR #53 同款）：快照含候补行，排队徽章由池行状态派生；
+ *  候补行带 queued 标记，不参与差量提交。 */
 export function loadSelectedIntoActive(): AddResult {
   const snapshot = selectedPreviewRows();
   if (!snapshot.length) return { ok: false, msg: '没有已选/候补课程' };
@@ -266,13 +267,13 @@ export function loadSelectedIntoActive(): AddResult {
     if (synced) {
       persistSoon();
       refreshCoverage();
-      return { ok: true, msg: '所选课程均已在草稿「' + d.name + '」中（已同步 ' + synced + ' 门志愿等级）' };
+      return { ok: true, msg: '所选正选/候补课程均已在草稿「' + d.name + '」中（已同步 ' + synced + ' 门状态）' };
     }
-    return { ok: false, msg: '所选课程均已在草稿「' + d.name + '」中' };
+    return { ok: false, msg: '所选正选/候补课程均已在草稿「' + d.name + '」中' };
   }
   persistSoon();
   refreshCoverage();
-  return { ok: true, msg: '已载入 ' + added + ' 门到草稿「' + d.name + '」' + srcLabel + (skipped ? '（跳过已在稿 ' + skipped + ' 门）' : '') + (synced ? ' · 同步 ' + synced + ' 门志愿' : '') };
+  return { ok: true, msg: '已载入 ' + added + ' 门到草稿「' + d.name + '」' + srcLabel + (skipped ? '（跳过已在稿 ' + skipped + ' 门）' : '') + (synced ? ' · 同步 ' + synced + ' 门状态' : '') };
 }
 
 /** JSON 导入（分享格式）：并入活跃草稿 */
@@ -305,6 +306,7 @@ export function importJson(jsonStr: string): AddResult {
       zy: parseInt(String(c.zy), 10) || 3,
       baseFlag: fallbackFlag,
       note: c.note || '',
+      queued: c.queued === true ? true : undefined,
     };
     const ac = session.allCourses.find(x => x.code === c.code && String(x.seq || '0') === String(c.seq || '0'));
     if (!push.baseFlag) push.baseFlag = ac ? baseFlag(ac) : fallbackFlag;
@@ -332,6 +334,7 @@ export function exportText(draft: Draft): string {
       flag: c.flag,
       zy: c.zy,
       baseFlag: c.baseFlag,
+      queued: c.queued === true,
     })),
   });
 }
@@ -384,14 +387,42 @@ export async function promote(draft: Draft): Promise<void> {
       return;
     }
     const current = await fetchSelectedCourses({ SEM: session.SEM, BASE: session.BASE, isZhjwxk: session.isZhjwxk, isZhjw: session.isZhjw, isWebvpn: session.isWebvpn });
-    const { kept, toDrop, toAdd } = draftDiff(current, draft.courses);
+    const queuedKeys = new Set(session.candidateCourses.map(c => c.code + '_' + normSeq(c.seq)));
+    // 候选表可信（队列阶段且本轮权威取得，含合法空表）→ 才清理陈旧 queued 标记/过滤差量；
+    // 拉取失败（ok=false）时保守保留，避免误提交仍排队的课
+    const candTrusted = session.isQueuePhase && session.candidateFetchOk;
+    // 陈旧 queued 标记清理：
+    // ① 非队列阶段（正选/浏览）候补队列本就不存在 → 全部标记定义失效，直接清空，避免行被差量永久跳过；
+    // ② 队列阶段且候选表可信（本轮权威取得，含合法空表）→ 清掉已退队/转正的行；拉取失败保守保留。
+    let queuedStale = false;
+    if (!session.isQueuePhase) {
+      draft.courses.forEach(c => {
+        if (c.queued) {
+          c.queued = undefined;
+          queuedStale = true;
+        }
+      });
+    } else if (session.candidateFetchOk) {
+      draft.courses.forEach(c => {
+        if (c.queued && !queuedKeys.has(c.code + '_' + normSeq(c.seq))) {
+          c.queued = undefined;
+          queuedStale = true;
+        }
+      });
+    }
+    if (queuedStale) persistSoon();
+    const { kept, toDrop, toAdd: rawToAdd } = draftDiff(current, draft.courses);
+    // 候补（排队中）课程不重复提交：queued=true 行已在 draftDiff 内跳过，此处再按实时候选表兜底
+    // （手动加入草稿的排队课可能无 queued 标记）
+    const toAdd = candTrusted ? rawToAdd.filter(c => !queuedKeys.has(c.code + '_' + normSeq(c.seq))) : rawToAdd;
+    const queuedSkipped = rawToAdd.length - toAdd.length;
     if (!toDrop.length && !toAdd.length) {
-      showToast(true, '课表「' + draft.name + '」与当前已选一致，无需提交');
+      showToast(true, queuedSkipped ? '课表「' + draft.name + '」与当前已选一致（候补 ' + queuedSkipped + ' 门不重复提交）' : '课表「' + draft.name + '」与当前已选一致，无需提交');
       return;
     }
     const ok = await confirmDialog(
       '提交「' + draft.name + '」？',
-      '保留重合 ' + kept.length + ' 门 · 退选 ' + toDrop.length + ' 门 · 新选 ' + toAdd.length + ' 门。',
+      '保留重合 ' + kept.length + ' 门 · 退选 ' + toDrop.length + ' 门 · 新选 ' + toAdd.length + ' 门' + (queuedSkipped ? '（候补 ' + queuedSkipped + ' 门不重复提交）' : '') + '。',
       false,
     );
     if (!ok) return;

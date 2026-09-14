@@ -69,7 +69,8 @@ export interface BlockMeta {
 export function previewBlockMeta(
   c: Course | ManualEvent,
   isQueuePhase: boolean,
-  previewIsSelected: boolean,
+  isSelected: boolean,
+  isQueued: boolean,
   queueDataMap: Record<string, { qRemaining: number; qQueue: number; qCapacity: number }>,
   cand: Course | undefined,
   prob: { color: string; label: string; bg: string } | null,
@@ -77,10 +78,12 @@ export function previewBlockMeta(
   const me = c as ManualEvent;
   if (me.manual) return { color: '#8b5cf6', label: '自定义', bg: 'rgba(139,92,246,.14)' };
   const cc = c as Course;
-  if (cc.isCandidate && cand?.myPos) return { color: '#ff9f1a', label: '排队第' + cand.myPos + '/' + (cand.queueTotal || 0) + '人', bg: 'rgba(255,159,26,.14)' };
-  if (cc.isCandidate) return { color: '#ff9f1a', label: '候选中', bg: 'rgba(255,159,26,.14)' };
+  // 已选（正选）优先于余量/排队/已满：余量仅作退路提醒，草稿视图的已选课不再标已满（用户报）
+  // 注意：判定必须按「行」而非视图——「当前已选」视图含候补行，不能用视图标志一刀切
+  if (isQueuePhase && isSelected) return { color: '#07c160', label: '已选', bg: 'rgba(7,193,96,.14)' };
+  if (isQueued && cand?.myPos) return { color: '#ff9f1a', label: '排队第' + cand.myPos + '/' + (cand.queueTotal || 0) + '人', bg: 'rgba(255,159,26,.14)' };
+  if (isQueued) return { color: '#ff9f1a', label: '候选中', bg: 'rgba(255,159,26,.14)' };
   if (isQueuePhase) {
-    if (previewIsSelected) return { color: '#07c160', label: '已选', bg: 'rgba(7,193,96,.14)' };
     const qd = queueDataMap[String(cc.code) + '_' + String(parseInt(String(cc.seq || '0'), 10) || 0)];
     if (qd) {
       if (qd.qRemaining > 0) return { color: '#07c160', label: '余' + qd.qRemaining, bg: 'rgba(7,193,96,.14)' };
