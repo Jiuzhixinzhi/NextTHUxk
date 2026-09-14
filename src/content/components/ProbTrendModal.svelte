@@ -3,7 +3,8 @@
   import { flagName, isSportsCourse } from '../../lib/domain/flags';
   import { probHist } from '../../lib/stores/probhist.svelte.ts';
   import { session } from '../../lib/stores/session.svelte.ts';
-  import { probAt, probSeries, probYDomain, sparkPath, trendDelta } from '../../lib/domain/probhist';
+  import { probAt, probSeries, probYDomain, sparkPath, trendDelta, priAt, priSeries, priDelta } from '../../lib/domain/probhist';
+  import { priProb } from '../../lib/domain/probability';
   import { fmtTime, keyOf } from '../../lib/core/utils';
 
   let { code, seq, flag: initFlag, zy: initZy }: { code: string; seq: string; flag: Flag; zy: number } = $props();
@@ -14,16 +15,26 @@
   const flags = $derived((course && isSportsCourse(course) ? ['ty'] : ['bx', 'xx', 'rx']) as Flag[]);
 
   let selFlag = $state<Flag>(initFlag);
-  let selZy = $state(initZy || 3);
+  // selZy = 0 表示「优先任选」独立档（走 is_zyrxk=1 通道，非 1/2/3 志愿）
+  let selZy = $state(initZy);
+
+  const hasPri = $derived.by(() => {
+    if (course && priProb(course)) return true;
+    return (points || []).some((p) => !!priAt(p));
+  });
 
   $effect(() => {
     if (!flags.includes(selFlag)) selFlag = flags[0]!;
-    if (selZy < 1 || selZy > 3) selZy = 3;
+    if (selZy === 0) {
+      if (!hasPri) selZy = 3;
+    } else if (selZy < 1 || selZy > 3) {
+      selZy = 3;
+    }
   });
 
-  const series = $derived.by(() => probSeries(points, selFlag, selZy));
-  const delta = $derived.by(() => trendDelta(points, selFlag, selZy));
-  const latest = $derived.by(() => (points.length ? probAt(points[points.length - 1]!, selFlag, selZy) : null));
+  const series = $derived.by(() => (selZy === 0 ? priSeries(points) : probSeries(points, selFlag, selZy)));
+  const delta = $derived.by(() => (selZy === 0 ? priDelta(points) : trendDelta(points, selFlag, selZy)));
+  const latest = $derived.by(() => (points.length ? (selZy === 0 ? priAt(points[points.length - 1]!) : probAt(points[points.length - 1]!, selFlag, selZy)) : null));
 
   const W = 480;
   const H = 96;
@@ -42,6 +53,9 @@
       <button type="button" class="nx-sim-mode" class:on={selFlag === f} onclick={() => (selFlag = f)}>{flagName(f)}</button>
     {/each}
     <span class="nx-trend-zywrap">
+      {#if hasPri}
+        <button type="button" class="nx-sim-mode" class:on={selZy === 0} title="优先任选通道（is_zyrxk=1），独立于 1/2/3 志愿" onclick={() => (selZy = 0)}>优先</button>
+      {/if}
       {#each [1, 2, 3] as z (z)}
         <button type="button" class="nx-sim-mode" class:on={selZy === z} onclick={() => (selZy = z)}>{z}志愿</button>
       {/each}

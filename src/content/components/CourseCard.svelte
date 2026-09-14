@@ -87,13 +87,14 @@
     const out: ChainNode[] = [];
     for (const row of probGridData(course)) {
       for (const cell of row.cells) {
-        const active = row.flag === curFlag && cell.zy === curZy;
+        const pri = !!cell.pri;
+        const active = !pri && row.flag === curFlag && cell.zy === curZy;
         const muted = (cell.prob ?? -1) < 0;
         const ratio = cell.ratioLabel || '';
-        const title = `${flagName(row.flag)} ${cell.zy}志愿 · ${cell.percentLabel || cell.label}${ratio && ratio !== '无数据' ? ' · ' + ratio : ''} · 点击看趋势`;
+        const title = (pri ? '任选 优先任选' : `${flagName(row.flag)} ${cell.zy}志愿`) + ` · ${cell.percentLabel || cell.label}${ratio && ratio !== '无数据' ? ' · ' + ratio : ''} · 点击看趋势`;
         out.push({
-          key: row.flag + cell.zy,
-          label: flagShort(row.flag) + cell.zy,
+          key: row.flag + (pri ? 'p' : cell.zy),
+          label: pri ? '优先' : flagShort(row.flag) + cell.zy,
           pct: cell.percentLabel || cell.label || '—',
           muted,
           color: cell.color,

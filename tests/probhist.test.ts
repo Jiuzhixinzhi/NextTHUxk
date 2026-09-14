@@ -13,6 +13,9 @@ import {
   snapshotVolMap,
   sparkPath,
   trendDelta,
+  priAt,
+  priSeries,
+  priDelta,
   type VolHistMap,
   type VolPoint,
 } from '../src/lib/domain/probhist';
@@ -164,6 +167,25 @@ describe('probAt（快照重算，与 calcProb 同口径）', () => {
     const p = probAt(W(0, 4, '', '', '', '(2)2,3,0'), 'ty', 2);
     expect(p.prob).toBeCloseTo(2 / 3);
     expect(p.ratioLabel).toBe('3/2');
+  });
+});
+
+describe('priAt / priSeries / priDelta（优先任选档）', () => {
+  it('无优先串 → null', () => {
+    expect(priAt(W(0, 10, '', '', ''))).toBeNull();
+    expect(priAt(W(0, 10, '', '', '(0)0,5,0'))).toBeNull();
+  });
+
+  it('优先档 = (池 − 必修三档 − 限选三档) / 优先人数', () => {
+    expect(priAt(W(0, 100, '10,5,0', '5,0,0', '(4)'))!.prob).toBe(1);
+    expect(priAt(W(0, 100, '10,5,0', '5,0,0', '(100)'))!.prob).toBeCloseTo(0.8);
+  });
+
+  it('priSeries 只保留有效点；priDelta 取相邻差', () => {
+    const pts = [W(100, 100, '', '', '(50)'), W(200, 50, '', '', '(100)')];
+    expect(priSeries(pts)).toHaveLength(2);
+    expect(priDelta(pts)).toBe(-50);
+    expect(priSeries([W(1, 10, '', '', '')])).toHaveLength(0);
   });
 });
 
