@@ -82,6 +82,9 @@
   {:else if visibleRows.length === 0}
     <div class="nx-empty">{searchMode ? '暂无匹配课程' : '暂无课程'}</div>
   {:else}
+    {#if st.error}
+      <div class="nx-st err" style="text-align:center;padding:8px 0 2px;font-size:11px;">{st.error}</div>
+    {/if}
     <div class="nx-list-tools">
       <span>共 {visibleRows.length} 门</span>
       <span class="nx-tools-gap"></span>

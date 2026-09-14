@@ -22,6 +22,11 @@ export function openWindow(state: Exclude<ModalState, { kind: 'none' } | { kind:
 }
 
 export function closeModal(): void {
+  // ✕/背景关闭也要结算交互型 promise（否则调用方 await 永久悬挂；zyConfirm 有副作用默认值，不在此结算）
+  const cur = modal.cur;
+  if (cur.kind === 'dialog') cur.resolve(false);
+  else if (cur.kind === 'prompt') cur.resolve(null);
+  else if (cur.kind === 'manualCopy') cur.resolve(false);
   modal.cur = { kind: 'none' };
 }
 

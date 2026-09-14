@@ -90,6 +90,36 @@ export interface SearchOpts {
   forceAll?: boolean;
 }
 
+// ─── 会话游标（上游 PR #46 同款核心：会话键 + 显式 reset）────────
+// kkxxSearch 依赖服务端会话记住「当前查询」，浏览翻页（无参 page=N）延续上次结果集。
+// 后台补拉并发请求会改写该会话 → 前台翻页拿错页。此处在「查询签名变化」时先裸发一次
+// kkxxSearch 重建会话，使每次查询都从确定基线开始（即使被扰动也能自愈）。
+let _searchSessionKey = '';
+
+function sessionKeyOf(ctx: Ctx, o: SearchOpts): string {
+  return JSON.stringify([
+    ctx.SEM,
+    ctx.BASE,
+    (o.kch || '').trim(),
+    (o.kcm || '').trim(),
+    (o.teacher || '').trim(),
+    o.department || '',
+    o.weekday || '',
+    o.section || '',
+    o.grade || '',
+    o.rxklxm || '',
+    o.kctsm || '',
+    !!o.onlyAvailable,
+    !!o.gradAvail,
+  ]);
+}
+
+/** 裸发一次 kkxxSearch 重置服务端会话（不带筛选参数、不带 page） */
+async function resetSearchSession(ctx: Ctx): Promise<void> {
+  const { SEM, BASE } = ctx;
+  await fetchPage(BASE + '/xkBks.vxkBksJxjhBs.do?m=kkxxSearch&p_xnxq=' + encodeURIComponent(SEM) + '&_t=' + Date.now());
+}
+
 /** 单页服务端搜索（pageKind：ok=有行；empty=结果页但 0 行；unknown=异常页） */
 export async function serverSearch(ctx: Ctx, o: SearchOpts = {}): Promise<ServerSearchResult> {
   const { SEM, BASE } = ctx;
@@ -112,9 +142,13 @@ export async function serverSearch(ctx: Ctx, o: SearchOpts = {}): Promise<Server
   if (o.onlyAvailable) parts.push('p_bkskyl_ig=0');
   if (o.gradAvail) parts.push('p_yjskyl_ig=0');
   const url = BASE + '/xkBks.vxkBksJxjhBs.do?' + parts.join('&') + '&_t=' + Date.now();
+  const key = sessionKeyOf(ctx, o);
+  const needReset = key !== _searchSessionKey;
   let html: string;
   try {
+    if (needReset) await resetSearchSession(ctx);
     html = await fetchPage(url);
+    if (needReset && !isSsoLoginHtml(html) && !isXkDeadHtml(html)) _searchSessionKey = key;
   } catch (e) {
     return { rows: [], pageKind: 'unknown', htmlHead: String(e instanceof Error ? e.message : e) };
   }
@@ -226,38 +260,42 @@ export async function serverSearchStorm(ctx: Ctx, o: SearchOpts = {}): Promise<S
   if (probeTo > 1) {
     const merged = new Map<string, Course>();
     rows.forEach(r => merged.set(r.code + '_' + (r.seq || '0'), r));
-    const mergePage = (list: Course[]): void => {
-      list.forEach(row => {
-        const k = row.code + '_' + (row.seq || '0');
-        if (!merged.has(k)) {
-          merged.set(k, row);
-          rows.push(row);
-        }
-      });
-    };
     const pages: number[] = [];
     for (let p = 2; p <= probeTo; p++) pages.push(p);
-    const failed: number[] = [];
-    const runPages = async (ps: number[], concurrency: number, staggerMs: number): Promise<void> => {
+    // 页抓取：0 行（serverSearch 内部吞网络/死页错误返回 0 行，不抛）或 0 新键
+    // （服务端忽略 page 回吐首页内容）都算失败，进重试队列（上游 ad46dd3 同款）
+    const runPages = async (ps: number[], concurrency: number, staggerMs: number): Promise<number[]> => {
+      const fails: number[] = [];
       await runPool(ps, concurrency, async (p, idx) => {
         await sleep(staggerMs * (idx % concurrency));
         try {
           const r = await serverSearch(ctx, { ...o, page: p });
-          mergePage(r.rows || []);
+          let added = 0;
+          (r.rows || []).forEach(row => {
+            // 精确课号深页护栏：教务忽略筛选回吐未过滤行，只收课号前缀命中（防污染池）
+            if (exactCode && !String(row.code || '').startsWith((o.kch || '').trim())) return;
+            const k = row.code + '_' + (row.seq || '0');
+            if (!merged.has(k)) {
+              merged.set(k, row);
+              rows.push(row);
+              added++;
+            }
+          });
+          if (!(r.rows || []).length || added === 0) fails.push(p);
         } catch (e) {
-          failed.push(p);
+          fails.push(p);
           console.warn(TAG, 'server search page', p, e);
         }
       });
+      return fails;
     };
-    await runPages(pages, 5, 30);
-    // 失败页重试（上游 ad46dd3 同款：旧版逐页失败静默蒸发，「加载全部」47/427 只装下零头）：
-    // 第二轮单并发慢速——顽固页多半被持续限流，隔 700ms 逐个再给一次机会
-    if (failed.length) {
-      console.warn(TAG, '翻页失败重试（单并发慢速）:', failed.join(','));
-      const retry = failed.splice(0, failed.length);
-      await runPages(retry, 1, 700);
+    let fails = await runPages(pages, 5, 30);
+    // 失败页降并发降速重试两轮（教务/WebVPN 对连发限流：用户实锤「加载全部」47/427 只装下零头）
+    for (let round = 0; round < 2 && fails.length; round++) {
+      console.warn(TAG, '翻页失败重试（第 ' + (round + 1) + ' 轮）:', fails.join(','));
+      fails = await runPages(fails, 2, 250);
     }
+    if (fails.length) console.warn(TAG, '翻页仍失败:', fails.join(','), '——部分页教务限流，可再点「加载全部」续拉');
   }
   // 教师名兜底：课名 0 行且非纯数字 → 换教师通道重试一次
   if (!rows.length && o.kcm && o.kcm.trim() && !/^\d+$/.test(o.kcm.trim()) && !o.teacher) {

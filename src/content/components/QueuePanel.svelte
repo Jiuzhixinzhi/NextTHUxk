@@ -5,7 +5,7 @@
   import { jumpTo } from '../../lib/stores/search.svelte.ts';
   import { confirmDialog } from '../../lib/stores/modal.svelte.ts';
   import { showToast } from '../../lib/stores/toast.svelte.ts';
-  import { baseFlag } from '../../lib/domain/flags';
+  import { entryBaseFlag } from '../../lib/domain/flags';
   import { keyOf } from '../../lib/core/utils';
 
   async function onDrop(code: string, seq: string) {
@@ -17,7 +17,7 @@
 
   /** 暂存到活跃草稿：类型/志愿取候补行真值（上游 PR #53 暂存按钮同款） */
   function onStage(c: Course) {
-    const res = addCourseToActive(c, baseFlag(c), c.zy || 3);
+    const res = addCourseToActive(c, entryBaseFlag(c), c.zy || 3);
     showToast(res.ok, res.msg);
   }
 </script>

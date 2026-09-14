@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Ctx, PlanCourse } from '../domain/types';
 import { fetchPage } from '../net/http';
+import { creditsOf } from '../domain/credits';
 
 export function parsePlan(doc: Document): PlanCourse[] {
   const rows = doc.querySelectorAll('table#kcTable tr');
@@ -26,7 +27,7 @@ export function parsePlan(doc: Document): PlanCourse[] {
     const attr = cells.find(c => ['必修', '限选', '任选'].includes(c));
     const credit = cells.find(c => /^\d{1,2}(\.\d)?$/.test(c) && c !== code);
     const group = cells.find(c => c.length > 2 && !['必修', '限选', '任选'].includes(c) && !/^\d/.test(c) && !c.includes('学年') && c !== name);
-    if (name) out.push({ semester: sem + ' ' + season, code, name: name.replace(/\s+/g, ''), attr: attr || '', credits: parseFloat(credit || '') || 0, group: group || '' });
+    if (name) out.push({ semester: sem + ' ' + season, code, name: name.replace(/\s+/g, ''), attr: attr || '', credits: creditsOf(code, parseFloat(credit || '') || 0), group: group || '' });
   }
   return out;
 }
@@ -45,7 +46,7 @@ export function parseFullProgram(doc: Document): PlanCourse[] {
     const idx = cells.length >= 9 ? 2 : 0;
     const code = cells[idx],
       name = cells[idx + 1];
-    if (code && name && /^\d+$/.test(code)) out.push({ code, name, credits: parseFloat(cells[idx + 2] || '') || 0, attr, group: grp, semester: '' });
+    if (code && name && /^\d+$/.test(code)) out.push({ code, name, credits: creditsOf(code, parseFloat(cells[idx + 2] || '') || 0), attr, group: grp, semester: '' });
   }
   return out;
 }
