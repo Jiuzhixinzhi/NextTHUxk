@@ -9,6 +9,7 @@ import { draftDiff, draftCourseFrom, draftKeyOf, mergeSelectedIntoDraft, repairD
 import { gbkPercentEncode } from '../src/lib/net/gbk';
 import { normSeq, keyOf } from '../src/lib/core/utils';
 import { checkPlanCoverage } from '../src/lib/domain/plancov';
+import { creditsOf } from '../src/lib/domain/credits';
 
 describe('parseTimeSlots', () => {
   it('解析标准大节（教务时间串 = 周X-第几节）', () => {
@@ -459,6 +460,21 @@ describe('工具', () => {
     expect(normSeq('0')).toBe('0');
     expect(normSeq('')).toBe('0');
     expect(keyOf('10720011', '01')).toBe('10720011_1');
+  });
+});
+
+describe('creditsOf 课号末位信用分', () => {
+  it('纯数字课号恒取末位（本校课）', () => {
+    expect(creditsOf('10680101', 9)).toBe(1);
+    expect(creditsOf('20740012', 0)).toBe(2);
+    expect(creditsOf('12345670', 5)).toBe(0);
+  });
+  it('外校前缀课号回退表内值', () => {
+    expect(creditsOf('PK1001', 3)).toBe(3);
+    expect(creditsOf('GPK2002', 2.5)).toBe(2.5);
+    expect(creditsOf('BW001', undefined)).toBe(0);
+    expect(creditsOf('', 4)).toBe(4);
+    expect(creditsOf(null, 1)).toBe(1);
   });
 });
 

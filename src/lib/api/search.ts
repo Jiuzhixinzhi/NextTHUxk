@@ -8,6 +8,7 @@ import { TAG } from '../core/constants';
 import { normSeq, runPool, sleep } from '../core/utils';
 import { fetchPage, fetchPost } from '../net/http';
 import { gbkPercentEncode } from '../net/gbk';
+import { creditsOf } from '../domain/credits';
 
 export function isXkDeadHtml(html: string): boolean {
   return (
@@ -40,7 +41,7 @@ export function parseCatalog(doc: Document): Course[] {
       code,
       seq: cell(2),
       name,
-      credits: parseFloat(cell(4)) || 0,
+      credits: creditsOf(code, parseFloat(cell(4)) || 0),
       teacher: cell(5),
       teacherId,
       department: cell(0),
@@ -152,7 +153,7 @@ export function parseTabGrid(html: string, attr: string): Course[] {
         attr: (cells[1] || '').replace(/<[^>]+>/g, '').trim() || attr || '',
         time: cells[6] || '',
         teacher: cells[7] || '',
-        credits: parseFloat(cells[8] || '') || 0,
+        credits: creditsOf(code, parseFloat(cells[8] || '') || 0),
         capacity: 0,
         remaining: 0,
         available: true,

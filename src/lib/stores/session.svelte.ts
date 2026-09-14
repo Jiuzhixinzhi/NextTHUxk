@@ -501,6 +501,17 @@ export function mergeRows(rows: Course[]): number {
       if (!ex.credits && r.credits) ex.credits = r.credits;
       if (!ex.department && r.department) ex.department = r.department;
       if (!ex.xkTextNote && r.xkTextNote) ex.xkTextNote = r.xkTextNote;
+      // 容量/余量刷新（上游 f0a1090 同款，用户实锤「形策跳转左边看得见余量、右边暂存不显示」）：
+      // 旧池行残值（列漂时代容量 0）吃不到新行真值；r.capacity>0 才动（页签 0/0 占位不覆盖）；
+      // 余量含 0（「余 0=已满」是信息，不是未知）
+      const rCap = r.capacity || 0;
+      const rRem = r.remaining ?? 0;
+      if (rCap > 0 && (ex.capacity !== rCap || ex.remaining !== rRem)) {
+        ex.capacity = rCap;
+        ex.remaining = rRem;
+        ex.available = rRem > 0;
+        filled++;
+      }
       if (before !== ex.note + '|' + ex.time) filled++;
     }
     if (parses(r)) {
