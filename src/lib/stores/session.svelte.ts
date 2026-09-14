@@ -423,7 +423,8 @@ export async function syncQueueAndVol(): Promise<void> {
   session.queueDataMap = qResult.map;
   session.isQueuePhase = qResult.phase;
   session.candidateCourses = await fetchCandidateCourses(ctx());
-  if (session.candidateCourses.length) await backfillCandidateMeta(ctx(), session.candidateCourses).catch(() => {});
+  // 检查点同步（定时器触发）：候补回填过前台闸门，避免与浏览翻页并发 kkxxSearch
+  if (session.candidateCourses.length) await backfillCandidateMeta(ctx(), session.candidateCourses, fgBusy).catch(() => {});
   const candKeys = new Set(session.candidateCourses.map(c => c.code + '_' + String(c.seq || '0')));
   session.allCourses.forEach(c => {
     c.isCandidate = candKeys.has(c.code + '_' + String(c.seq || '0'));

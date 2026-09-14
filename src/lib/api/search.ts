@@ -260,38 +260,42 @@ export async function serverSearchStorm(ctx: Ctx, o: SearchOpts = {}): Promise<S
   if (probeTo > 1) {
     const merged = new Map<string, Course>();
     rows.forEach(r => merged.set(r.code + '_' + (r.seq || '0'), r));
-    const mergePage = (list: Course[]): void => {
-      list.forEach(row => {
-        const k = row.code + '_' + (row.seq || '0');
-        if (!merged.has(k)) {
-          merged.set(k, row);
-          rows.push(row);
-        }
-      });
-    };
     const pages: number[] = [];
     for (let p = 2; p <= probeTo; p++) pages.push(p);
-    const failed: number[] = [];
-    const runPages = async (ps: number[], concurrency: number, staggerMs: number): Promise<void> => {
+    // 页抓取：0 行（serverSearch 内部吞网络/死页错误返回 0 行，不抛）或 0 新键
+    // （服务端忽略 page 回吐首页内容）都算失败，进重试队列（上游 ad46dd3 同款）
+    const runPages = async (ps: number[], concurrency: number, staggerMs: number): Promise<number[]> => {
+      const fails: number[] = [];
       await runPool(ps, concurrency, async (p, idx) => {
         await sleep(staggerMs * (idx % concurrency));
         try {
           const r = await serverSearch(ctx, { ...o, page: p });
-          mergePage(r.rows || []);
+          let added = 0;
+          (r.rows || []).forEach(row => {
+            // 精确课号深页护栏：教务忽略筛选回吐未过滤行，只收课号前缀命中（防污染池）
+            if (exactCode && !String(row.code || '').startsWith((o.kch || '').trim())) return;
+            const k = row.code + '_' + (row.seq || '0');
+            if (!merged.has(k)) {
+              merged.set(k, row);
+              rows.push(row);
+              added++;
+            }
+          });
+          if (!(r.rows || []).length || added === 0) fails.push(p);
         } catch (e) {
-          failed.push(p);
+          fails.push(p);
           console.warn(TAG, 'server search page', p, e);
         }
       });
+      return fails;
     };
-    await runPages(pages, 5, 30);
-    // 失败页重试（上游 ad46dd3 同款：旧版逐页失败静默蒸发，「加载全部」47/427 只装下零头）：
-    // 第二轮单并发慢速——顽固页多半被持续限流，隔 700ms 逐个再给一次机会
-    if (failed.length) {
-      console.warn(TAG, '翻页失败重试（单并发慢速）:', failed.join(','));
-      const retry = failed.splice(0, failed.length);
-      await runPages(retry, 1, 700);
+    let fails = await runPages(pages, 5, 30);
+    // 失败页降并发降速重试两轮（教务/WebVPN 对连发限流：用户实锤「加载全部」47/427 只装下零头）
+    for (let round = 0; round < 2 && fails.length; round++) {
+      console.warn(TAG, '翻页失败重试（第 ' + (round + 1) + ' 轮）:', fails.join(','));
+      fails = await runPages(fails, 2, 250);
     }
+    if (fails.length) console.warn(TAG, '翻页仍失败:', fails.join(','), '——部分页教务限流，可再点「加载全部」续拉');
   }
   // 教师名兜底：课名 0 行且非纯数字 → 换教师通道重试一次
   if (!rows.length && o.kcm && o.kcm.trim() && !/^\d+$/.test(o.kcm.trim()) && !o.teacher) {

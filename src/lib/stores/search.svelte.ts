@@ -442,6 +442,9 @@ export async function runServerQuery(): Promise<void> {
           }
           search.browseRestore = null;
           search.error = '教务返回分页异常，已保留原页码';
+          // 恢复原页后指纹已变：主动落定并停止重迭代，否则循环会重拉成功页把提示清掉
+          search.serverSig = serverSig();
+          break;
         } else {
           if (!queryMode) search.browseRestore = null;
           applyMarks(res.rows || []);

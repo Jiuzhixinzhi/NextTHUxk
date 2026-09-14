@@ -203,12 +203,15 @@ export async function fetchCandidateCourses(ctx: Ctx): Promise<Course[]> {
   }
 }
 
-/** 候补课元数据回填（按课号单查一页补齐学分/容量/时间） */
-export async function backfillCandidateMeta(ctx: Ctx, candidates: Course[]): Promise<void> {
+/** 候补课元数据回填（按课号单查一页补齐学分/容量/时间）。
+ *  shouldPause 由调用方注入（检查点同步传前台占用判定）——前台查询在途时让路，
+ *  避免后台 kkxxSearch 污染服务端会话游标（上游 PR #46 同款；api 层不 import stores）。 */
+export async function backfillCandidateMeta(ctx: Ctx, candidates: Course[], shouldPause?: () => boolean): Promise<void> {
   const todo = (candidates || []).filter(c => c && c.code && !c.credits);
   if (!todo.length) return;
   await runPool(todo, 4, async c => {
     await sleep(30);
+    if (shouldPause?.()) return;
     try {
       const r = await serverSearch(ctx, { kch: c.code });
       const same = (r.rows || []).filter(x => String(x.code) === String(c.code));
