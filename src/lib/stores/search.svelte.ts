@@ -9,6 +9,7 @@ import { keyOf, lc, normSeq } from '../core/utils';
 import { serverSearch, serverSearchStorm, isCodeLike, type SearchOpts } from '../api/search';
 import type { Course } from '../domain/types';
 import { isSportsCourse } from '../domain/flags';
+import { normTeacher, teacherHit } from '../domain/match';
 import { conflictsWithPreview, buildPreviewSlotIndex } from '../domain/conflict';
 import { mergeRows, session } from './session.svelte.ts';
 import { onLaunchDone } from './bus.svelte.ts';
@@ -429,19 +430,7 @@ export function browseGoto(page: number): void {
 // ─── 跳转定位（课表/草稿 → 左侧搜索定位高亮） ─────────────────
 // 身份仲裁（上游 #33「课序会骗人」同款分层）：课序会陈旧/缺位，教师才是最高身份。
 // 匹配序：课号+课序+教师 → 课号+教师（唯一直认）→ 课号+课序（旧行为）→ 放弃高亮不冒认。
-
-/** 教师归一（去空白+小写） */
-function normTeacher(s: string | undefined | null): string {
-  return (s || '').toLowerCase().replace(/\s+/g, '');
-}
-
-/** 教师命中：行教师含查询教师即可（多师行「刘烨、王洪川」含「刘烨」）；
- *  反向包含不做——查询串含多师时防「王洪川」单师行误中 */
-function teacherHit(r: Course, teacher: string): boolean {
-  if (!teacher) return false;
-  const t = normTeacher(r.teacher);
-  return !!t && (t === teacher || t.includes(teacher));
-}
+// 课号粒度（seq='0'，如培养方案条目）：该课任一课序即达，不再白爬全量（上游 67053db）。
 
 export function jumpTo(code: string, seq: string, teacher?: string): void {
   search.chip = 'all';
@@ -461,22 +450,29 @@ export async function highlightJumpTarget(): Promise<void> {
   const code = search.jumpCode;
   if (!code) return;
   const seq = normSeq(search.jumpSeq || '0');
+  const codeGrain = !search.jumpSeq || seq === '0';
   const teacher = normTeacher(search.jumpTeacher);
   let rows = search.rows || [];
   const findTiered = (): { idx: number; row: Course | null } => {
     const q = search.q.toLowerCase();
     const src = q ? rows.filter(c => entryMatchesQ(c, q)) : rows;
     const sameCode = src.filter(r => String(r.code) === String(code));
-    // ① 课号+课序+教师 全信号
-    let row = sameCode.find(r => normSeq(r.seq || '0') === seq && teacherHit(r, teacher)) || null;
-    // ② 课号+教师：唯一直认；同师多课须课序在师内判得出，判不出不冒认
-    if (!row && teacher) {
-      const hits = sameCode.filter(r => teacherHit(r, teacher));
-      if (hits.length === 1) row = hits[0]!;
-      else if (hits.length > 1) row = hits.find(r => normSeq(r.seq || '0') === seq) || null;
+    let row: Course | null = null;
+    if (codeGrain) {
+      // 课号粒度（培养方案 seq='0'）：该课任一课序即达（教师给定时优先教师命中）
+      row = (teacher ? sameCode.find(r => teacherHit(r, teacher)) : undefined) || sameCode[0] || null;
+    } else {
+      // ① 课号+课序+教师 全信号
+      row = sameCode.find(r => normSeq(r.seq || '0') === seq && teacherHit(r, teacher)) || null;
+      // ② 课号+教师：唯一直认；同师多课须课序在师内判得出，判不出不冒认
+      if (!row && teacher) {
+        const hits = sameCode.filter(r => teacherHit(r, teacher));
+        if (hits.length === 1) row = hits[0]!;
+        else if (hits.length > 1) row = hits.find(r => normSeq(r.seq || '0') === seq) || null;
+      }
+      // ③ 课号+课序（旧行为兜底）
+      if (!row) row = sameCode.find(r => normSeq(r.seq || '0') === seq) || null;
     }
-    // ③ 课号+课序（旧行为兜底）
-    if (!row) row = sameCode.find(r => normSeq(r.seq || '0') === seq) || null;
     return row ? { idx: src.indexOf(row), row } : { idx: -1, row: null };
   };
   let hit = findTiered();

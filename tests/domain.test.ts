@@ -9,6 +9,8 @@ import { draftDiff, draftCourseFrom, draftKeyOf, mergeSelectedIntoDraft, repairD
 import { gbkPercentEncode } from '../src/lib/net/gbk';
 import { normSeq, keyOf } from '../src/lib/core/utils';
 import { checkPlanCoverage } from '../src/lib/domain/plancov';
+import { creditsOf } from '../src/lib/domain/credits';
+import { matchPoolRow, teacherHit } from '../src/lib/domain/match';
 
 describe('parseTimeSlots', () => {
   it('解析标准大节（教务时间串 = 周X-第几节）', () => {
@@ -459,6 +461,44 @@ describe('工具', () => {
     expect(normSeq('0')).toBe('0');
     expect(normSeq('')).toBe('0');
     expect(keyOf('10720011', '01')).toBe('10720011_1');
+  });
+});
+
+describe('matchPoolRow 池行三段匹配', () => {
+  const rows = [
+    { code: '100', seq: '1', teacher: '甲' },
+    { code: '100', seq: '2', teacher: '乙' },
+    { code: '100', seq: '3', teacher: '甲、乙' },
+  ] as never;
+  it('归一课序精确（前导零）', () => {
+    expect(matchPoolRow(rows, '02', '丙')!.seq).toBe('2');
+    expect(matchPoolRow(rows, '01')!.seq).toBe('1');
+  });
+  it('课序无匹配 → 同课同师（多师行含单师）', () => {
+    expect(matchPoolRow(rows, '9', '乙')!.seq).toBe('2');
+    expect(matchPoolRow(rows, '9', '丙')).toBe(rows[0]);
+  });
+  it('teacherHit 只做正向包含', () => {
+    expect(teacherHit(rows[2] as never, '乙')).toBe(true);
+    expect(teacherHit(rows[1] as never, '甲乙')).toBe(false);
+  });
+  it('空行表', () => {
+    expect(matchPoolRow([], '1')).toBeUndefined();
+  });
+});
+
+describe('creditsOf 课号末位信用分', () => {
+  it('纯数字课号恒取末位（本校课）', () => {
+    expect(creditsOf('10680101', 9)).toBe(1);
+    expect(creditsOf('20740012', 0)).toBe(2);
+    expect(creditsOf('12345670', 5)).toBe(0);
+  });
+  it('外校前缀课号回退表内值', () => {
+    expect(creditsOf('PK1001', 3)).toBe(3);
+    expect(creditsOf('GPK2002', 2.5)).toBe(2.5);
+    expect(creditsOf('BW001', undefined)).toBe(0);
+    expect(creditsOf('', 4)).toBe(4);
+    expect(creditsOf(null, 1)).toBe(1);
   });
 });
 

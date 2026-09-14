@@ -9,6 +9,8 @@ import { fetchPage, fetchPageDual, fetchPost } from '../net/http';
 import { pickDecoded } from '../net/decode';
 import { gbkPercentEncode } from '../net/gbk';
 import { isSportsCourse } from '../domain/flags';
+import { creditsOf } from '../domain/credits';
+import { matchPoolRow } from '../domain/match';
 import { serverSearch } from './search';
 
 // ─── 已选课程 ─────────────────────────────────────────────────
@@ -47,13 +49,16 @@ export async function fetchSelectedCourses(ctx: Ctx): Promise<Course[]> {
       const typeLabel = sportsDetected ? '体育' : cell(1) || zyInfo.typeLabel || '';
       // 2026-2027-1 起已选表列序变更：课号独立成列 → 自适应取第一个非纯数字候选格
       const nameCell = [cell(4), cell(3)].find(x => x !== '' && !/^\d+$/.test(x)) || '';
+      // 教师列：cell(7) 常空（2026-2027-1 列序变更后），cell(2) 实为学分位——
+      // 纯数字不是教师，宁可留空（上游 26a9340 同款；整体课表/池行随后回填真名）
+      const teacherCell = cell(7) || (/^\d+$/.test(cell(2)) ? '' : cell(2));
       selected.push({
         code,
         seq,
         name: nameCell || cell(1) || code,
-        teacher: cell(7) || cell(2),
+        teacher: teacherCell,
         time: cell(6) || cell(3),
-        credits: parseFloat(cell(8) || cell(4)) || 0,
+        credits: creditsOf(code, parseFloat(cell(8) || cell(4)) || 0),
         typeLabel,
         zy: zyNum || 0,
         typeCode: sportsDetected ? 'ty' : zyInfo.typeCode || '',
@@ -147,16 +152,18 @@ export async function fetchCandidateCourses(ctx: Ctx): Promise<Course[]> {
       const seq = td(4);
       const queueTotal = parseInt(td(5)) || 0;
       const myPos = parseInt(td(6)) || 0;
-      if (!code || !name) continue;
+      // 码型校验即表头行拦截：表头「课号」含中文，进不了数据（上游 1935408 同款同根：
+      // 体育漏选/0 学分/特色课全坏源于表头行被当数据行解析）
+      if (!code || !name || !/^[A-Za-z0-9]+$/.test(code) || !/\d/.test(code)) continue;
       const zyNum = zyStr.match(/第([一二三1-3])志愿/);
-      const typeCode = typeLabel === '必修' ? '006' : typeLabel === '限选' ? '008' : '007';
+      const typeCode = typeLabel === '体育' ? 'ty' : typeLabel === '必修' ? '006' : typeLabel === '限选' ? '008' : '007';
       out.push({
         code,
         seq: seq || '0',
         name,
         teacher: td(8),
         time: td(7) || '',
-        credits: 0,
+        credits: creditsOf(code, 0),
         typeLabel,
         typeCode,
         zy: zyNum ? ({ '一': 1, '二': 2, '三': 3 } as Record<string, number>)[zyNum[1]!] || parseInt(zyNum[1]!) || 3 : 3,
@@ -204,7 +211,8 @@ export async function backfillCandidateMeta(ctx: Ctx, candidates: Course[]): Pro
     await sleep(30);
     try {
       const r = await serverSearch(ctx, { kch: c.code });
-      const hit = (r.rows || []).find(x => String(x.seq || '0') === String(c.seq || '0')) || (r.rows || [])[0];
+      const same = (r.rows || []).filter(x => String(x.code) === String(c.code));
+      const hit = matchPoolRow(same.length ? same : (r.rows || []), c.seq, c.teacher);
       if (hit) {
         c.credits = hit.credits || 0;
         c.capacity = hit.capacity || 0;
@@ -357,10 +365,10 @@ export async function fetchQueueData(ctx: Ctx, courses: Course[]): Promise<{ map
     const formAction = BASE + '/xkBks.vxkBksJxjhBs.do';
     if (token) {
       const codes = [...new Set((courses || []).map(c => String(c.code || '').trim()).filter(Boolean))];
-      const kylPost = async (code: string): Promise<string> => {
+      const kylPost = async (code: string, page: number): Promise<string> => {
         const body = new URLSearchParams({
           m: 'kylSearch',
-          page: '1',
+          page: String(page),
           token,
           'p_sort.p1': '',
           'p_sort.p2': '',
@@ -377,16 +385,34 @@ export async function fetchQueueData(ctx: Ctx, courses: Course[]): Promise<{ map
         });
         return fetchPost(formAction, body);
       };
+      const kylRe = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
+      const mergeKylGrid = (html: string): number => {
+        let n = 0;
+        let pm: RegExpExecArray | null;
+        kylRe.lastIndex = 0;
+        while ((pm = kylRe.exec(html)) !== null) {
+          const key = pm[1]! + '_' + normSeq(pm[2]!);
+          if (!map[key]) {
+            map[key] = { code: pm[1]!, seq: pm[2]!, qCapacity: parseInt(pm[3]!) || 0, qRemaining: parseInt(pm[4]!) || 0, qQueue: 0 };
+            n++;
+          }
+        }
+        return n;
+      };
       await runPool(codes, 5, async (code, idx) => {
         await sleep(30 * (idx % 5));
         try {
-          const html = await kylPost(code);
-          if (!html.includes('gridData')) return;
-          const re = /\[\s*"(\d+)"\s*,\s*"([^"]*?)"\s*,\s*"[^"]*?"\s*,\s*"(\d*)"\s*,\s*"(\d*)"\s*,\s*"[^"]*?"\s*,\s*"[^"]*?"\s*\]/g;
-          let pm: RegExpExecArray | null;
-          while ((pm = re.exec(html)) !== null) {
-            const key = pm[1]! + '_' + normSeq(pm[2]!);
-            if (!map[key]) map[key] = { code: pm[1]!, seq: pm[2]!, qCapacity: parseInt(pm[3]!) || 0, qRemaining: parseInt(pm[4]!) || 0, qQueue: 0 };
+          const first = await kylPost(code, 0);
+          if (!first.includes('gridData')) return;
+          mergeKylGrid(first);
+          // 翻页（OneTHU getXkQueueData 同款，页号从 0 起）：单课号也可能几十班——
+          // 形势与政策一班一师全学期 ~40 班，一页装不下；只取第 1 页会漏后半教师
+          // （用户实锤王洪川班查不到余量）。页数按分页「共N页」，单课号上限 10 页防失控。
+          const totalPages = Math.min(parseInt((first.match(/共\s*(\d+)\s*页/) || [])[1] || '', 10) || 1, 10);
+          for (let p = 1; p < totalPages; p++) {
+            const html = await kylPost(code, p);
+            if (!html.includes('gridData')) break;
+            if (mergeKylGrid(html) === 0) break;
           }
         } catch (e) {
           console.warn(TAG, 'kyl code', code, e);

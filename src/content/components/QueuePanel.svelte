@@ -1,14 +1,23 @@
 <script lang="ts">
+  import type { Course } from '../../lib/domain/types';
   import { session, doDropCourse } from '../../lib/stores/session.svelte.ts';
+  import { addCourseToActive } from '../../lib/stores/drafts.svelte.ts';
   import { jumpTo } from '../../lib/stores/search.svelte.ts';
   import { confirmDialog } from '../../lib/stores/modal.svelte.ts';
   import { showToast } from '../../lib/stores/toast.svelte.ts';
+  import { baseFlag } from '../../lib/domain/flags';
   import { keyOf } from '../../lib/core/utils';
 
   async function onDrop(code: string, seq: string) {
     const c = session.candidateCourses.find((x) => keyOf(x.code, x.seq) === keyOf(code, seq));
     if (!(await confirmDialog('退出候补队列「' + (c?.name || code) + '」？', ''))) return;
     const res = await doDropCourse(code, seq);
+    showToast(res.ok, res.msg);
+  }
+
+  /** 暂存到活跃草稿：类型/志愿取候补行真值（上游 PR #53 暂存按钮同款） */
+  function onStage(c: Course) {
+    const res = addCourseToActive(c, baseFlag(c), c.zy || 3);
     showToast(res.ok, res.msg);
   }
 </script>
@@ -31,6 +40,12 @@
           <span style="font-size:11px;color:var(--nx-amber);font-weight:600;white-space:nowrap;">
             {c.myPos ? '排队第' + c.myPos + ' / 共' + (c.queueTotal || '?') + '人' : '候选中'}
           </span>
+          <button
+            style="height:22px;padding:0 10px;font-size:11px;border-radius:6px;border:1px solid rgba(7,193,96,.35);background:rgba(7,193,96,.1);color:#07c160;cursor:pointer;font-family:inherit;white-space:nowrap;"
+            title="暂存到活跃草稿（不改动教务侧选课）"
+            onclick={() => onStage(c)}
+          >暂存</button
+          >
           <button
             class="nx-drop-btn"
             style="height:22px;padding:0 10px;font-size:11px;"

@@ -173,12 +173,13 @@
   });
 
   // ─── 渐进式披露：手动覆盖优先，自动规则兜底
-  // （已选/候补/开课线风险默认展开；冲突一律折叠、红标明示课节+课名，压过 available；
+  // （优先级：已选/候补 > 冲突一律折叠（红标明示课节+课名，压过开课线风险与 available）> 开课线风险/可用展开；
   //   available 两阶段统一：课余量按 qRemaining>0 回写，预选为搜索页未满标志） ───
   const cardKey = $derived(keyOf(course.code, course.seq));
   const autoOpen = $derived.by(() => {
-    if (course.selected || course.isCandidate || openRisk != null) return true;
+    if (course.selected || course.isCandidate) return true;
     if (conflicts.length > 0) return false;
+    if (openRisk != null) return true;
     return !!course.available;
   });
   const exp = $derived(cardExpanded(cardKey, autoOpen));

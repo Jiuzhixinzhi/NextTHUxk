@@ -25,6 +25,7 @@ import { applyVolunteer, volSession } from '../api/volunteers';
 import { dropCourse, submitCourse, changeVolunteer } from '../api/write';
 import { attachScores, ensureScores } from '../api/scores';
 import { typeCodeToFlag } from '../domain/flags';
+import { matchPoolRow } from '../domain/match';
 import { parseTimeSlots, clockRangesOf } from '../domain/time';
 import { checkPlanCoverage } from '../domain/plancov';
 import { showXkResult } from './toast.svelte.ts';
@@ -455,10 +456,28 @@ export async function doSubmitCourse(code: string, seq: string, zy: number, flag
   return { ok: res.ok, msg: res.msg };
 }
 
+/** 退选/退队当日本地摘牌（上游 #36-5 同款）：不等网络往返，立即清池行选中态 +
+ *  剔出候补列表；后台 refreshSelected 兜底校准（失败保持已摘牌，下次手动刷新自愈）。 */
+function applyLocalRemoval(code: string, seq: string): void {
+  const k = keyOf(code, seq);
+  const row = session.allCourses.find(c => keyOf(c.code, c.seq) === k);
+  if (row) {
+    row.selected = false;
+    row.isCandidate = false;
+    row.zy = 0;
+    row.queue = '';
+  }
+  session.candidateCourses = session.candidateCourses.filter(c => keyOf(c.code, c.seq) !== k);
+  emitSelectedChanged();
+}
+
 export async function doDropCourse(code: string, seq: string): Promise<{ ok: boolean; msg: string }> {
   const isQueue = session.candidateCourses.some(c => c.code === code && String(c.seq) === String(seq));
   const res = await dropCourse(ctx(), code, seq, isQueue);
-  if (res.ok) await refreshSelected(false);
+  if (res.ok) {
+    applyLocalRemoval(code, seq);
+    void refreshSelected(false).catch(() => {});
+  }
   return { ok: res.ok, msg: res.msg };
 }
 
@@ -501,6 +520,17 @@ export function mergeRows(rows: Course[]): number {
       if (!ex.credits && r.credits) ex.credits = r.credits;
       if (!ex.department && r.department) ex.department = r.department;
       if (!ex.xkTextNote && r.xkTextNote) ex.xkTextNote = r.xkTextNote;
+      // 容量/余量刷新（上游 f0a1090 同款，用户实锤「形策跳转左边看得见余量、右边暂存不显示」）：
+      // 旧池行残值（列漂时代容量 0）吃不到新行真值；r.capacity>0 才动（页签 0/0 占位不覆盖）；
+      // 余量含 0（「余 0=已满」是信息，不是未知）
+      const rCap = r.capacity || 0;
+      const rRem = r.remaining ?? 0;
+      if (rCap > 0 && (ex.capacity !== rCap || ex.remaining !== rRem)) {
+        ex.capacity = rCap;
+        ex.remaining = rRem;
+        ex.available = rRem > 0;
+        filled++;
+      }
       if (before !== ex.note + '|' + ex.time) filled++;
     }
     if (parses(r)) {
@@ -638,8 +668,8 @@ export async function backfillSelTimes(): Promise<void> {
             }
             rows = (await _bfScanP).filter(c => c.code === r.code);
           }
-          let hit = rows.find(c => c.code === r.code && String(c.seq || '0') === String(r.seq || '0'));
-          if (!hit) hit = rows.find(c => c.code === r.code);
+          // 三段匹配挑对班（归一课序 → 同课同师 → 首行）：同课号多班直接取首行会借错时间
+          const hit = matchPoolRow(rows.filter(c => String(c.code) === String(r.code)), r.seq, r.teacher);
           if (hit) {
             mergeRows([hit]);
             outcome.push(r.code + '✓');

@@ -5,7 +5,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Draft, DraftCourse, Flag } from '../domain/types';
 import { TAG } from '../core/constants';
-import { normSeq } from '../core/utils';
+import { keyOf, normSeq } from '../core/utils';
 import { K, store } from '../storage/store';
 import {
   draftCourseFrom,
@@ -21,7 +21,7 @@ import { detectConflicts } from '../domain/conflict';
 import { previewJoinRows } from '../domain/preview';
 import { fetchSelectedCourses } from '../api/records';
 import { dropCourse, submitCourse } from '../api/write';
-import { confirmDialog, promptDialog } from './modal.svelte.ts';
+import { confirmDialog, manualCopyDialog, promptDialog } from './modal.svelte.ts';
 import { showToast, showXkResult } from './toast.svelte.ts';
 import { onLaunchDone, onSelectedChanged } from './bus.svelte.ts';
 import { refreshPlanCoverage, refreshSelected, selectedPreviewRows, knoteRemember, session } from './session.svelte.ts';
@@ -249,15 +249,19 @@ export async function renameDraft(id: number): Promise<void> {
   showToast(true, '已重命名为「' + d.name + '」');
 }
 
-/** 已选载入：当前已选整表并入活跃草稿（按课班去重；已在稿行回写真实志愿） */
+/** 已选/候补载入：当前已选 + 候补队列快照并入活跃草稿（按课班去重；已在稿行回写真实志愿）。
+ *  排队期「存当前选课」语义（上游 PR #53 同款）：快照含候补行，排队徽章由池行状态派生。 */
 export function loadSelectedIntoActive(): AddResult {
-  const selected = session.allCourses.filter(c => c.selected);
-  if (!selected.length) return { ok: false, msg: '没有已选课程' };
+  const snapshot = selectedPreviewRows();
+  if (!snapshot.length) return { ok: false, msg: '没有已选/候补课程' };
+  const selCount = snapshot.filter(c => c.selected).length;
+  const candCount = snapshot.filter(c => !c.selected && (c.isCandidate || session.candidateCourses.some(x => keyOf(x.code, x.seq) === keyOf(c.code, c.seq)))).length;
   const d = ensureActiveDraft();
-  const { added, skipped, synced } = mergeSelectedIntoDraft(d, selected);
-  selected.forEach(row => {
+  const { added, skipped, synced } = mergeSelectedIntoDraft(d, snapshot);
+  snapshot.forEach(row => {
     knoteRemember(row.code, row.seq, row.note || row.xkTextNote || '', row.time || '');
   });
+  const srcLabel = candCount ? '（已选 ' + selCount + ' · 候补 ' + candCount + '）' : '';
   if (!added) {
     if (synced) {
       persistSoon();
@@ -268,7 +272,7 @@ export function loadSelectedIntoActive(): AddResult {
   }
   persistSoon();
   refreshCoverage();
-  return { ok: true, msg: '已载入 ' + added + ' 门已选课程到草稿「' + d.name + '」' + (skipped ? '（跳过已在稿 ' + skipped + ' 门）' : '') + (synced ? ' · 同步 ' + synced + ' 门志愿' : '') };
+  return { ok: true, msg: '已载入 ' + added + ' 门到草稿「' + d.name + '」' + srcLabel + (skipped ? '（跳过已在稿 ' + skipped + ' 门）' : '') + (synced ? ' · 同步 ' + synced + ' 门志愿' : '') };
 }
 
 /** JSON 导入（分享格式）：并入活跃草稿 */
@@ -334,18 +338,37 @@ export function exportText(draft: Draft): string {
 
 export async function copyExport(draft: Draft): Promise<void> {
   const json = exportText(draft);
+  // content script 常无 clipboardWrite 权限（navigator.clipboard === undefined）——
+  // 可用性探测 + execCommand 降级 + 手动复制弹窗兜底，任何路径都有可见反馈
+  // （上游 #36-1 同款；旧版两路全败仍 toast 假成功）
+  let ok = false;
   try {
-    await navigator.clipboard.writeText(json);
-    showToast(true, '「' + draft.name + '」已复制到剪贴板，可分享给他人');
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      await navigator.clipboard.writeText(json);
+      ok = true;
+    }
   } catch {
-    const ta = document.createElement('textarea');
-    ta.value = json;
-    document.body.appendChild(ta);
-    ta.select();
-    document.execCommand('copy');
-    ta.remove();
-    showToast(true, '「' + draft.name + '」已复制到剪贴板');
+    ok = false;
   }
+  if (!ok) {
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = json;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      ok = document.execCommand('copy');
+      ta.remove();
+    } catch {
+      ok = false;
+    }
+  }
+  if (ok) {
+    showToast(true, '「' + draft.name + '」已复制到剪贴板，可分享给他人');
+    return;
+  }
+  await manualCopyDialog('手动复制「' + draft.name + '」', json);
 }
 
 /** 提交选课（差量对齐）：与已选重合课不动，只退多余、选新增 */
@@ -373,27 +396,29 @@ export async function promote(draft: Draft): Promise<void> {
     );
     if (!ok) return;
     const ctx = { SEM: session.SEM, BASE: session.BASE, isZhjwxk: session.isZhjwxk, isZhjw: session.isZhjw, isWebvpn: session.isWebvpn };
-    for (let i = 0; i < toDrop.length; i++) {
-      showToast(false, '退选差量 ' + (i + 1) + '/' + toDrop.length + ': ' + toDrop[i]!.name);
-      const isQueue = session.candidateCourses.some(c => c.code === toDrop[i]!.code && String(c.seq) === String(toDrop[i]!.seq));
-      const r = await dropCourse(ctx, toDrop[i]!.code, toDrop[i]!.seq, isQueue);
-      if (!r.ok) {
-        await refreshSelectedNoModal();
-        showToast(false, '提交中断：退选「' + toDrop[i]!.name + '」失败 — ' + (r.msg || '未知错误') + '（此前已退 ' + i + ' 门），请刷新核对后重试');
-        return;
-      }
-      await new Promise(r2 => setTimeout(r2, 1000));
-    }
+    // 顺序铁律：先选后退（上游 v2.1.1 差分提交同款）——最坏情况回到提交前原状可重试，
+    // 永不出现半张课表。旧版先退后选：退课中断时课已永久丢失。
     for (let i = 0; i < toAdd.length; i++) {
       const c = toAdd[i]!;
       showToast(false, '新选差量 ' + (i + 1) + '/' + toAdd.length + ': ' + c.name);
       const r = await submitCourse(ctx, c.code, c.seq, c.zy || 3, c.flag || 'bx');
       if (!r.ok) {
         await refreshSelectedNoModal();
-        showToast(false, '提交中断：新选「' + c.name + '」未生效 — ' + (r.msg || '未知错误') + '（此前已选 ' + i + ' 门、已退 ' + toDrop.length + ' 门），请刷新核对后重试');
+        showToast(false, '提交中断：新选「' + c.name + '」未生效 — ' + (r.msg || '未知错误') + '（此前已选 ' + i + ' 门，尚未开始退课），请刷新核对后重试');
         return;
       }
       await new Promise(r2 => setTimeout(r2, 2000));
+    }
+    for (let i = 0; i < toDrop.length; i++) {
+      showToast(false, '退选差量 ' + (i + 1) + '/' + toDrop.length + ': ' + toDrop[i]!.name);
+      const isQueue = session.candidateCourses.some(c => c.code === toDrop[i]!.code && String(c.seq) === String(toDrop[i]!.seq));
+      const r = await dropCourse(ctx, toDrop[i]!.code, toDrop[i]!.seq, isQueue);
+      if (!r.ok) {
+        await refreshSelectedNoModal();
+        showToast(false, '提交中断：退选「' + toDrop[i]!.name + '」失败 — ' + (r.msg || '未知错误') + '（新课已选 ' + toAdd.length + ' 门、已退 ' + i + ' 门），请刷新核对后重试');
+        return;
+      }
+      await new Promise(r2 => setTimeout(r2, 1000));
     }
     await refreshSelectedNoModal();
     showToast(true, '课表「' + draft.name + '」已提交：新选 ' + toAdd.length + ' · 退选 ' + toDrop.length + ' · 保留 ' + kept.length);
