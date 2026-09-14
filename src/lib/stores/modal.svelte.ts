@@ -12,7 +12,8 @@ export type ModalState =
   | { kind: 'manualEvent' }
   | { kind: 'zyConfirm'; courses: Course[]; resolve: (values: number[]) => void }
   | { kind: 'dialog'; title: string; message: string; danger?: boolean; confirmText?: string; resolve: (ok: boolean) => void }
-  | { kind: 'prompt'; title: string; message?: string; initial: string; placeholder?: string; resolve: (val: string | null) => void };
+  | { kind: 'prompt'; title: string; message?: string; initial: string; placeholder?: string; resolve: (val: string | null) => void }
+  | { kind: 'manualCopy'; title: string; text: string; resolve: (ok: boolean) => void };
 
 export const modal = $state({ cur: { kind: 'none' } as ModalState });
 
@@ -59,6 +60,20 @@ export function resolveDialog(ok: boolean): void {
 export function resolvePrompt(val: string | null): void {
   if (modal.cur.kind === 'prompt') {
     modal.cur.resolve(val);
+    modal.cur = { kind: 'none' };
+  }
+}
+
+/** 手动复制兜底（navigator.clipboard / execCommand 全失败时）：只读 textarea 常驻 */
+export function manualCopyDialog(title: string, text: string): Promise<boolean> {
+  return new Promise(resolve => {
+    modal.cur = { kind: 'manualCopy', title, text, resolve };
+  });
+}
+
+export function resolveManualCopy(): void {
+  if (modal.cur.kind === 'manualCopy') {
+    modal.cur.resolve(true);
     modal.cur = { kind: 'none' };
   }
 }

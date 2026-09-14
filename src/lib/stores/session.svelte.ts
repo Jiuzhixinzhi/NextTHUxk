@@ -456,10 +456,28 @@ export async function doSubmitCourse(code: string, seq: string, zy: number, flag
   return { ok: res.ok, msg: res.msg };
 }
 
+/** 退选/退队当日本地摘牌（上游 #36-5 同款）：不等网络往返，立即清池行选中态 +
+ *  剔出候补列表；后台 refreshSelected 兜底校准（失败保持已摘牌，下次手动刷新自愈）。 */
+function applyLocalRemoval(code: string, seq: string): void {
+  const k = keyOf(code, seq);
+  const row = session.allCourses.find(c => keyOf(c.code, c.seq) === k);
+  if (row) {
+    row.selected = false;
+    row.isCandidate = false;
+    row.zy = 0;
+    row.queue = '';
+  }
+  session.candidateCourses = session.candidateCourses.filter(c => keyOf(c.code, c.seq) !== k);
+  emitSelectedChanged();
+}
+
 export async function doDropCourse(code: string, seq: string): Promise<{ ok: boolean; msg: string }> {
   const isQueue = session.candidateCourses.some(c => c.code === code && String(c.seq) === String(seq));
   const res = await dropCourse(ctx(), code, seq, isQueue);
-  if (res.ok) await refreshSelected(false);
+  if (res.ok) {
+    applyLocalRemoval(code, seq);
+    void refreshSelected(false).catch(() => {});
+  }
   return { ok: res.ok, msg: res.msg };
 }
 

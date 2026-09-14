@@ -71,7 +71,7 @@
     </span>
     <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;">
       <button class="nx-stage-btn" onclick={onNewDraft}>新建草稿</button>
-      <button class="nx-stage-btn" title="把当前已选整表并入活跃草稿，以现有课表为底稿继续编排" onclick={onLoadSelected}>已选载入</button>
+      <button class="nx-stage-btn" title="把当前已选 + 候补队列整表并入活跃草稿，以现有课表为底稿继续编排" onclick={onLoadSelected}>已选/候补载入</button>
       <button class="nx-stage-btn" onclick={onExport}>导出</button>
       <button class="nx-stage-btn" onclick={() => (importOpen = !importOpen)}>导入</button>
     </span>
@@ -114,7 +114,7 @@
           {/each}
         </div>
       {:else}
-        <div class="nx-st" style="margin-top:6px;">空草稿——点左侧课程卡片「加入草稿」，或用「已选载入」/「导入」添加；添加时会自动阻止时间冲突</div>
+        <div class="nx-st" style="margin-top:6px;">空草稿——点左侧课程卡片「加入草稿」，或用「已选/候补载入」/「导入」添加；添加时会自动阻止时间冲突</div>
       {/if}
 
       <div style="margin-top:6px;font-size:11px;">

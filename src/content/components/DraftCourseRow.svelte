@@ -11,6 +11,13 @@
   const ac = $derived.by(() => session.allCourses.find((x: { code: string; seq: string }) => x.code === course.code && String(x.seq || '0') === String(course.seq || '0')));
   const meta = $derived.by(() => (ac ? currentProbMeta(ac, course.flag, course.zy) : null));
   const qd = $derived.by(() => session.queueDataMap[keyOf(course.code, course.seq)]);
+  // 已选/排队徽章：派生自池行状态（快照行不落冗余字段）——上游 PR #53 同款
+  const selState = $derived.by(() => {
+    const k = keyOf(course.code, course.seq);
+    if (session.candidateCourses.some((x: { code: string; seq: string }) => keyOf(x.code, x.seq) === k)) return '排队';
+    if (ac && (ac as { selected?: boolean }).selected) return '已选';
+    return '';
+  });
 </script>
 
 <div style="display:flex;align-items:center;gap:4px;padding:3px 0;font-size:11px;border-bottom:1px solid rgba(0,0,0,.03);">
@@ -21,6 +28,12 @@
     onclick={() => jumpTo(course.code, course.seq, course.teacher)}
   >{course.name}</span
   >
+  {#if selState}
+    <span
+      style="font-size:9px;font-weight:600;padding:0 4px;border-radius:4px;white-space:nowrap;{selState === '排队' ? 'color:#ff9f1a;background:rgba(255,159,26,.14);' : 'color:#07c160;background:rgba(7,193,96,.14);'}"
+      title="该课在教务侧{selState === '排队' ? '处于候补队列' : '已选入课表'}"
+    >{selState}</span>
+  {/if}
   <span style="font-size:10px;color:var(--nx-faint);">{course.credits}学分</span>
   <select
     style="padding:1px 3px;border-radius:5px;border:1px solid rgba(0,0,0,.1);font-size:10px;font-family:inherit;background:#fff;cursor:pointer;"

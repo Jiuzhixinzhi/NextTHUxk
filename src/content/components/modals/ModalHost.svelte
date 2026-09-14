@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { modal, closeModal, resolveDialog, resolvePrompt, resolveZyModal } from '../../../lib/stores/modal.svelte.ts';
+  import { modal, closeModal, resolveDialog, resolvePrompt, resolveZyModal, resolveManualCopy } from '../../../lib/stores/modal.svelte.ts';
   import { session } from '../../../lib/stores/session.svelte.ts';
   import { fetchDetail } from '../../../lib/stores/session.svelte.ts';
   import { ensureIndex, tbMatch, tbFetchReviews, tbCourseUrl, tbWriteUrl, tbStars } from '../../../lib/reviews/reviews';
@@ -64,6 +64,7 @@ const cur = $derived(modal.cur);
   let simTargetInput: string = $state('0');
   let zySel: number[] = $state([]);
   let promptVal: string = $state('');
+  let manualCopyEl: HTMLTextAreaElement | undefined = $state();
 
   function simReinit(courses: DraftCourse[], certainKeys?: string[]) {
     const items = creditSimItems(courses, {
@@ -168,6 +169,8 @@ const cur = $derived(modal.cur);
           {:else if cur.kind === 'dialog'}
             {cur.title}
           {:else if cur.kind === 'prompt'}
+            {cur.title}
+          {:else if cur.kind === 'manualCopy'}
             {cur.title}
           {/if}
         </div>
@@ -375,6 +378,29 @@ const cur = $derived(modal.cur);
           <div class="flex justify-end" style="gap:8px;margin-top:18px;">
             <button class="nx-ghost-btn" onclick={() => resolvePrompt(null)}>取消</button>
             <button class="nx-select-btn" onclick={() => resolvePrompt(promptVal)}>确定</button>
+          </div>
+        {:else if cur.kind === 'manualCopy'}
+          <div style="font-size:12px;color:var(--nx-ink-soft);margin-bottom:8px;">自动复制失败（无剪贴板权限）——请手动全选复制以下内容：</div>
+          <textarea
+            class="nx-inp"
+            readonly
+            style="width:100%;height:180px;font-size:12px;font-family:ui-monospace,Menlo,Consolas,monospace;resize:vertical;"
+            bind:this={manualCopyEl}
+          >{cur.text}</textarea>
+          <div class="flex justify-end" style="gap:8px;margin-top:18px;">
+            <button class="nx-ghost-btn" onclick={() => resolveManualCopy()}>关闭</button>
+            <button
+              class="nx-select-btn"
+              onclick={() => {
+                manualCopyEl?.focus();
+                manualCopyEl?.select();
+                try {
+                  document.execCommand('copy');
+                } catch {
+                  /* 用户仍可手动 Ctrl+C */
+                }
+              }}>全选并复制</button
+            >
           </div>
         {/if}
       </div>
