@@ -196,16 +196,41 @@ export function currentProbMeta(course: Course, flag: Flag, zy: number): ProbRes
   return { ...p, zy, flagLabel: flagName(flag), bg: probBg(p.color) };
 }
 
-/** 概率网格数据（3×3 全显；体育单行）——纯数据，渲染交给组件 */
-export function probGridData(course: Course): { flag: Flag; cells: (ProbResult & { zy: number })[] }[] {
+/** 任选优先档概率（志愿串 (N) 前缀 = 优先任选通道人数，独立于 1/2/3 志愿，
+ *  提交走 is_zyrxk=1）：可争位 = 本批池 − 必修三档 − 限选三档，概率 = 位/优先人数。
+ *  无优先通道（N=0/无池）→ null，不显示该档（上游 #36-3/#39 同款）。 */
+export function priProb(course: Course): ProbResult | null {
+  const rxV = parseVolArr(course.volOptional);
+  const pri = (rxV && rxV.priority) || 0;
+  if (pri <= 0) return null;
+  const pool = Number(parseInt(String(course.volCapacity ?? course.capacity ?? 0), 10)) || 0;
+  if (!pool) return null;
+  let rem = pool;
+  const bxV = parseVolArr(course.volRequired);
+  const xxV = parseVolArr(course.volElective);
+  if (bxV) for (let i = 0; i < 3; i++) rem -= bxV[i]!;
+  if (xxV) for (let i = 0; i < 3; i++) rem -= xxV[i]!;
+  return probResult(rem, pri);
+}
+
+export interface ProbCell extends ProbResult {
+  zy: number;
+  /** 优先任选档（独立通道，zy=0 占位；非 1/2/3 志愿） */
+  pri?: boolean;
+}
+
+/** 概率网格数据（3×3 全显；体育单行；任选行最前加「优先」独立档）——纯数据，渲染交给组件 */
+export function probGridData(course: Course): { flag: Flag; cells: ProbCell[] }[] {
   const aFlags = isSportsCourse(course) ? (['ty'] as Flag[]) : (['bx', 'xx', 'rx'] as Flag[]);
-  return aFlags.map(f => ({
-    flag: f,
-    cells: [1, 2, 3].map(z => {
-      const p = calcProb(course, f, z);
-      return { ...p, zy: z };
-    }),
-  }));
+  return aFlags.map(f => {
+    const cells: ProbCell[] = [];
+    if (f === 'rx') {
+      const p = priProb(course);
+      if (p) cells.push({ ...p, zy: 0, pri: true });
+    }
+    for (const z of [1, 2, 3]) cells.push({ ...calcProb(course, f, z), zy: z });
+    return { flag: f, cells };
+  });
 }
 
 /** 学分中签模拟条目（prob=null 表示实时取不到，由用户手动填；certainKeys=课余量阶段已锁定正选的键集，恒 prob=1） */

@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseTimeSlots, clockRangesOf, pvToMin, spansOf } from '../src/lib/domain/time';
 import { detectConflicts } from '../src/lib/domain/conflict';
-import { calcProb, capacityStatus, cascadeOf, lockedOf, parseVolArr, probResult, creditDist, creditSimItems } from '../src/lib/domain/probability';
+import { calcProb, capacityStatus, cascadeOf, lockedOf, parseVolArr, probResult, priProb, probGridData, creditDist, creditSimItems } from '../src/lib/domain/probability';
 import { draftDiff, draftCourseFrom, draftKeyOf, mergeSelectedIntoDraft, repairDraftCourse, sameAsDraft } from '../src/lib/domain/draft';
 import { gbkPercentEncode } from '../src/lib/net/gbk';
 import { normSeq, keyOf } from '../src/lib/core/utils';
@@ -461,6 +461,24 @@ describe('工具', () => {
     expect(normSeq('0')).toBe('0');
     expect(normSeq('')).toBe('0');
     expect(keyOf('10720011', '01')).toBe('10720011_1');
+  });
+});
+
+describe('priProb / probGridData 优先任选档', () => {
+  it('无优先通道 → 不显示优先格', () => {
+    const c = { code: '1', seq: '1', name: 'x', volCapacity: 10, volOptional: '0,5,0' } as never;
+    expect(priProb(c)).toBeNull();
+    const rx = probGridData(c).find(r => r.flag === 'rx')!;
+    expect(rx.cells).toHaveLength(3);
+  });
+
+  it('有优先通道 → rx 行最前加优先格（zy=0, pri=true）', () => {
+    const c = { code: '1', seq: '1', name: 'x', volCapacity: 100, volRequired: '10,5,0', volElective: '5,0,0', volOptional: '(100)' } as never;
+    expect(priProb(c)!.prob).toBeCloseTo(0.8);
+    const rx = probGridData(c).find(r => r.flag === 'rx')!;
+    expect(rx.cells[0]!.pri).toBe(true);
+    expect(rx.cells[0]!.zy).toBe(0);
+    expect(rx.cells).toHaveLength(4);
   });
 });
 

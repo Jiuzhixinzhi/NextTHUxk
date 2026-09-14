@@ -5,7 +5,7 @@
 // calcProb 事后重算，供级联链节点查看中签率变化趋势。
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Flag, ProbResult, VolDatum } from './types';
-import { calcProb } from './probability';
+import { calcProb, priProb } from './probability';
 import { keyOf } from '../core/utils';
 
 /** 单窗口志愿快照（t = 检查点窗口起点 ms；缺位字段存空串/0） */
@@ -118,6 +118,21 @@ export function probAt(p: VolPoint, flag: Flag, zy: number): ProbResult {
   return calcProb(pseudo, flag, zy);
 }
 
+/** 快照点 → 该课「优先任选」档概率（口径与卡片 priProb 一致） */
+export function priAt(p: VolPoint): ProbResult | null {
+  const pseudo: Course = {
+    code: '',
+    seq: '0',
+    name: '',
+    volCapacity: p.cap,
+    volRequired: p.vr,
+    volElective: p.vx,
+    volOptional: p.vo,
+    volSports: p.vs,
+  };
+  return priProb(pseudo);
+}
+
 /** 概率序列：仅保留有效点（prob>=0），x=窗口时间 */
 export function probSeries(points: VolPoint[] | undefined, flag: Flag, zy: number): { t: number; prob: number }[] {
   const out: { t: number; prob: number }[] = [];
@@ -126,6 +141,23 @@ export function probSeries(points: VolPoint[] | undefined, flag: Flag, zy: numbe
     if (r.prob >= 0) out.push({ t: p.t, prob: r.prob });
   }
   return out;
+}
+
+/** 优先任选档概率序列（仅保留有效点） */
+export function priSeries(points: VolPoint[] | undefined): { t: number; prob: number }[] {
+  const out: { t: number; prob: number }[] = [];
+  for (const p of points || []) {
+    const r = priAt(p);
+    if (r && r.prob >= 0) out.push({ t: p.t, prob: r.prob });
+  }
+  return out;
+}
+
+/** 优先任选档相对上一有效窗口的概率差（百分点）；历史不足 2 点 → null */
+export function priDelta(points: VolPoint[] | undefined): number | null {
+  const s = priSeries(points);
+  if (s.length < 2) return null;
+  return Math.round((s[s.length - 1]!.prob - s[s.length - 2]!.prob) * 100);
 }
 
 /** 相对上一有效窗口的概率差（百分点，正=变好）；历史不足 2 点 → null */

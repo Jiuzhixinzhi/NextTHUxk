@@ -151,8 +151,8 @@ export interface ServerSearchResult {
   hasMore?: boolean;
   totalPages?: number;
   totalRows?: number;
-  /** ok=有行 · empty=结果页但0行 · unknown=异常页 */
-  pageKind: 'ok' | 'empty' | 'unknown';
+  /** ok=有行 · empty=结果页但0行 · unknown=异常页 · sso=统一认证登录页（主会话注销，换票救不了） */
+  pageKind: 'ok' | 'empty' | 'unknown' | 'sso';
   htmlHead?: string;
   viaTab?: boolean;
 }

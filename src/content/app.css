@@ -1177,19 +1177,78 @@
   display: block;
 }
 /* 自定义占用：半透明斜纹底（紫色签名）；与课程重叠时升级为全宽覆盖层——
-   不拦截课程块点击/✕（容器 pointer-events 穿透），✕ 常驻右下角避免与课程 ✕（右上）相撞 */
+   标签条带整体 pointer-events 穿透（点击落到课程块），仅行内 ✕ 拦截；
+   z-index 须高于课程 hover 的 5，否则 ✕ 被抬升的课程块盖住无法点击 */
 .nx-tta-b.manual {
   background: repeating-linear-gradient(45deg, rgba(139, 92, 246, 0.22) 0 5px, rgba(139, 92, 246, 0.08) 5px 10px);
 }
 .nx-tta-b.manual.overlay {
-  z-index: 2;
+  z-index: 6;
   pointer-events: none;
 }
-.nx-tta-b.manual.overlay .nx-tta-x {
-  display: block;
-  top: auto;
+.nx-tta-ovl {
+  position: absolute;
+  left: 5px;
+  right: 3px;
   bottom: 2px;
+  display: flex;
+  flex-direction: column;
+  padding: 1px 3px;
+  border-radius: 4px;
+  background: var(--nx-glass-strong);
+  box-shadow: inset 0 0 0 1px var(--nx-line), 0 1px 2px rgba(28, 39, 64, 0.12);
+  color: var(--nx-ink-soft);
+  pointer-events: none;
+}
+.nx-tta-ovl-name {
+  font-weight: 700;
+  font-size: 9.5px;
+  line-height: 1.15;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nx-tta-ovl-time {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  white-space: nowrap;
+  font-size: 8.5px;
+  line-height: 1.15;
+  color: var(--nx-faint);
+}
+.nx-tta-ovl-t {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.nx-tta-ovl-x {
+  flex-shrink: 0;
+  width: 14px;
+  height: 14px;
+  line-height: 14px;
+  text-align: center;
+  border-radius: 7px;
+  background: rgba(238, 77, 77, 0.92);
+  color: #fff;
+  font-size: 9px;
   pointer-events: auto;
+}
+.nx-tta-ovl.slim {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+}
+.nx-tta-ovl.slim .nx-tta-ovl-name {
+  min-width: 0;
+  flex: 0 1 auto;
+}
+.nx-tta-ovl.slim .nx-tta-ovl-time {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 .nx-tt-jump {
   border-left: 3px solid transparent;

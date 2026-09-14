@@ -7,12 +7,22 @@
 import { PAGE_SIZE, TAG } from '../core/constants';
 import { keyOf, lc, normSeq } from '../core/utils';
 import { serverSearch, serverSearchStorm, isCodeLike, type SearchOpts } from '../api/search';
-import type { Course } from '../domain/types';
+import type { Course, ServerSearchResult } from '../domain/types';
 import { isSportsCourse } from '../domain/flags';
 import { normTeacher, teacherHit } from '../domain/match';
 import { conflictsWithPreview, buildPreviewSlotIndex } from '../domain/conflict';
 import { mergeRows, session } from './session.svelte.ts';
-import { onLaunchDone } from './bus.svelte.ts';
+import { fgEnter, fgExit, onLaunchDone } from './bus.svelte.ts';
+
+/** 前台查询占用包裹：进出计数供后台补拉让路（服务端 kkxxSearch 会话游标敏感） */
+async function withForeground<T>(fn: () => Promise<T>): Promise<T> {
+  fgEnter();
+  try {
+    return await fn();
+  } finally {
+    fgExit();
+  }
+}
 
 export const search = $state({
   q: '',
@@ -82,6 +92,14 @@ export function buildSearchOpts(): SearchOpts {
 function serverSig(): string {
   const s = search.server;
   return JSON.stringify([search.q.trim(), session.SEM, search.browsePage, s.tongshi, s.feature, s.grade, s.bksrem, s.yjsrem, s.day, s.period]);
+}
+
+/** 异常页文案：SSO 注销（换票救不了，需重新登录 WebVPN）区别于会话死页（可自愈） */
+function pageError(res: ServerSearchResult): string {
+  if (res.pageKind === 'sso') return '统一认证已注销——请重新登录 WebVPN 后刷新；若在校园网内可直接访问 jwweb 而不走 WebVPN';
+  if (res.pageKind === 'unknown')
+    return '教务返回异常页' + (res.htmlHead ? '（' + String(res.htmlHead).slice(0, 80) + '…）' : '') + '——WebVPN/教务会话可能已失效，请退出重新登录';
+  return '';
 }
 
 const localChip = (c: string) => c === 'selected' || c === 'queue' || c === 'required' || c === 'elective' || c === 'sports';
@@ -300,12 +318,12 @@ export function loadAll(): void {
   if (search.loadingAll) return;
   search.loadingAll = true;
   search.loadAllNonce++;
-  const sigAtStart = search.serverSig;
+  const sigAtStart = serverSig();
   void (async () => {
     try {
       const opts = Object.assign({}, search.optsSnapshot || buildSearchOpts(), { forceAll: true });
-      const res = await serverSearchStorm(toCtx(), opts);
-      if (search.serverSig !== sigAtStart) {
+      const res = await withForeground(() => serverSearchStorm(toCtx(), opts));
+      if (serverSig() !== sigAtStart) {
         console.warn(TAG, 'load all 过期丢弃（查询已变化）');
       } else {
         applyMarks(res.rows || []);
@@ -314,7 +332,7 @@ export function loadAll(): void {
         search.incomplete = !!(res.totalRows && (res.rows || []).length < res.totalRows);
         if (res.totalPages) search.totalPages = res.totalPages;
         if (res.totalRows) search.totalRows = res.totalRows;
-        search.error = res.pageKind === 'unknown' ? '教务返回异常页——WebVPN/教务会话可能已失效，请退出重新登录' : '';
+        search.error = pageError(res);
       }
     } catch (e) {
       console.warn(TAG, 'load all:', e);
@@ -363,18 +381,20 @@ export async function runServerQuery(): Promise<void> {
   ssBusy = true;
   try {
     for (let guard = 0; guard < 4; guard++) {
-      const ranSig = search.serverSig;
+      const wantSig = serverSig();
       const opts = buildSearchOpts();
       const queryMode = !!(opts.kch || opts.kcm || opts.weekday || opts.section || opts.grade || opts.rxklxm || opts.kctsm || opts.onlyAvailable || opts.gradAvail);
       if (!queryMode) opts.page = search.browsePage || 1;
       let res;
       try {
-        res = queryMode ? await serverSearchStorm(toCtx(), opts) : await serverSearch(toCtx(), opts);
+        res = queryMode
+          ? await withForeground(() => serverSearchStorm(toCtx(), opts))
+          : await withForeground(() => serverSearch(toCtx(), opts));
         if (queryMode && opts.kch && !(res.rows || []).length) {
           const poolHit = session.allCourses.find(c => c.name && (c.code === opts.kch || c.code.startsWith(opts.kch!)));
           if (poolHit) {
             console.log(TAG, '课号 0 行 → 课名重搜:', opts.kch, '→', poolHit.name);
-            const res2 = await serverSearchStorm(toCtx(), Object.assign({}, opts, { kch: '', kcm: poolHit.name }));
+            const res2 = await withForeground(() => serverSearchStorm(toCtx(), Object.assign({}, opts, { kch: '', kcm: poolHit.name })));
             if ((res2.rows || []).length) {
               res = res2;
               opts.kcm = poolHit.name;
@@ -388,19 +408,16 @@ export async function runServerQuery(): Promise<void> {
         search.totalPages = res.totalPages || 0;
         search.totalRows = res.totalRows || 0;
         search.incomplete = queryMode && !!(res.totalRows && (res.rows || []).length < res.totalRows);
-        search.error =
-          res.pageKind === 'unknown'
-            ? '教务返回异常页' + (res.htmlHead ? '（' + String(res.htmlHead).slice(0, 80) + '…）' : '') + '——WebVPN/教务会话可能已失效，请退出重新登录'
-            : res.pageKind === 'empty'
-              ? ''
-              : '';
+        search.error = pageError(res);
       } catch (e) {
         console.warn(TAG, 'server search scheduled:', e);
         search.rows = search.rows || [];
         search.browseHasMore = false;
         search.error = '查询失败：' + (e instanceof Error ? e.message : String(e));
       }
-      if (search.serverSig === ranSig) {
+      if (serverSig() === wantSig) {
+        // 落定：记下已应用的指纹（setChip/loadAll/跳转补爬的过期守卫据此生效）
+        search.serverSig = wantSig;
         const snap: SearchOpts = { ...opts };
         delete snap['page'];
         delete snap['forceAll'];
@@ -478,11 +495,11 @@ export async function highlightJumpTarget(): Promise<void> {
   let hit = findTiered();
   if (hit.idx < 0 && search.incomplete && search.totalPages >= 2 && search.totalPages <= 25 && !search.loadingAll) {
     console.log(TAG, '跳转目标未落在已探测页，自动补齐全量（共', search.totalRows, '行 /', search.totalPages, '页）:', code + '_' + seq);
-    const sigAt = search.serverSig;
+    const sigAt = serverSig();
     try {
       const opts = Object.assign({}, search.optsSnapshot || buildSearchOpts(), { forceAll: true });
-      const res = await serverSearchStorm(toCtx(), opts);
-      if (search.serverSig !== sigAt) return;
+      const res = await withForeground(() => serverSearchStorm(toCtx(), opts));
+      if (serverSig() !== sigAt) return;
       applyMarks(res.rows || []);
       search.rows = res.rows || [];
       if ((res.rows || []).length) mergeRows(res.rows);

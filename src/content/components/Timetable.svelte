@@ -171,15 +171,32 @@
           <div class="nx-tta-day-b" style="height:{layout.H}px;">
             {#each layout.blocks.filter((b) => b.day === di + 1) as b (b.key + '_' + b.begin + '_' + b.end)}
               {@const isOverlay = b.manual && b.overlap === true}
+              {@const bh = Math.max(isOverlay ? 18 : 14, Math.round((b.end - b.begin) * 0.72) - 2)}
               <div
                 class:manual={b.manual}
                 class:overlay={isOverlay}
                 class="nx-tta-b"
-                style="top:{Math.round((b.begin - layout.A0) * 0.72)}px;height:{Math.max(14, Math.round((b.end - b.begin) * 0.72) - 2)}px;left:calc({b.lane * 100 / b.lanes}% + 1px);width:calc({100 / b.lanes}% - 2px);{b.manual ? '' : 'background:' + (b.bg || b.color + '22') + ';'}border-left:3px solid {b.color};"
+                style="top:{Math.round((b.begin - layout.A0) * 0.72)}px;height:{bh}px;left:calc({b.lane * 100 / b.lanes}% + 1px);width:calc({100 / b.lanes}% - 2px);{b.manual ? '' : 'background:' + (b.bg || b.color + '22') + ';'}border-left:3px solid {b.color};"
                 title={isOverlay ? undefined : b.title}
                 onclick={() => onBlockClick(b)}
               >
-                {#if !isOverlay}
+                {#if isOverlay}
+                  <div class="nx-tta-ovl" class:slim={bh < 26}>
+                    <span class="nx-tta-ovl-name">{b.label}</span>
+                    <span class="nx-tta-ovl-time">
+                      <span class="nx-tta-ovl-t">{hm(b.begin)}-{hm(b.end)}</span>
+                      <span
+                        class="nx-tta-ovl-x"
+                        title={b.title + ' · 删除此占用'}
+                        onclick={(e) => {
+                          e.stopPropagation();
+                          void onBlockRemove(b);
+                        }}
+                      >✕</span
+                      >
+                    </span>
+                  </div>
+                {:else}
                   <div class="nx-tta-l">
                     {#if b.origin}
                       <span class="nx-tta-origin" style="background:{originColorOf(b)};">{b.origin}</span>
@@ -193,16 +210,16 @@
                     {/if}
                     <span class="nx-tta-tag">{hm(b.begin)}-{hm(b.end)}</span>
                   </div>
+                  <span
+                    class="nx-tta-x"
+                    title="移除"
+                    onclick={(e) => {
+                      e.stopPropagation();
+                      void onBlockRemove(b);
+                    }}
+                  >✕</span
+                  >
                 {/if}
-                <span
-                  class="nx-tta-x"
-                  title={isOverlay ? b.title + ' · 删除此占用' : '移除'}
-                  onclick={(e) => {
-                    e.stopPropagation();
-                    void onBlockRemove(b);
-                  }}
-                >✕</span
-                >
               </div>
             {/each}
           </div>

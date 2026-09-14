@@ -10,7 +10,7 @@ import { knoteLoad, makeKnoteRemember, type KnoteMap } from '../storage/knote';
 import { ensureSiteIdentity } from '../site/webvpn';
 import { fetchPageRaw, setWebvpnReenter } from '../net/http';
 import { fetchTrainingPlan } from '../api/plan';
-import { isXkDeadHtml, serverSearch } from '../api/search';
+import { isSsoLoginHtml, isXkDeadHtml, serverSearch } from '../api/search';
 import {
   applyLevelMap,
   backfillCandidateMeta,
@@ -33,7 +33,7 @@ import { clearCardExpansions } from './uicards.svelte.ts';
 import { promptDialog, zyConfirm } from './modal.svelte.ts';
 import { vol, volCacheHydrate, volCachePersist, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
 import { probHistHydrate } from './probhist.svelte.ts';
-import { emitServerRowsMerged, emitLaunchDone, emitSelectedChanged } from './bus.svelte.ts';
+import { emitServerRowsMerged, emitLaunchDone, emitSelectedChanged, fgBusy, launchSettled } from './bus.svelte.ts';
 import { checkUpdate } from '../update/check';
 import { ensureIndex, tbAttach, setOnIndexChange } from '../reviews/reviews';
 import { deptOfCourse } from '../api/dept';
@@ -112,7 +112,8 @@ export async function bootSite(): Promise<void> {
 async function reenterXkRoot(): Promise<boolean> {
   try {
     const html = await fetchPageRaw(session.BASE + '/');
-    const ok = !isXkDeadHtml(html);
+    // SSO 登录页也算「入口根已死」：换票救不了（主会话真没了），不再白跑重进
+    const ok = !isXkDeadHtml(html) && !isSsoLoginHtml(html);
     console.log(TAG, 'webvpn 重进入口换票:', ok ? '成功，重试原请求' : '入口根也是死页，主会话真死，需重新登录');
     return ok;
   } catch (e) {
@@ -155,11 +156,16 @@ export async function launch(): Promise<void> {
     volCacheHydrate(session.SEM);
     probHistHydrate(session.SEM);
     console.log(TAG, 'on-demand mode: fetching selected + candidates + plan');
-    const [selectedCourses, candCourses, planFresh, level, catAttrs] = await Promise.all([
-      fetchSelectedCourses(ctx()).catch(e => {
-        console.warn(TAG, 'selected:', e);
-        return [];
-      }),
+    // 阶段1：已选先上屏（上游 68485cd 同款：进选课列表先出已选，不等方案/目录/候补/属性）
+    const selectedCourses = await fetchSelectedCourses(ctx()).catch(e => {
+      console.warn(TAG, 'selected:', e);
+      return [];
+    });
+    const pool: Course[] = selectedCourses.map(c => ({ ...c, selected: true }));
+    session.allCourses = pool;
+    applyLevelMap(pool, session.levelMap, session.planData);
+    // 阶段2：候补/方案/等级/属性并行到货后增量并入池（已选首屏不被拖慢）
+    const [candCourses, planFresh, level, catAttrs] = await Promise.all([
       fetchCandidateCourses(ctx()).catch(e => {
         console.warn(TAG, 'candidates:', e);
         return [];
@@ -183,29 +189,27 @@ export async function launch(): Promise<void> {
     if (candCourses.length) {
       await backfillCandidateMeta(ctx(), candCourses).catch(e => console.warn(TAG, 'cand meta:', e));
     }
-    const pool: Course[] = selectedCourses.map(c => ({ ...c, selected: true }));
     session.candidateCourses.forEach(c => {
-      if (!pool.some(p => keyOf(p.code, p.seq) === keyOf(c.code, c.seq))) pool.push({ ...c, isCandidate: true });
+      if (!session.allCourses.some(p => keyOf(p.code, p.seq) === keyOf(c.code, c.seq))) session.allCourses.push({ ...c, isCandidate: true });
     });
     session.knote = await knoteLoad().catch(e => {
       console.warn(TAG, 'knote:', e);
       return {};
     });
-    session.allCourses = pool;
-    applyLevelMap(pool, session.levelMap, session.planData);
+    applyLevelMap(session.allCourses, session.levelMap, session.planData);
     // 重开场景：志愿院系均在检查点窗口内 fresh → 后台拉取返回空，池行会一直缺 vol 字段
     // （概率标签消失）。此处先用内存/缓存 vol.map 同步回放，后台到货后再刷新。
-    if (Object.keys(vol.map).length) applyVolunteer(pool, vol.map);
+    if (Object.keys(vol.map).length) applyVolunteer(session.allCourses, vol.map);
     // 课余量/排队 + 志愿：非阻塞（UI 先上屏，数据后到回填）
     void (async () => {
-      const qResult = await fetchQueueData(ctx(), pool).catch(e => {
+      const qResult = await fetchQueueData(ctx(), session.allCourses).catch(e => {
         console.warn(TAG, 'queue:', e);
         return { map: {}, phase: false };
       });
       session.queueDataMap = qResult.map;
       session.isQueuePhase = qResult.phase;
       if (qResult.phase) {
-        pool.forEach(c => {
+        session.allCourses.forEach(c => {
           const q = session.queueDataMap[c.code + '_' + normSeq(c.seq)];
           if (q) {
             c.available = q.qRemaining > 0;
@@ -215,7 +219,7 @@ export async function launch(): Promise<void> {
         });
       } else {
         try {
-          await fetchVolForPoolLaunch(pool);
+          await fetchVolForPoolLaunch(session.allCourses);
         } catch (e) {
           console.warn(TAG, 'volunteer:', e);
         }
@@ -261,7 +265,7 @@ export async function launch(): Promise<void> {
       session.fetchWarn = '';
       showXkResult({ ok: false, msg: warn });
     }
-    console.log(TAG, 'on-demand launch done:', pool.filter(c => c.selected).length, 'selected,', session.candidateCourses.length, 'candidates,', session.isQueuePhase ? 'queue phase' : 'browse mode');
+    console.log(TAG, 'on-demand launch done:', session.allCourses.filter(c => c.selected).length, 'selected,', session.candidateCourses.length, 'candidates,', session.isQueuePhase ? 'queue phase' : 'browse mode');
   } catch (e) {
     showXkResult({ ok: false, msg: '启动失败：' + (e instanceof Error ? e.message : String(e)) });
   } finally {
@@ -616,8 +620,20 @@ const _bfStatus: Record<string, string> = {};
 let _bfScanP: Promise<Course[]> | null = null;
 let _selBfLogged = false;
 
+/** 后台补拉前等待前台空闲（启动落定 + 无前台查询在途）——上游 PR #46 启动门控。
+ *  浏览模式翻页靠服务端会话游标，后台 kkxxSearch 并发会污染（实锤用户报）。 */
+async function waitForegroundIdle(maxMs = 30000): Promise<boolean> {
+  const t0 = Date.now();
+  while (!launchSettled() || fgBusy()) {
+    if (Date.now() - t0 > maxMs) return false;
+    await sleep(150);
+  }
+  return true;
+}
+
 export async function backfillSelTimes(): Promise<void> {
   if (!session.isZhjwxk && !session.isWebvpn) return;
+  if (!(await waitForegroundIdle())) return;
   const tried = _selTried;
   const sel = session.allCourses.filter(c => c.selected && !c.isCandidate);
   const unparsed = sel.filter(r => parseTimeSlots(r.time || '').length === 0 && clockRangesOf(r.note || r.xkTextNote || '', r.time || '').length === 0);
@@ -653,6 +669,8 @@ export async function backfillSelTimes(): Promise<void> {
               _bfScanP = (async () => {
                 const scanned: Course[] = [];
                 for (let p = 1; p <= 10; p++) {
+                  // 前台接手浏览翻页 → 让路（服务端会话游标敏感）；下次回填再补
+                  if (fgBusy()) break;
                   try {
                     const res3 = await serverSearch(ctx(), { page: p });
                     const rs = res3.rows || [];
