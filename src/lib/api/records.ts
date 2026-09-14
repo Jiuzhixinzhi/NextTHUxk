@@ -134,47 +134,62 @@ export function parseTimetableCandidates(html: string): Course[] {
   return [...byCode.values()];
 }
 
+/** 极简 HTML 实体解码：够用于单元格内文（&nbsp; 与常见命名/数字实体），
+ *  避免 `&nbsp;10720011` 这类前缀把纯数字课号守卫误伤。 */
+const decodeCellEntities = (s: string): string =>
+  s.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (full, e: string) => {
+    if (e[0] === '#') {
+      const n = /^#x/i.test(e) ? parseInt(e.slice(2), 16) : parseInt(e.slice(1), 10);
+      return Number.isFinite(n) && n >= 0 && n <= 0x10ffff ? String.fromCodePoint(n) : full;
+    }
+    return ({ nbsp: ' ', amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" } as Record<string, string>)[e.toLowerCase()] ?? full;
+  });
+
+/** dlSearch 候补表解析：td 列序固定。课号须字母数字且至少含一位数字——外校课含
+ *  PK/GPK/BW 前缀（同 parseCatalog 守卫）；WL 阶段页面表头/模板行也带 trr class，
+ *  其字面标签（课程号/课程名/上课时间…）曾混入候选队列形成无法退选的幽灵行（用户报）。 */
+export function parseDlRows(html: string): Course[] {
+  const out: Course[] = [];
+  const rowRe = /<tr[^>]*class="trr[12]"[^>]*>([\s\S]*?)<\/tr>/g;
+  let m: RegExpExecArray | null;
+  while ((m = rowRe.exec(html)) !== null) {
+    const tds = [...m[1]!.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(t =>
+      decodeCellEntities(t[1]!.replace(/<[^>]*>/g, '')).replace(/\s+/g, ' ').trim(),
+    );
+    if (tds.length < 7) continue;
+    const td = (i: number) => tds[i] || '';
+    const typeLabel = td(0);
+    const zyStr = td(1);
+    const code = td(2);
+    const name = td(3);
+    const seq = td(4);
+    const queueTotal = parseInt(td(5)) || 0;
+    const myPos = parseInt(td(6)) || 0;
+    if (!/^[A-Za-z0-9]+$/.test(code) || !/\d/.test(code) || !name) continue;
+    const zyNum = zyStr.match(/第([一二三1-3])志愿/);
+    const typeCode = typeLabel === '体育' ? 'ty' : typeLabel === '必修' ? '006' : typeLabel === '限选' ? '008' : '007';
+    out.push({
+      code,
+      seq: seq || '0',
+      name,
+      teacher: td(8),
+      time: td(7) || '',
+      credits: creditsOf(code, 0),
+      typeLabel,
+      typeCode,
+      zy: zyNum ? ({ '一': 1, '二': 2, '三': 3 } as Record<string, number>)[zyNum[1]!] || parseInt(zyNum[1]!) || 3 : 3,
+      queueTotal,
+      myPos,
+      isCandidate: true,
+      selected: false,
+    });
+  }
+  return out;
+}
+
 export async function fetchCandidateCourses(ctx: Ctx): Promise<Course[]> {
   if (!ctx.isZhjwxk) return [];
   const { SEM, BASE } = ctx;
-  const parseDl = (html: string): Course[] => {
-    const out: Course[] = [];
-    const rowRe = /<tr[^>]*class="trr[12]"[^>]*>([\s\S]*?)<\/tr>/g;
-    let m: RegExpExecArray | null;
-    while ((m = rowRe.exec(html)) !== null) {
-      const tds = [...m[1]!.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/g)].map(t => t[1]!.replace(/<[^>]*>/g, '').trim());
-      if (tds.length < 7) continue;
-      const td = (i: number) => tds[i] || '';
-      const typeLabel = td(0);
-      const zyStr = td(1);
-      const code = td(2);
-      const name = td(3);
-      const seq = td(4);
-      const queueTotal = parseInt(td(5)) || 0;
-      const myPos = parseInt(td(6)) || 0;
-      // 码型校验即表头行拦截：表头「课号」含中文，进不了数据（上游 1935408 同款同根：
-      // 体育漏选/0 学分/特色课全坏源于表头行被当数据行解析）
-      if (!code || !name || !/^[A-Za-z0-9]+$/.test(code) || !/\d/.test(code)) continue;
-      const zyNum = zyStr.match(/第([一二三1-3])志愿/);
-      const typeCode = typeLabel === '体育' ? 'ty' : typeLabel === '必修' ? '006' : typeLabel === '限选' ? '008' : '007';
-      out.push({
-        code,
-        seq: seq || '0',
-        name,
-        teacher: td(8),
-        time: td(7) || '',
-        credits: creditsOf(code, 0),
-        typeLabel,
-        typeCode,
-        zy: zyNum ? ({ '一': 1, '二': 2, '三': 3 } as Record<string, number>)[zyNum[1]!] || parseInt(zyNum[1]!) || 3 : 3,
-        queueTotal,
-        myPos,
-        isCandidate: true,
-        selected: false,
-      });
-    }
-    return out;
-  };
   try {
     let dual: { gbk: string; utf8: string } | null = null;
     try {
@@ -183,7 +198,7 @@ export async function fetchCandidateCourses(ctx: Ctx): Promise<Course[]> {
       console.warn(TAG, 'dlSearch failed (' + (e instanceof Error ? e.message : e) + ') → 课表兜底');
     }
     if (dual && dual.gbk.includes('accessDenied') && dual.utf8.includes('accessDenied')) return [];
-    const candidates = dual ? pickDecoded(parseDl, dual) : [];
+    const candidates = dual ? pickDecoded(parseDlRows, dual) : [];
     console.log(TAG, 'candidate courses:', candidates.length);
     if (!candidates.length) {
       try {
