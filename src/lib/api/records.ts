@@ -6,7 +6,7 @@ import type { Course, Ctx, PlanCourse, QueueDatum } from '../domain/types';
 import { TAG } from '../core/constants';
 import { keyOf, runPool, sleep } from '../core/utils';
 import { fetchPage, fetchPageDual, fetchPost } from '../net/http';
-import { pickDecoded } from '../net/decode';
+import { pickDecoded, pickDecodedWithSource } from '../net/decode';
 import { gbkPercentEncode } from '../net/gbk';
 import { isSportsCourse } from '../domain/flags';
 import { creditsOf } from '../domain/credits';
@@ -203,11 +203,10 @@ export async function fetchCandidateCourses(ctx: Ctx): Promise<CandidateFetchRes
       return null;
     });
     if (dual && dual.gbk.includes('accessDenied') && dual.utf8.includes('accessDenied')) return { rows: [], ok: false };
-    // 双解码择优（pickDecoded 同款：行数多者胜，平分回退 gbk）；此处保留胜出原文以取 token/共X页
-    const gRows = dual ? parseDlRows(dual.gbk) : [];
-    const uRows = dual ? parseDlRows(dual.utf8) : [];
-    const candidates = uRows.length > gRows.length ? uRows : gRows;
-    const html0 = dual ? (uRows.length > gRows.length ? dual.utf8 : dual.gbk) : '';
+    // 双解码择优（与 pickDecoded 同一判据）：同时保留胜出原文以取 token/共X页
+    const picked = dual ? pickDecodedWithSource(parseDlRows, dual) : { value: [] as Course[], html: '' };
+    const candidates = picked.value;
+    const html0 = picked.html;
     // 防御性翻页：候补表分页时单 GET 首页会静默丢行（镜像 fetchCategoryAttrs 的 token POST；
     // 单页者 totalPages=1，零额外请求）
     const token = (html0.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';

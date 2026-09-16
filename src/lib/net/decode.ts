@@ -20,11 +20,16 @@ export function decodeBest(buf: ArrayBuffer, url: string): string {
   return GBK_URL_RE.test(url) ? asGbk : asUtf8;
 }
 
-/** 双解码结果选优：score = parse(html).length ×2 +（无替换符 +1）；平分回退 gbk。 */
+/** 双解码选优：score = parse(html).length ×2 +（无替换符 +1）；平分回退 gbk。 */
 export function pickDecoded<T>(parse: (html: string) => T, dual: { gbk: string; utf8: string }): T {
+  return pickDecodedWithSource(parse, dual).value;
+}
+
+/** 同上，但一并返回胜出原文——调用方还需从胜出页取 token / 共 X 页 时用（同一判据，勿另写）。 */
+export function pickDecodedWithSource<T>(parse: (html: string) => T, dual: { gbk: string; utf8: string }): { value: T; html: string } {
   const ga = parse(dual.gbk);
   const ua = parse(dual.utf8);
   const gs = Array.isArray(ga) ? ga.length * 2 + (dual.gbk.includes(REPL) ? 0 : 1) : 0;
   const us = Array.isArray(ua) ? ua.length * 2 + (dual.utf8.includes(REPL) ? 0 : 1) : 0;
-  return us > gs ? ua : ga;
+  return us > gs ? { value: ua, html: dual.utf8 } : { value: ga, html: dual.gbk };
 }
