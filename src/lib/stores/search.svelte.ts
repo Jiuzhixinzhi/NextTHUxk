@@ -10,8 +10,8 @@ import { serverSearch, serverSearchStorm, isCodeLike, type SearchOpts } from '..
 import type { Course, ServerSearchResult } from '../domain/types';
 import { isSportsCourse } from '../domain/flags';
 import { normTeacher, teacherHit } from '../domain/match';
-import { conflictsWithPreview, buildPreviewSpans } from '../domain/conflict';
-import { mergeRows, session } from './session.svelte.ts';
+import { conflictsWithPreview } from '../domain/conflict';
+import { mergeRows, previewConflictSpans, session } from './session.svelte.ts';
 import { fgEnter, fgExit, onLaunchDone } from './bus.svelte.ts';
 
 /** 前台查询占用包裹：进出计数供后台补拉让路（服务端 kkxxSearch 会话游标敏感） */
@@ -161,7 +161,7 @@ function computeDisplayed(): Course[] {
   }
   const cf2 = search.local.conflict;
   if (cf2) {
-    const spans = buildPreviewSpans(previewPoolForConflict(), session.manualEvents);
+    const spans = previewConflictSpans();
     list = list.filter(c => {
       const conflicts = conflictsWithPreview(c, spans);
       return cf2 === 'noconflict' ? conflicts.length === 0 : conflicts.length > 0;
@@ -210,13 +210,6 @@ function computeDisplayed(): Course[] {
     });
   }
   return list;
-}
-
-function previewPoolForConflict(): Course[] {
-  const sel = session.allCourses.filter(c => c.selected);
-  const seen = new Set(sel.map(c => keyOf(c.code, c.seq)));
-  const candidates = session.candidateCourses.filter(cc => !seen.has(keyOf(cc.code, cc.seq)));
-  return sel.concat(candidates);
 }
 
 export function isSearchMode(): boolean {

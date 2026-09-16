@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseTimeSlots, clockRangesOf, pvToMin, spansOf, weeksOf, weeksOverlap } from '../src/lib/domain/time';
 import { detectConflicts, buildPreviewSpans, conflictsWithPreview } from '../src/lib/domain/conflict';
-import { calcProb, capacityStatus, cascadeOf, lockedOf, parseVolArr, probResult, priProb, probGridData, creditDist, creditSimItems } from '../src/lib/domain/probability';
+import { calcProb, capacityStatus, cascadeOf, lockedOf, parseVolArr, probResult, priProb, probGridData, creditDist, creditSimItems, queueCapLevel, queueCapTitle } from '../src/lib/domain/probability';
 import { draftDiff, draftCourseFrom, draftKeyOf, mergeSelectedIntoDraft, repairDraftCourse, sameAsDraft } from '../src/lib/domain/draft';
 import { gbkPercentEncode } from '../src/lib/net/gbk';
 import { normSeq, keyOf } from '../src/lib/core/utils';
@@ -275,6 +275,36 @@ describe('capacityStatus（课余量：已选 · 余量 · 排队）', () => {
 
   it('无容量 → null', () => {
     expect(capacityStatus(c({ capacity: 0 }), undefined)).toBeNull();
+  });
+});
+
+describe('queueCapLevel / queueCapTitle（课余量档位三处同源）', () => {
+  it('有余 → ok；无余有排队 → queued；皆无 → full', () => {
+    expect(queueCapLevel(3, 0)).toBe('ok');
+    expect(queueCapLevel(0, 5)).toBe('queued');
+    expect(queueCapLevel(0, 0)).toBe('full');
+    expect(queueCapLevel(null, 0)).toBe('full');
+    expect(queueCapLevel(undefined, 2)).toBe('queued');
+  });
+
+  it('提示串：已选 · 余（缺 → —） · 排队 · 容量', () => {
+    expect(queueCapTitle({ cap: 40, used: 33, rem: 7, queue: 5, pct: 82.5 })).toBe('已选33 · 余7 · 排队5 · 容量40');
+    expect(queueCapTitle({ cap: 40, used: 40, rem: 0, queue: 0, pct: 100 })).toBe('已选40 · 余0 · 排队0 · 容量40');
+  });
+
+  it('previewBlockMeta 文案/配色取自同一档位表（余 / 排队 / 已满）', async () => {
+    const { previewBlockMeta } = await import('../src/lib/domain/preview');
+    const c = { code: 'a', seq: '01', name: 'A', time: '', credits: 1 } as never;
+    const qd = (qRemaining: number, qQueue: number) => ({ a_1: { qRemaining, qQueue, qCapacity: 30 } });
+    expect(previewBlockMeta(c, true, false, false, qd(2, 0), undefined, null)).toEqual({
+      color: '#07c160', label: '余2', bg: 'rgba(7,193,96,.14)',
+    });
+    expect(previewBlockMeta(c, true, false, false, qd(0, 4), undefined, null)).toEqual({
+      color: '#ff9f1a', label: '排队4人', bg: 'rgba(255,159,26,.14)',
+    });
+    expect(previewBlockMeta(c, true, false, false, qd(0, 0), undefined, null)).toEqual({
+      color: '#ee4d4d', label: '已满', bg: 'rgba(238,77,77,.14)',
+    });
   });
 });
 

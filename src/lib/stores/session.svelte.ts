@@ -25,6 +25,7 @@ import { applyVolunteer, volSession } from '../api/volunteers';
 import { dropCourse, submitCourse, changeVolunteer } from '../api/write';
 import { attachScores, ensureScores } from '../api/scores';
 import { typeCodeToFlag } from '../domain/flags';
+import { buildPreviewSpans, type PreviewSpan } from '../domain/conflict';
 import { matchPoolRow } from '../domain/match';
 import { parseTimeSlots, clockRangesOf } from '../domain/time';
 import { checkPlanCoverage } from '../domain/plancov';
@@ -87,6 +88,13 @@ export function selectedPreviewRows(): Course[] {
   const seen = new Set(sel.map(c => keyOf(c.code, c.seq)));
   const cand = session.candidateCourses.filter(cc => !seen.has(keyOf(cc.code, cc.seq)));
   return sel.concat(cand);
+}
+
+/** 预览冲突时段表（已选/候补行 + 自定义占用）——全列表共用一份：
+ *  卡片冲突徽章与搜索「冲突」筛选同源，避免每卡各自 buildPreviewSpans。
+ *  响应式：读 $state，组件以 $derived.by(() => previewConflictSpans()) 包裹。 */
+export function previewConflictSpans(): PreviewSpan[] {
+  return buildPreviewSpans(selectedPreviewRows(), session.manualEvents);
 }
 
 /** 培养方案覆盖（正选 + 全部草稿）——launch 完成后（bus onLaunchDone）与草稿/已选变更时重算。

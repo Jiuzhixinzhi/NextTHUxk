@@ -5,6 +5,7 @@ import type { Course, ManualEvent } from './types';
 import { clockRangesOf, parseTimeSlots } from './time';
 import { keyOf } from '../core/utils';
 import { matchPoolRow } from './match';
+import { QUEUE_CAP_STYLE, queueCapLevel } from './probability';
 
 const parses = (c: Course) =>
   parseTimeSlots(c.time || '').length > 0 || clockRangesOf(c.note || c.xkTextNote || '', c.time || '').length > 0;
@@ -84,11 +85,12 @@ export function previewBlockMeta(
   if (isQueued && cand?.myPos) return { color: '#ff9f1a', label: '排队第' + cand.myPos + '/' + (cand.queueTotal || 0) + '人', bg: 'rgba(255,159,26,.14)' };
   if (isQueued) return { color: '#ff9f1a', label: '候选中', bg: 'rgba(255,159,26,.14)' };
   if (isQueuePhase) {
-    const qd = queueDataMap[String(cc.code) + '_' + String(parseInt(String(cc.seq || '0'), 10) || 0)];
+    const qd = queueDataMap[keyOf(cc.code, cc.seq)];
     if (qd) {
-      if (qd.qRemaining > 0) return { color: '#07c160', label: '余' + qd.qRemaining, bg: 'rgba(7,193,96,.14)' };
-      if (qd.qQueue > 0) return { color: '#ff9f1a', label: '排队' + qd.qQueue + '人', bg: 'rgba(255,159,26,.14)' };
-      return { color: '#ee4d4d', label: '已满', bg: 'rgba(238,77,77,.14)' };
+      const lv = queueCapLevel(qd.qRemaining, qd.qQueue);
+      const st = QUEUE_CAP_STYLE[lv];
+      const label = lv === 'ok' ? '余' + qd.qRemaining : lv === 'queued' ? '排队' + qd.qQueue + '人' : '已满';
+      return { color: st.color, label, bg: st.bg };
     }
     return { color: '', label: '', bg: '' };
   }
