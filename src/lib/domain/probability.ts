@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, CreditSimItem, Flag, ProbResult, QueueDatum } from './types';
 import { allowedFlags, baseFlag, flagName, isSportsCourse } from './flags';
-import { normSeq } from '../core/utils';
+import { keyOf } from '../core/utils';
 
 export const fmtVol = (v: string | undefined | null): string => {
   if (!v) return '';
@@ -269,7 +269,7 @@ export function creditSimItems(
     if (!(Number(c.credits) > 0)) return;
     let prob: number | null = null;
     const ac = ctx.courseLookup(c.code, c.seq);
-    const qkey = c.code + '_' + normSeq(c.seq);
+    const qkey = keyOf(c.code, c.seq);
     if (ctx.isQueuePhase) {
       if (ctx.certainKeys?.has(qkey)) {
         prob = 1; // 正选锁定：已确认选入与余量无关

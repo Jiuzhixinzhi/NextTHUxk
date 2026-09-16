@@ -4,6 +4,7 @@
 // 池里没有就用缓存兜底。外校课时间只在 kkxxSearch 说明列出现过一次也能永远用。
 // ═══════════════════════════════════════════════════════════════
 import { clockRangesOf, parseTimeSlots } from '../domain/time';
+import { keyOf } from '../core/utils';
 import { K, store } from './store';
 
 export type KnoteMap = Record<string, { note: string; time: string }>;
@@ -11,7 +12,14 @@ export type KnoteMap = Record<string, { note: string; time: string }>;
 export async function knoteLoad(): Promise<KnoteMap> {
   try {
     const v = await store.get<KnoteMap>(K.knote);
-    return v && typeof v === 'object' ? v : {};
+    if (!v || typeof v !== 'object') return {};
+    // 键迁移：历史版本用原始课序拼键（'01'），统一为 keyOf 归一拼写（含 '01'/'1' 双写法去重）
+    const out: KnoteMap = {};
+    for (const [k, val] of Object.entries(v)) {
+      const i = k.indexOf('_');
+      out[i >= 0 ? keyOf(k.slice(0, i), k.slice(i + 1)) : k] = val;
+    }
+    return out;
   } catch {
     return {};
   }
@@ -33,7 +41,7 @@ export function makeKnoteRemember(getKnote: () => KnoteMap) {
     const knote = getKnote();
     const parses = parseTimeSlots(time || '').length > 0 || clockRangesOf(note || '', time || '').length > 0;
     if (!code || !parses) return;
-    const k = code + '_' + (seq || '0');
+    const k = keyOf(code, seq);
     const ex = knote[k];
     if (ex && (ex.note || '') === (note || '') && (ex.time || '') === (time || '')) return;
     knote[k] = { note: note || '', time: time || '' };

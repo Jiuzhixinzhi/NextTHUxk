@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, VolDatum } from '../domain/types';
 import { TAG } from '../core/constants';
-import { fmtTime, keyOf, normSeq } from '../core/utils';
+import { fmtTime, keyOf } from '../core/utils';
 import { K, store } from '../storage/store';
 import {
   applyVolunteer,

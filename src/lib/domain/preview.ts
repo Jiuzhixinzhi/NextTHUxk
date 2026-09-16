@@ -43,7 +43,7 @@ export function previewJoinRows(rows: Course[], pool: Course[], knote: Record<st
     let hit: Course | undefined = matchPoolRow(poolRows, s.seq, s.teacher);
     if (!hit) {
       const knoteKey = Object.keys(knote).find(k => k.indexOf(s.code + '_') === 0);
-      hit = (knote[s.code + '_' + (s.seq || '0')] as Course | undefined) || (knoteKey ? (knote[knoteKey] as Course | undefined) : undefined);
+      hit = (knote[keyOf(s.code, s.seq)] as Course | undefined) || (knoteKey ? (knote[knoteKey] as Course | undefined) : undefined);
     }
     if (!hit) {
       out.push(s);

@@ -8,6 +8,7 @@
   import { openWindow } from '../../lib/stores/modal.svelte.ts';
   import DraftCourseRow from './DraftCourseRow.svelte';
   import type { Flag } from '../../lib/domain/types';
+  import { keyOf } from '../../lib/core/utils';
 
   let importOpen = $state(false);
   let importText = $state('');
@@ -104,7 +105,7 @@
 
       {#if activeDraft.courses.length}
         <div style="margin-top:6px;">
-          {#each activeDraft.courses as c, ci (c.code + '_' + (c.seq || '0'))}
+          {#each activeDraft.courses as c, ci (keyOf(c.code, c.seq))}
             <DraftCourseRow
               course={c}
               onFlag={(f: Flag) => updateActiveCourse(ci, { flag: f })}
@@ -153,7 +154,7 @@
           </div>
           {#if draftStore.expandedId === d.id && d.courses.length}
             <div style="margin-top:6px;border-top:1px solid rgba(0,0,0,.06);padding-top:6px;">
-              {#each d.courses as c, ci (c.code + '_' + (c.seq || '0'))}
+              {#each d.courses as c, ci (keyOf(c.code, c.seq))}
                 <DraftCourseRow
                   course={c}
                   onFlag={(f: Flag) => updateDraftCourse(d.id, ci, { flag: f })}

@@ -6,7 +6,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Ctx, VolDatum } from '../domain/types';
 import { TAG } from '../core/constants';
-import { normSeq } from '../core/utils';
+import { keyOf, normSeq } from '../core/utils';
 import { fetchPage, fetchPost } from '../net/http';
 import { pagedFetch } from '../net/paged';
 import { deptCodeOf, deptOfCourse } from './dept';
@@ -20,7 +20,7 @@ export function parseVolFromHtml(html: string): Record<string, VolDatum> {
   while ((m = regex.exec(html)) !== null) {
     // 墓碑行过滤：capacity==0 && applied==0 = 已满课不在志愿池；报名>0 的 0 容量保留
     if (!(parseInt(m[4]!) || 0) && !(parseInt(m[5]!) || 0)) continue;
-    const key = m[1]! + '_' + normSeq(m[2]!);
+    const key = keyOf(m[1]!, m[2]!);
     map[key] = {
       code: m[1]!,
       seq: m[2]!,
@@ -41,7 +41,7 @@ export function parseVolSportsFromHtml(html: string): Record<string, VolDatum> {
   let m: RegExpExecArray | null;
   while ((m = regex.exec(html)) !== null) {
     if (!(parseInt(m[3]!) || 0) && !(parseInt(m[4]!) || 0)) continue;
-    const key = m[1]! + '_' + normSeq(m[2]!);
+    const key = keyOf(m[1]!, m[2]!);
     map[key] = { code: m[1]!, seq: m[2]!, capacity: parseInt(m[3]!) || 0, applied: parseInt(m[4]!) || 0, volSports: m[5] };
   }
   return map;
@@ -129,7 +129,7 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
           maxPages: 25,
           concurrency: 3,
           throttle: 50,
-          dedupe: v => v.code + '_' + normSeq(v.seq),
+          dedupe: v => keyOf(v.code, v.seq),
           expectPages: pg.pages,
           label: 'vol-BR-' + code,
         });
@@ -139,7 +139,7 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
           return m;
         }
         items.forEach(v => {
-          m[v.code + '_' + normSeq(v.seq)] = v;
+          m[keyOf(v.code, v.seq)] = v;
         });
         done[code] = Date.now();
       } catch (e) {
@@ -189,7 +189,7 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
               maxPages: 20,
               concurrency: 3,
               throttle: 50,
-              dedupe: v => v.code + '_' + normSeq(v.seq),
+              dedupe: v => keyOf(v.code, v.seq),
               expectPages: pg.pages,
               label: 'vol-Ty',
             });
@@ -205,7 +205,7 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
         return p;
       })();
       items.forEach(v => {
-        const k = v.code + '_' + normSeq(v.seq);
+        const k = keyOf(v.code, v.seq);
         map[k] = Object.assign({ capacity: 0, applied: 0, volRequired: '', volElective: '', volOptional: '' }, map[k], v);
       });
       done.ty = Date.now();
@@ -229,14 +229,12 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
 export function applyVolunteer(courses: Course[], volData: Record<string, VolDatum> | undefined): boolean {
   const byCodeAll: Record<string, VolDatum[]> = {};
   for (const v of Object.values(volData || {})) (byCodeAll[v.code] = byCodeAll[v.code] || []).push(v);
-  const norm = (s: string | number) => String(parseInt(String(s), 10) || 0);
   let changed = 0;
   (courses || []).forEach(c => {
     const rows = byCodeAll[c.code] || [];
     const v =
-      volData?.[c.code + '_' + (c.seq || '0')] ||
-      volData?.[c.code + '_' + norm(c.seq)] ||
-      rows.find(r => norm(r.seq) === norm(c.seq)) ||
+      volData?.[keyOf(c.code, c.seq)] ||
+      rows.find(r => normSeq(r.seq) === normSeq(c.seq)) ||
       (rows.length === 1 ? rows[0] : null);
     if (v) {
       const eq =

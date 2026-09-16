@@ -95,7 +95,7 @@
       <button type="button" class="nx-list-tool" onclick={() => setAllExpand(false)}>全部收起</button>
     </div>
     <div bind:this={listEl}>
-      {#each visibleRows as c (c.code + '_' + (c.seq || '0'))}
+      {#each visibleRows as c (keyOf(c.code, c.seq))}
         <div class="nx-card-holder" data-code={c.code} data-seq={c.seq || '0'}>
           <CourseCard course={c} {conflictSpans} />
         </div>

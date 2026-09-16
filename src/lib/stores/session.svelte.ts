@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Ctx, DraftCourse, ManualEvent, PlanCourse, QueueDatum, VolDatum } from '../domain/types';
 import { DATA_VER, TAG } from '../core/constants';
-import { keyOf, normSeq, sleep } from '../core/utils';
+import { keyOf, sleep } from '../core/utils';
 import { K, cleanupLegacyKeys, store } from '../storage/store';
 import { knoteLoad, makeKnoteRemember, type KnoteMap } from '../storage/knote';
 import { ensureSiteIdentity } from '../site/webvpn';
@@ -231,7 +231,7 @@ export async function launch(): Promise<void> {
       session.isQueuePhase = qResult.phase;
       if (qResult.phase) {
         session.allCourses.forEach(c => {
-          const q = session.queueDataMap[c.code + '_' + normSeq(c.seq)];
+          const q = session.queueDataMap[keyOf(c.code, c.seq)];
           if (q) {
             c.available = q.qRemaining > 0;
             if (q.qRemaining > 0) c.remaining = q.qRemaining;
@@ -331,7 +331,9 @@ async function resolveCourseZy(courses: Course[], selMap: Record<string, Course>
   let levelMap: Record<string, LevelInfo> | null = null;
   let selectedChanged = false;
   for (const c of courses) {
-    const key = c.code + '_' + (c.seq || '0');
+    // keyOf 归一：selMap/zyCache 与 fetchLevelTable 的键拼写必须一致
+    // （历史 Bug：此处用原始课序拼键查归一后的 levelMap，前导零课班取不到 typeCode/typeLabel）
+    const key = keyOf(c.code, c.seq);
     const s = selMap[key];
     if (c.selected !== !!s) selectedChanged = true;
     c.selected = !!s;
@@ -372,7 +374,7 @@ async function resolveCourseZy(courses: Course[], selMap: Record<string, Course>
     if (session.isQueuePhase) {
       missingZy.forEach(c => {
         c.zy = 3;
-        zyCache[c.code + '_' + (c.seq || '0')] = { zy: 3, typeCode: c.typeCode || '', typeLabel: c.typeLabel || '', confirmed: false };
+        zyCache[keyOf(c.code, c.seq)] = { zy: 3, typeCode: c.typeCode || '', typeLabel: c.typeLabel || '', confirmed: false };
       });
       cacheUpdated = true;
     } else if (withModal) {
@@ -380,7 +382,7 @@ async function resolveCourseZy(courses: Course[], selMap: Record<string, Course>
       missingZy.forEach((c, i) => {
         if (values[i] && values[i]! > 0) {
           c.zy = values[i]!;
-          zyCache[c.code + '_' + (c.seq || '0')] = { zy: c.zy, typeCode: c.typeCode || '', typeLabel: c.typeLabel || '', confirmed: false };
+          zyCache[keyOf(c.code, c.seq)] = { zy: c.zy, typeCode: c.typeCode || '', typeLabel: c.typeLabel || '', confirmed: false };
           cacheUpdated = true;
         }
       });
@@ -401,7 +403,7 @@ export async function refreshSelected(withModal = true): Promise<void> {
   const selected = await fetchSelectedCourses(ctx());
   const selMap: Record<string, Course> = {};
   selected.forEach(s => {
-    selMap[s.code + '_' + (s.seq || '0')] = s;
+    selMap[keyOf(s.code, s.seq)] = s;
   });
   session.levelMap = await fetchLevelTable(ctx()).catch(() => session.levelMap || {});
   applyLevelMap(session.allCourses, session.levelMap, session.planData);
@@ -414,9 +416,9 @@ export async function refreshSelected(withModal = true): Promise<void> {
     /* 保持现有候补数据不变；标记置不可信，避免 promote 依据过期名单 */
     session.candidateFetchOk = false;
   }
-  const candKeys = new Set(session.candidateCourses.map(c => c.code + '_' + String(c.seq || '0')));
+  const candKeys = new Set(session.candidateCourses.map(c => keyOf(c.code, c.seq)));
   session.allCourses.forEach(c => {
-    c.isCandidate = candKeys.has(c.code + '_' + (c.seq || '0'));
+    c.isCandidate = candKeys.has(keyOf(c.code, c.seq));
   });
   try {
     const qResult = await fetchQueueData(ctx(), session.allCourses);
@@ -424,7 +426,7 @@ export async function refreshSelected(withModal = true): Promise<void> {
     session.isQueuePhase = qResult.phase;
     if (session.isQueuePhase) {
       session.allCourses.forEach(c => {
-        const q = session.queueDataMap[c.code + '_' + normSeq(c.seq)];
+        const q = session.queueDataMap[keyOf(c.code, c.seq)];
         if (q) {
           c.available = q.qRemaining > 0;
           if (q.qRemaining > 0) c.remaining = q.qRemaining;
@@ -450,15 +452,15 @@ export async function syncQueueAndVol(): Promise<void> {
   session.candidateFetchOk = cr.ok;
   // 检查点同步（定时器触发）：候补回填过前台闸门，避免与浏览翻页并发 kkxxSearch
   if (session.candidateCourses.length) await backfillCandidateMeta(ctx(), session.candidateCourses, fgBusy).catch(() => {});
-  const candKeys = new Set(session.candidateCourses.map(c => c.code + '_' + String(c.seq || '0')));
+  const candKeys = new Set(session.candidateCourses.map(c => keyOf(c.code, c.seq)));
   session.allCourses.forEach(c => {
-    c.isCandidate = candKeys.has(c.code + '_' + String(c.seq || '0'));
+    c.isCandidate = candKeys.has(keyOf(c.code, c.seq));
   });
   session.candidateCourses.forEach(c => {
     if (!session.allCourses.some(ac => keyOf(ac.code, ac.seq) === keyOf(c.code, c.seq))) session.allCourses.push({ ...c, isCandidate: true });
   });
   session.allCourses.forEach(c => {
-    const q = session.queueDataMap[c.code + '_' + normSeq(c.seq)];
+    const q = session.queueDataMap[keyOf(c.code, c.seq)];
     if (q) {
       c.available = q.qRemaining > 0;
       if (q.qRemaining > 0) c.remaining = q.qRemaining;
@@ -503,7 +505,7 @@ function applyLocalRemoval(code: string, seq: string): void {
 }
 
 export async function doDropCourse(code: string, seq: string): Promise<{ ok: boolean; msg: string }> {
-  const isQueue = session.candidateCourses.some(c => c.code === code && String(c.seq) === String(seq));
+  const isQueue = session.candidateCourses.some(c => keyOf(c.code, c.seq) === keyOf(code, seq));
   const res = await dropCourse(ctx(), code, seq, isQueue);
   if (res.ok) {
     applyLocalRemoval(code, seq);
@@ -587,7 +589,7 @@ export function mergeRows(rows: Course[]): number {
   applyLevelMap(rows, session.levelMap, session.planData);
   if (rows.length) {
     const wa = rows.filter(r => r.attr).length;
-    console.log(TAG, 'server rows 属性: ' + wa + '/' + rows.length + ' | 样例: ' + rows.slice(0, 3).map(r => r.code + '_' + (r.seq || '0') + '→' + (r.attr || '空')).join(' , '));
+    console.log(TAG, 'server rows 属性: ' + wa + '/' + rows.length + ' | 样例: ' + rows.slice(0, 3).map(r => keyOf(r.code, r.seq) + '→' + (r.attr || '空')).join(' , '));
   }
   if (!session.isQueuePhase) {
     if (Object.keys(vol.map).length) applyVolunteer(rows, vol.map);
@@ -596,7 +598,7 @@ export function mergeRows(rows: Course[]): number {
     const needRetry = rows.some(r => {
       if (!(r && r.code)) return false;
       const dc = deptOfCourseFallback(r);
-      const has = !!vol.map[r.code + '_' + normSeq(r.seq || '0')];
+      const has = !!vol.map[keyOf(r.code, r.seq)];
       return !!dc && (session.isQueuePhase ? false : !has) && (retried[dc] || 0) < 3;
     });
     if (newDepts.length || needRetry) {
@@ -667,7 +669,7 @@ export async function backfillSelTimes(): Promise<void> {
   const needsTime = (r: Course): boolean => parseTimeSlots(r.time || '').length === 0 && clockRangesOf(r.note || r.xkTextNote || '', r.time || '').length === 0;
   const unparsed = sel.filter(needsTime);
   // 触发范围：时间解析不出 或 学分缺失（WL 已选表列位漂移致 credits=0，用户报形势与政策）
-  const need = sel.filter(r => needsTime(r) || !r.credits).filter(r => (tried.get(r.code + '_' + (r.seq || '0')) || 0) < 2);
+  const need = sel.filter(r => needsTime(r) || !r.credits).filter(r => (tried.get(keyOf(r.code, r.seq)) || 0) < 2);
   if (!need.length) {
     if (unparsed.length && !_selBfLogged) {
       _selBfLogged = true;
@@ -675,12 +677,12 @@ export async function backfillSelTimes(): Promise<void> {
     }
     return;
   }
-  console.log(TAG, '已选元数据回填: 查 ' + need.map(r => r.code + '_' + (r.seq || '0')).join(','));
+  console.log(TAG, '已选元数据回填: 查 ' + need.map(r => keyOf(r.code, r.seq)).join(','));
   const outcome: string[] = [];
   for (let i = 0; i < need.length; i += 5) {
     await Promise.all(
       need.slice(i, i + 5).map(async r => {
-        const k = r.code + '_' + (r.seq || '0');
+        const k = keyOf(r.code, r.seq);
         try {
           // 前台占用则不发起后台请求（服务端会话游标敏感，上游 PR #46）；不消耗 2 次预算
           if (fgBusy()) {

@@ -15,7 +15,6 @@ import { probHist } from './probhist.svelte.ts';
 import { mergeImportedVolCache, vol } from './volunteer.svelte.ts';
 import { volSession } from '../api/volunteers';
 import { volWindowStart } from '../update/check';
-import { normSeq } from '../core/utils';
 
 export async function draftCounts(): Promise<{ drafts: number; manual: number; hist: number }> {
   return { drafts: draftStore.drafts.length, manual: session.manualEvents.length, hist: Object.keys(probHist.map).length };
@@ -219,7 +218,6 @@ export async function backupImport(jsonStr: string): Promise<void> {
     else if (volSkipSem) parts.push('志愿缓存学期不符（跳过）');
     else if (volIn && volAdd < 0) parts.push('志愿缓存窗口不符（跳过）');
     showToast(true, parts.length ? '备份导入完成：' + parts.join(' · ') : '备份导入完成：无新增（数据均已存在）');
-    void normSeq;
     void loadDrafts;
   } catch (e) {
     showToast(false, '导入失败: ' + (e instanceof Error ? e.message : String(e)));

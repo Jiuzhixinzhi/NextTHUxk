@@ -5,7 +5,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Ctx, Flag } from '../domain/types';
 import { TAG } from '../core/constants';
-import { sleep } from '../core/utils';
+import { keyOf, sleep } from '../core/utils';
 import { fetchPage, fetchPost } from '../net/http';
 
 export interface XkResult {
@@ -77,6 +77,9 @@ export async function pollUntil(fn: () => Promise<boolean>, delay: number, tries
 
 export async function submitCourse(ctx: Ctx, code: string, seq: string, zy: number, flag: Flag): Promise<XkResult> {
   const { SEM, BASE } = ctx;
+  // 确认比对一律走 keyOf：教务各页课序前导零不一致（'01'/'1'），裸串比较会把
+  // 已生效的提交判成失败（历史教训：「不假成功」的对偶面——假失败）
+  const target = keyOf(code, seq);
   zy = zy || 3;
   flag = flag || 'bx';
   const mSearch = { bx: 'bxSearch', xx: 'xxSearch', rx: 'rxSearch', ty: 'tySearch' }[flag] || 'bxSearch';
@@ -98,32 +101,33 @@ export async function submitCourse(ctx: Ctx, code: string, seq: string, zy: numb
     if (!res.unknown) return res;
     const hitSelUnknown = async () => {
       const sel = await fetchSelectedForWrite(ctx);
-      return sel.some(s => s.code === code && String(s.seq) === String(seq));
+      return sel.some(s => keyOf(s.code, s.seq) === target);
     };
     if (await pollUntil(hitSelUnknown, 700, 3)) return { ok: true, msg: '选课成功' };
     const candUnknown = (await fetchCandidatesForWrite(ctx)).rows;
-    if (candUnknown.some(s => s.code === code && String(s.seq) === String(seq))) return { ok: true, msg: '已加入候补队列' };
+    if (candUnknown.some(s => keyOf(s.code, s.seq) === target)) return { ok: true, msg: '已加入候补队列' };
     return { ok: false, msg: res.msg };
   }
   const hitSel = async () => {
     const sel = await fetchSelectedForWrite(ctx);
-    return sel.some(s => s.code === code && String(s.seq) === String(seq));
+    return sel.some(s => keyOf(s.code, s.seq) === target);
   };
   if (await pollUntil(hitSel, 700, 3)) return { ok: true, msg: '选课成功' };
   const cand = (await fetchCandidatesForWrite(ctx)).rows;
-  const foundQueue = cand.some(s => s.code === code && String(s.seq) === String(seq));
+  const foundQueue = cand.some(s => keyOf(s.code, s.seq) === target);
   return foundQueue ? { ok: true, msg: '已加入候补队列' } : { ok: false, msg: '选课未生效，请确认课程类型是否正确' };
 }
 
 export async function dropCourse(ctx: Ctx, code: string, seq: string, isQueue: boolean): Promise<XkResult> {
   const { SEM, BASE } = ctx;
+  const target = keyOf(code, seq);
   if (isQueue) {
     const searchUrl = BASE + '/xkBks.vxkBksXkbBs.do?m=dlSearchTab&p_xnxq=' + SEM;
     const res = await fetchFormSubmit(ctx, searchUrl, { m: 'dlDelete', p_xnxq: SEM, page: '', 'p_del_id': SEM + ';' + code + ';' + seq + ';' });
     if (!res.submitted) return res;
     const gone = async () => {
       const cand = (await fetchCandidatesForWrite(ctx)).rows;
-      return !cand.some(s => s.code === code && String(s.seq) === String(seq));
+      return !cand.some(s => keyOf(s.code, s.seq) === target);
     };
     if (await pollUntil(gone, 500, 3)) return { ok: true, msg: '已退出候补队列' };
     return { ok: false, msg: '退出队列未生效，请稍后重试' };
@@ -143,7 +147,7 @@ export async function dropCourse(ctx: Ctx, code: string, seq: string, isQueue: b
   if (!res.submitted) return res;
   const gone = async () => {
     const sel = await fetchSelectedForWrite(ctx);
-    return !sel.some(s => s.code === code && String(s.seq) === String(seq));
+    return !sel.some(s => keyOf(s.code, s.seq) === target);
   };
   if (await pollUntil(gone, 500, 3)) return { ok: true, msg: '退选成功' };
   return { ok: false, msg: '退选未生效，请稍后重试' };
