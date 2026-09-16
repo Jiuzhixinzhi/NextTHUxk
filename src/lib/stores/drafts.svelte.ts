@@ -85,8 +85,9 @@ export function setPreview(kind: PreviewTarget): void {
 }
 
 export async function loadDrafts(): Promise<void> {
-  const saved = (await store.get<Draft[]>(K.drafts).catch(() => [])) || [];
-  draftStore.drafts = saved;
+  // 坏形态自愈：storage 可能被异物写成真值非数组（同理 staticData.plan 故障类）
+  const saved = await store.get<Draft[]>(K.drafts).catch(() => []);
+  draftStore.drafts = Array.isArray(saved) ? saved : [];
   if (draftStore.drafts.some(d => !d.id)) {
     draftStore.drafts.forEach(d => {
       if (!d.id) d.id = Date.now();

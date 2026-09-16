@@ -148,10 +148,19 @@ export async function launch(): Promise<void> {
     await store.set(K.sem, session.SEM);
     const SEM0 = session.SEM;
     await cleanupLegacyKeys();
-    session.manualEvents = (await store.get<ManualEvent[]>(K.manualEvents)) || [];
+    const savedManual = await store.get<ManualEvent[]>(K.manualEvents);
+    session.manualEvents = Array.isArray(savedManual) ? savedManual : [];
     let sd: { ver: number; plan: PlanCourse[] } | null = (await store.get<{ ver: number; plan: PlanCourse[] }>(K.staticData)) || null;
     if (sd && sd.ver !== DATA_VER) {
       console.log(TAG, 'data version mismatch, clearing cache');
+      sd = null;
+      await store.set(K.staticData, null).catch(() => {});
+    }
+    // 坏形态自愈：plan 非数组（storage 损坏/异物写入）时清缓存重拉。
+    // 历史故障：sd.ver 命中但 plan 为真值非数组 → applyLevelMap 的 (plan||[]).forEach 抛
+    // 「(n||[]).forEach is not a function」，launch 整体死掉、工作台打不开。
+    if (sd && !Array.isArray(sd.plan)) {
+      console.warn(TAG, 'staticData.plan 形态非法，清缓存重拉:', typeof sd.plan);
       sd = null;
       await store.set(K.staticData, null).catch(() => {});
     }
