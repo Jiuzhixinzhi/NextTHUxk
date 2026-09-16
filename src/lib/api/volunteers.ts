@@ -82,27 +82,41 @@ const inflight: Record<string, Promise<unknown>> = {};
 export interface VolOpts {
   force?: boolean;
   onDept?: (partial: Record<string, VolDatum>) => void;
-  /** 检查点窗口新鲜度判定：ts 处于当前窗口 → false（跳过重拉） */
-  fresh?: (ts: number) => boolean;
+  /** 检查点窗口新鲜度判定：ts 已过当前窗口 → true（需重拉）。
+   *  缺省恒 true（保守：宁可多拉一次，勿留陈旧） */
+  needsRefresh?: (ts: number) => boolean;
   onPersist?: () => void;
   /** 院系 → 最近抓取时间戳（由 store 持有并注入；本函数就地更新，api 层不持有会话状态） */
-  done?: Record<string, number>;
+  done: Record<string, number>;
+}
+
+/** 本批需拉取的院系码（纯函数、可测）：force · 未见 · 已过检查点窗口 三者取并
+ *  v1.5.0 语义（v2 data.js:473 同款正向判定）——注意是「过期则拉」，
+ *  取反会让检查点同步失效、同窗口反复重拉（v3 改写期曾整式取反） */
+export function deptsToFetch(
+  pool: Course[],
+  done: Record<string, number>,
+  needsRefresh: (ts: number) => boolean,
+  force = false,
+): string[] {
+  const out = new Set<string>();
+  for (const c of pool) {
+    const code = deptOfCourse(c);
+    if (code && (force || !done[code] || needsRefresh(done[code]!))) out.add(code);
+  }
+  return Array.from(out);
 }
 
 /** 院系定向爬取；返回本批全部行；in-flight 共享；失败容忍不记 done。 */
-export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts = {}): Promise<Record<string, VolDatum>> {
+export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts): Promise<Record<string, VolDatum>> {
   if (!ctx.isZhjwxk) return {};
   const force = !!opts.force;
   const onDept = opts.onDept;
-  const done = opts.done || {};
-  const fresh = (ts: number) => (opts.fresh ? opts.fresh(ts) : true);
+  const done = opts.done;
+  const needsRefresh = (ts: number) => (opts.needsRefresh ? opts.needsRefresh(ts) : true);
   const pool = (courses || []).filter(c => c && c.code && !c.isCandidate);
   const map: Record<string, VolDatum> = {};
-  const deptCodes = new Set<string>();
-  pool.forEach(c => {
-    const code = deptOfCourse(c);
-    if (code && (force || !done[code] || fresh(done[code]))) deptCodes.add(code);
-  });
+  const deptCodes = new Set<string>(deptsToFetch(pool, done, needsRefresh, force));
   const hasSports = pool.some(c => isSportsCourse(c));
   const parseVol = (parseFn: (h: string) => Record<string, VolDatum>) => (html: string) => {
     const b = parseFn(html);
@@ -168,7 +182,7 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
       }
     }
   }
-  if (hasSports && (force || !done.ty || fresh(done.ty))) {
+  if (hasSports && (force || !done.ty || needsRefresh(done.ty))) {
     try {
       const items: VolDatum[] = await (async () => {
         let p = inflight['ty'] as Promise<VolDatum[]> | undefined;

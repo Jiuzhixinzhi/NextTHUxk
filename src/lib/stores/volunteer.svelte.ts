@@ -157,7 +157,7 @@ export async function fetchVolForPool(ctx: VolApplyCtx & { BASE: string; SEM: st
     courses,
     {
       force,
-      fresh: ts => !volNeedsRefresh(ts),
+      needsRefresh: volNeedsRefresh,
       done: depts,
       onPersist: () => volCachePersist(ctx.SEM),
       onDept: m => {
@@ -171,8 +171,8 @@ export async function fetchVolForPool(ctx: VolApplyCtx & { BASE: string; SEM: st
       },
     },
   );
-  // 无条件回放（幂等）：launch 重建池行后若所有院系均在检查点窗口内 fresh，partial
-  // 为空但池行仍缺 vol 字段（概率标签消失）——必须回放缓存 vol.map
+  // 无条件回放（幂等）：launch 重建池行后若所有院系都还在检查点窗口内（partial 为空），
+  // 池行仍会缺 vol 字段（概率标签消失）——必须回放缓存 vol.map
   vol.map = Object.assign({}, vol.map, partial);
   applyVolunteer(ctx.allCourses.concat(ctx.searchRows || []), vol.map);
   volCachePersist(ctx.SEM);
