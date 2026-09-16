@@ -2,6 +2,7 @@
   import { session } from '../../../lib/stores/session.svelte.ts';
   import { creditSimItems, creditDist } from '../../../lib/domain/probability';
   import { flagName } from '../../../lib/domain/flags';
+  import { keyOf } from '../../../lib/core/utils';
   import type { CreditSimItem, DraftCourse } from '../../../lib/domain/types';
 
   let { courses, certainKeys }: { courses: DraftCourse[]; certainKeys?: string[] } = $props();
@@ -16,7 +17,7 @@
     const items = creditSimItems(cs, {
       isQueuePhase: session.isQueuePhase,
       queueDataMap: session.queueDataMap as never,
-      courseLookup: (code, seq) => session.allCourses.find((x) => x.code === code && String(x.seq || '0') === String(seq || '0')),
+      courseLookup: (code, seq) => session.allCourses.find((x) => keyOf(x.code, x.seq) === keyOf(code, seq)),
       certainKeys: keys && keys.length ? new Set(keys) : undefined,
     });
     sim.items = items;

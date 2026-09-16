@@ -496,32 +496,27 @@ export function isCourseActionBusy(code: string, seq: string): boolean {
   return courseActionBusy.keys.includes(keyOf(code, seq));
 }
 
-async function withCourseAction<T>(code: string, seq: string, fn: () => Promise<T>): Promise<T | null> {
+/** 退选/退队流程（确认文案 + 互斥 + 结果 toast）：课程卡 / 候选队列 / 课表预览共用
+ *  是否候补按当时名单判定（单一口径），调用方只需给课班与展示名。
+ *  互斥键在确认弹窗之前登记（覆盖「确认 → 提交」全程）：连点不会叠出第二个弹窗，
+ *  也不会让首问的 promise 悬空（后问会覆盖 modal.cur） */
+export async function dropCourseFlow(code: string, seq: string, name?: string): Promise<void> {
   const k = keyOf(code, seq);
-  if (courseActionBusy.keys.includes(k)) return null;
+  if (courseActionBusy.keys.includes(k)) return;
   courseActionBusy.keys = [...courseActionBusy.keys, k];
   try {
-    return await fn();
+    const isQueue = session.candidateCourses.some(c => keyOf(c.code, c.seq) === k);
+    const label = name || code;
+    const ok = await confirmDialog(
+      isQueue ? `退出候补队列「${label}」？` : `退选「${label}」？`,
+      isQueue ? '候补位次将丢失，重新排队需等待。' : '教务确认后生效。',
+    );
+    if (!ok) return;
+    const res = await doDropCourse(code, seq);
+    showToast(res.ok, res.msg);
   } finally {
     courseActionBusy.keys = courseActionBusy.keys.filter(x => x !== k);
   }
-}
-
-/** 退选/退队流程（确认文案 + 互斥 + 结果 toast）：课程卡 / 候选队列 / 课表预览共用
- *  是否候补按当时名单判定（单一口径），调用方只需给课班与展示名 */
-export async function dropCourseFlow(code: string, seq: string, name?: string): Promise<void> {
-  if (isCourseActionBusy(code, seq)) return;
-  const isQueue = session.candidateCourses.some(c => keyOf(c.code, c.seq) === keyOf(code, seq));
-  const label = name || code;
-  const ok = await confirmDialog(
-    isQueue ? `退出候补队列「${label}」？` : `退选「${label}」？`,
-    isQueue ? '候补位次将丢失，重新排队需等待。' : '教务确认后生效。',
-  );
-  if (!ok) return;
-  await withCourseAction(code, seq, async () => {
-    const res = await doDropCourse(code, seq);
-    showToast(res.ok, res.msg);
-  });
 }
 
 // ─── 课程行合并（搜索/回填行 → 会话池）────────────────────────

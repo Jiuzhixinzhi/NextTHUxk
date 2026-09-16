@@ -8,7 +8,7 @@
 
   let { course, onFlag, onZy, onRemove }: { course: DraftCourse; onFlag: (f: Flag) => void; onZy: (z: number) => void; onRemove: () => void } = $props();
 
-  const ac = $derived.by(() => session.allCourses.find((x: { code: string; seq: string }) => x.code === course.code && String(x.seq || '0') === String(course.seq || '0')));
+  const ac = $derived.by(() => session.allCourses.find((x: { code: string; seq: string }) => keyOf(x.code, x.seq) === keyOf(course.code, course.seq)));
   const meta = $derived.by(() => (ac ? currentProbMeta(ac, course.flag, course.zy) : null));
   const qd = $derived.by(() => session.queueDataMap[keyOf(course.code, course.seq)]);
   /** 余位档位（与课表块/课程卡同源）：无 qd 数据在课余量阶段按已满显示（旧版同款） */
