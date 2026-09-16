@@ -124,18 +124,17 @@
 - 纯函数不纯：`domain/draft.ts:122 newDraft` 用 `Date.now()` 造 id（同 ms 撞 id）；`domain/scores.ts:71 slimScores` 内嵌 `Date.now()`；`domain/time.ts:43 slotCache` 返回共享引用（可外部变异污染）。
 - `api/records.ts:484` `fetchQueueData` 裸 `fetch`（绕过 net/http 的超时/解编码/壳页自愈）并内嵌 `qFailStreak>=3` 熔断。
 - `paged.ts` 接口泄漏：调用方须知道 0/1 都映射未分页 URL、页 0-indexed、且需自备 `expectPages`。
-- **`domain/timetable-layout.ts:85,106,122` 块键 `code_seq_tag` 不含 day**：同一课班在两日上同一大节时，
-  `merged`（键 = `key+begin+end`）会把两块并成一块直接丢一行；跨日同键还会让全局 `laneOf` 互相覆盖 →
-  分道数错。钟点 span 的 `tag` 恒 0（`SLOT_NAMES.indexOf('HH:MM-HH:MM')` = -1）加剧同键。修法：键加
-  `s.dayN`，补「同大节两日课渲染两块」测试。
+- ~~**`domain/timetable-layout.ts:85,106,122` 块键 `code_seq_tag` 不含 day**~~ ✅ 已修（`a130dac`）：
+  键改 `code_seq_day_tag`（merge/`laneOf` 按日隔离），钟点 span 的 tag 由恒 0 改为 `when`；
+  另有 4 例测试（同大节跨两日 / 拆周段仍并 / 外校课复合日 / 同日两段钟点）。
 - **剩余裸课序比较（B1 尾项）**：`domain/flags.ts:64`（`canAdjustZy` 自我排除——同一课班两种拼写会占掉
   自己的志愿档，语义最重）、`stores/drafts.svelte.ts:313,:449`、`Timetable.svelte:72,:108`
   （`findIndex` 失配 → 移除按钮静默无效）。`CreditSimModal`/`DraftCourseRow` 已在 `5b200c3` 收编。
 - **`domain/pool.ts:11 hasParsedTime` 兼任 `backfillSelTimes`（session.svelte.ts:609）的「需回填」判定**：
   选课文字说明里含任意 `HH:MM-HH:MM`（如实验/练习时段）即判为「时间已解析」→ 该行不再走服务端回填，
   可能长期挂在这个说明钟点上。v1.5.0 起即如此（本批次只是收拢改名），要分离须新增「大节已解析」谓词。
-- `stores/volunteer.svelte.ts:123 volNeedsDeptRetry` 的 `isQueuePhase` 形参在唯一调用点恒 false
-  （session.svelte.ts:548 已在 `!session.isQueuePhase` 内）→ 该早退分支不可达。
+- `stores/volunteer.svelte.ts:123 volNeedsDeptRetry` ~~的 `isQueuePhase` 形参在唯一调用点恒 false
+  （session.svelte.ts:548 已在 `!session.isQueuePhase` 内）→ 该早退分支不可达~~ ✅ 已删参（`a130dac`）。
 - `storage/knote.ts knoteLoad` 的旧键迁移只改内存映射，要等下次 `knote` 写入才落盘（幂等，无正确性影响）。
 
 ---
@@ -152,7 +151,8 @@
 
 已完成批次：B1 `721bf4c` · B2 `8e7a96e` · B5 `18f2a6e` · B6 `b096496` · B7(部分) `12aa979` · B8 `8b91558` · B9 `02e35f8` · B10(部分) `0e9824e`
 评审跟进（PR #32 首轮 review）：Step 1 `5b200c3`（学分模拟/草稿行课班查找归一 + 互斥覆盖确认阶段）· Step 2 `d02c04f`（志愿院系拉取判定取反 → 恢复 v1.5.0「过期则拉」，附 `tests/volunteers.test.ts` 7 例守门）
-剩余未做：**B3**（session 拆解，最大）· **B4**（分页重试统一，风险最高）· B7 尾项（DraftPanel 导入确认）· B10 尾项（见上）· C 节小项（含本轮新增：timetable-layout 键加 day、B1 尾项裸课序比较）
+评审跟进（二轮 review）：`a130dac`（课表块键补 day 维度 + 钟点 span 用几何做 tag + `volNeedsDeptRetry` 删死参，附 4 例测试）
+剩余未做：**B3**（session 拆解，最大）· **B4**（分页重试统一，风险最高）· B7 尾项（DraftPanel 导入确认）· B10 尾项（见上）· C 节小项（含 B1 尾项裸课序比较等）
 
 ## E. 需记录的决策（建议补 ADR，仓库当前无 docs/adr/）
 
