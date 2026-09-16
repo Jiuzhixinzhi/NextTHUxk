@@ -2,17 +2,12 @@
 // NextTHUxk — 志愿统计状态（volMap + 检查点窗口缓存 + 院内自愈）
 // ═══════════════════════════════════════════════════════════════
 import type { Course, VolDatum } from '../domain/types';
-import { TAG } from '../core/constants';
+import { TAG, VOL_RETRY_BUDGET } from '../core/constants';
 import { fmtTime, keyOf } from '../core/utils';
 import { K, store } from '../storage/store';
-import {
-  applyVolunteer,
-  fetchVolCourse,
-  fetchVolunteer,
-  volSession,
-  type VolSession,
-} from '../api/volunteers';
-import { volNeedsRefresh, volWindowStart } from '../update/check';
+import { applyVolunteer, fetchVolCourse, fetchVolunteer } from '../api/volunteers';
+import { deptOfCourse } from '../api/dept';
+import { nextVolCheckpoint, volNeedsRefresh, volWindowStart } from '../update/check';
 import { recordVolWindow } from './probhist.svelte.ts';
 
 export const vol = $state({
@@ -21,9 +16,15 @@ export const vol = $state({
   syncing: false,
 });
 
+// ─── 志愿抓取会话状态（唯一写者＝本模块；api/volunteers 无状态化）─────
+/** 院系 → 最近抓取时间戳（含 'ty'）——检查点窗口新鲜度判定源 */
+const depts: Record<string, number> = {};
+/** 缺行自愈预算计数（院系码 / 'k:'+课号），每会话 VOL_RETRY_BUDGET 次 */
+const retried: Record<string, number> = {};
+
 let persistT: ReturnType<typeof setTimeout> | undefined;
 
-/** 志愿缓存水合：同学期 + 同检查点窗口 → volMap/volSession.depts 直接还原 */
+/** 志愿缓存水合：同学期 + 同检查点窗口 → volMap/depts 直接还原 */
 export function volCacheHydrate(sem: string): void {
   store.get<{ sem: string; windowStart: number; map: Record<string, VolDatum>; depts: Record<string, number> }>(K.volCache)
     .then(c => {
@@ -31,7 +32,7 @@ export function volCacheHydrate(sem: string): void {
       if (c.sem !== sem) return;
       if (c.windowStart !== volWindowStart().getTime()) return;
       vol.map = Object.assign({}, vol.map, c.map);
-      Object.assign(volSession.depts, c.depts);
+      Object.assign(depts, c.depts);
       console.log(TAG, 'vol cache hydrated:', Object.keys(c.map).length, 'rows,', Object.keys(c.depts).length, 'depts（窗口', fmtTime(c.windowStart), '）');
     })
     .catch(() => {});
@@ -49,7 +50,7 @@ export function volCachePersist(sem: string): void {
   function complete() {
     // vol.map 是 $state Proxy，直传 storage 序列化会失败——先深拷贝（失败时 store.set 内部已 console.warn）
     store
-      .set(K.volCache, { sem, windowStart: win, map: JSON.parse(JSON.stringify(vol.map)), depts: volSession.depts })
+      .set(K.volCache, { sem, windowStart: win, map: JSON.parse(JSON.stringify(vol.map)), depts })
       .catch(() => {});
   }
 }
@@ -61,7 +62,7 @@ export function mergeImportedVolCache(
   curSem: string,
   windowStart: number,
   map: Record<string, VolDatum>,
-  depts: Record<string, number>,
+  deptsIn: Record<string, number>,
   targets: Course[],
 ): number {
   if (!curSem || !map || !Object.keys(map).length || windowStart !== volWindowStart().getTime()) return -1;
@@ -74,10 +75,10 @@ export function mergeImportedVolCache(
     merged[k] = v;
   }
   vol.map = merged;
-  const dep = depts || {};
+  const dep = deptsIn || {};
   for (const k of Object.keys(dep)) {
     const t = Number(dep[k]) || 0;
-    if (t > 0 && (!volSession.depts[k] || volSession.depts[k]! < t)) volSession.depts[k] = t;
+    if (t > 0 && (!depts[k] || depts[k]! < t)) depts[k] = t;
   }
   if (targets && targets.length) applyVolunteer(targets, vol.map);
   volCachePersist(curSem);
@@ -91,7 +92,7 @@ export function startVolAutoSync(sem: string, onSync: () => Promise<void>): void
   if (syncStarted) return;
   syncStarted = true;
   const schedule = () => {
-    const next = nextCheckpoint();
+    const next = nextVolCheckpoint(Date.now());
     vol.nextSyncAt = next.getTime();
     syncT = setTimeout(async () => {
       try {
@@ -105,18 +106,33 @@ export function startVolAutoSync(sem: string, onSync: () => Promise<void>): void
   schedule();
   void sem;
 }
-function nextCheckpoint(): Date {
-  const cp = [8, 12, 16, 20];
-  const d = new Date();
-  for (const h of cp) {
-    const t = new Date(d);
-    t.setHours(h, 0, 0, 0);
-    if (t > d) return t;
-  }
-  const t = new Date(d);
-  t.setDate(t.getDate() + 1);
-  t.setHours(cp[0]!, 0, 0, 0);
-  return t;
+
+// ─── 会话状态查询（供 session/backup 使用；写者仍是本模块）────────
+
+/** 院系抓取时间戳快照（备份导出用；返回浅拷贝，外部不可改内部状态） */
+export function volDeptTimes(): Record<string, number> {
+  return { ...depts };
+}
+
+/** 本批需要抓志愿统计的新院系（池内未见或已过检查点窗口） */
+export function volNewDepts(rows: Course[]): string[] {
+  return Array.from(new Set(rows.map(deptOfCourse).filter(Boolean))).filter(dc => !depts[dc] || volNeedsRefresh(depts[dc]!));
+}
+
+/** 缺行自愈判定：池内仍有缺志愿统计的行，且该院系未耗尽重试预算（排队阶段不补拉） */
+export function volNeedsDeptRetry(rows: Course[], isQueuePhase: boolean): boolean {
+  if (isQueuePhase) return false;
+  return rows.some(r => {
+    if (!(r && r.code)) return false;
+    const dc = deptOfCourse(r);
+    return !!dc && !vol.map[keyOf(r.code, r.seq)] && (retried[dc] || 0) < VOL_RETRY_BUDGET;
+  });
+}
+
+/** 换学期重置：清空院系时间戳与缺行重试预算 */
+export function volSessionReset(): void {
+  Object.keys(depts).forEach(k => delete depts[k]);
+  Object.keys(retried).forEach(k => delete retried[k]);
 }
 
 export interface VolApplyCtx {
@@ -142,6 +158,7 @@ export async function fetchVolForPool(ctx: VolApplyCtx & { BASE: string; SEM: st
     {
       force,
       fresh: ts => !volNeedsRefresh(ts),
+      done: depts,
       onPersist: () => volCachePersist(ctx.SEM),
       onDept: m => {
         if (!m || !Object.keys(m).length) return;
@@ -185,17 +202,16 @@ export async function runVolFetch(ctx: VolApplyCtx & { BASE: string; SEM: string
     console.log(TAG, 'volunteer 按需补拉院系:', newDepts.join(',') || '(缺行自愈)');
     const volr = await fetchVolForPool(ctx, rows, false);
     let extra: Record<string, VolDatum> = {};
-    // 缺行自愈：volMap 仍缺的行对其院系定向强制重拉 + 逐课 p_kch（各 3 次预算）
-    const retried = volSession.retried;
+    // 缺行自愈：volMap 仍缺的行对其院系定向强制重拉 + 逐课 p_kch（各 VOL_RETRY_BUDGET 次预算）
     const nk = (r: Course) => keyOf(r.code, r.seq);
     const scope = rows.concat(ctx.allCourses.filter(p => !rows.includes(p)));
     const missing = scope.filter(r => {
       if (!(r && r.code)) return false;
-      const dc = volSessionDeptOf(r);
-      return !!dc && !vol.map[nk(r)] && (retried[dc] || 0) < 3;
+      const dc = deptOfCourse(r);
+      return !!dc && !vol.map[nk(r)] && (retried[dc] || 0) < VOL_RETRY_BUDGET;
     });
     if (missing.length) {
-      const mdeps = Array.from(new Set(missing.map(volSessionDeptOf)));
+      const mdeps = Array.from(new Set(missing.map(deptOfCourse)));
       mdeps.forEach(d => {
         retried[d] = (retried[d] || 0) + 1;
       });
@@ -212,7 +228,7 @@ export async function runVolFetch(ctx: VolApplyCtx & { BASE: string; SEM: string
         .slice(0, 4);
       for (const r of kchTargets) {
         if (vol.map[nk(r)]) continue;
-        if ((retried['k:' + r.code] || 0) >= 3) continue;
+        if ((retried['k:' + r.code] || 0) >= VOL_RETRY_BUDGET) continue;
         retried['k:' + r.code] = (retried['k:' + r.code] || 0) + 1;
         try {
           const m2 = await fetchVolCourse({ BASE: ctx.BASE, SEM: ctx.SEM, isZhjwxk: ctx.isZhjwxk, isZhjw: ctx.isZhjw, isWebvpn: ctx.isWebvpn }, r.code);
@@ -241,7 +257,3 @@ export async function runVolFetch(ctx: VolApplyCtx & { BASE: string; SEM: string
   }
 }
 
-import { deptOfCourse } from '../api/dept';
-function volSessionDeptOf(r: Course): string {
-  return deptOfCourse(r);
-}

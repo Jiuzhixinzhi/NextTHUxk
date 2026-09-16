@@ -76,14 +76,8 @@ export async function fetchVolCourse(ctx: Ctx, code: string): Promise<Record<str
   return out;
 }
 
-export interface VolSession {
-  depts: Record<string, number>;
-  retried: Record<string, number>;
-  /** BR 键=院系码（Record 返回）；Ty 键='ty'（VolDatum[]）——共享池仅做 in-flight 去重 */
-  inflight: Record<string, Promise<unknown>>;
-}
-
-export const volSession: VolSession = { depts: {}, retried: {}, inflight: {} };
+/** in-flight 共享池（模块私有；仅做并发去重，非会话状态） */
+const inflight: Record<string, Promise<unknown>> = {};
 
 export interface VolOpts {
   force?: boolean;
@@ -91,6 +85,8 @@ export interface VolOpts {
   /** 检查点窗口新鲜度判定：ts 处于当前窗口 → false（跳过重拉） */
   fresh?: (ts: number) => boolean;
   onPersist?: () => void;
+  /** 院系 → 最近抓取时间戳（由 store 持有并注入；本函数就地更新，api 层不持有会话状态） */
+  done?: Record<string, number>;
 }
 
 /** 院系定向爬取；返回本批全部行；in-flight 共享；失败容忍不记 done。 */
@@ -98,8 +94,7 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
   if (!ctx.isZhjwxk) return {};
   const force = !!opts.force;
   const onDept = opts.onDept;
-  const done = volSession.depts;
-  const inflight = volSession.inflight;
+  const done = opts.done || {};
   const fresh = (ts: number) => (opts.fresh ? opts.fresh(ts) : true);
   const pool = (courses || []).filter(c => c && c.code && !c.isCandidate);
   const map: Record<string, VolDatum> = {};

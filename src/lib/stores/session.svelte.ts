@@ -21,7 +21,7 @@ import {
   fetchQueueData,
   fetchSelectedCourses,
 } from '../api/records';
-import { applyVolunteer, volSession } from '../api/volunteers';
+import { applyVolunteer } from '../api/volunteers';
 import { dropCourse, submitCourse, changeVolunteer } from '../api/write';
 import { attachScores, ensureScores } from '../api/scores';
 import { typeCodeToFlag } from '../domain/flags';
@@ -32,13 +32,11 @@ import { checkPlanCoverage } from '../domain/plancov';
 import { showToast, showXkResult } from './toast.svelte.ts';
 import { clearCardExpansions } from './uicards.svelte.ts';
 import { confirmDialog, promptDialog, zyConfirm } from './modal.svelte.ts';
-import { vol, volCacheHydrate, volCachePersist, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
+import { vol, volCacheHydrate, volCachePersist, volNewDepts, volNeedsDeptRetry, volSessionReset, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
 import { probHistHydrate } from './probhist.svelte.ts';
 import { emitServerRowsMerged, emitLaunchDone, emitSelectedChanged, fgBusy, launchSettled, markLaunchStart } from './bus.svelte.ts';
 import { checkUpdate } from '../update/check';
 import { ensureIndex, tbAttach, setOnIndexChange } from '../reviews/reviews';
-import { deptOfCourse } from '../api/dept';
-import { volNeedsRefresh as volNeedsRefreshLocal } from '../update/check';
 
 export interface LevelInfo {
   typeCode: string;
@@ -546,24 +544,13 @@ export function mergeRows(rows: Course[]): number {
   }
   if (!session.isQueuePhase) {
     if (Object.keys(vol.map).length) applyVolunteer(rows, vol.map);
-    const newDepts = Array.from(new Set(rows.map(c => deptOfCourseFallback(c)).filter(Boolean))).filter(dc => !volSession.depts[dc] || volNeedsRefreshLocal(volSession.depts[dc]!));
-    const retried = volSession.retried;
-    const needRetry = rows.some(r => {
-      if (!(r && r.code)) return false;
-      const dc = deptOfCourseFallback(r);
-      const has = !!vol.map[keyOf(r.code, r.seq)];
-      return !!dc && (session.isQueuePhase ? false : !has) && (retried[dc] || 0) < 3;
-    });
-    if (newDepts.length || needRetry) {
+    const newDepts = volNewDepts(rows);
+    if (newDepts.length || volNeedsDeptRetry(rows, session.isQueuePhase)) {
       scheduleVolFetch(vctx(), rows, newDepts);
     }
   }
   emitServerRowsMerged(rows, filled);
   return added;
-}
-
-function deptOfCourseFallback(c: Course): string {
-  return deptOfCourse(c);
 }
 
 // ─── 手动占用 ─────────────────────────────────────────────────
@@ -738,7 +725,7 @@ export async function changeSemester(newSem: string): Promise<void> {
   session.queueDataMap = {};
   clearCardExpansions();
   vol.map = {};
-  Object.keys(volSession.depts).forEach(k => delete volSession.depts[k]);
+  volSessionReset();
   session.fetchWarn = '';
   await launch();
 }

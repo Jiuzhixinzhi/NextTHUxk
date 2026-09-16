@@ -12,8 +12,7 @@ import { draftStore, loadDrafts, importJson } from './drafts.svelte.ts';
 import { session } from './session.svelte.ts';
 import { search } from './search.svelte.ts';
 import { probHist } from './probhist.svelte.ts';
-import { mergeImportedVolCache, vol } from './volunteer.svelte.ts';
-import { volSession } from '../api/volunteers';
+import { mergeImportedVolCache, vol, volDeptTimes } from './volunteer.svelte.ts';
 import { volWindowStart } from '../update/check';
 
 export async function draftCounts(): Promise<{ drafts: number; manual: number; hist: number }> {
@@ -44,7 +43,7 @@ export async function backupExport(): Promise<void> {
           sem: session.SEM,
           windowStart: volWindowStart().getTime(),
           map: JSON.parse(JSON.stringify(vol.map)),
-          depts: JSON.parse(JSON.stringify(volSession.depts)),
+          depts: JSON.parse(JSON.stringify(volDeptTimes())),
         }
       : undefined,
   };
