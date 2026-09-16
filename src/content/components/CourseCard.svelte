@@ -13,7 +13,7 @@
   import { showToast, showXkResult } from '../../lib/stores/toast.svelte.ts';
   import { confirmDialog, openWindow } from '../../lib/stores/modal.svelte.ts';
   import { cardExpanded, toggleCard } from '../../lib/stores/uicards.svelte.ts';
-  import { buildPreviewSlotIndex, conflictsWithPreview } from '../../lib/domain/conflict';
+  import { buildPreviewSpans, conflictsWithPreview } from '../../lib/domain/conflict';
   import { keyOf, normSeq } from '../../lib/core/utils';
 
   let { course }: { course: Course } = $props();
@@ -45,8 +45,8 @@
   const meta = $derived.by(() => currentProbMeta(course, curFlag, curZy));
 
   const conflicts = $derived.by(() => {
-    const idx = buildPreviewSlotIndex(selectedPreviewRows() as Course[], session.manualEvents);
-    return conflictsWithPreview(course, idx);
+    const spans = buildPreviewSpans(selectedPreviewRows() as Course[], session.manualEvents);
+    return conflictsWithPreview(course, spans);
   });
 
   // ─── 课号拆段：首位·院系码(蓝)·尾段（尾段末位承载学分：放大加粗） ───

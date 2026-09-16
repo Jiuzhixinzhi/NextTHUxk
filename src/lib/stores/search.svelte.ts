@@ -10,7 +10,7 @@ import { serverSearch, serverSearchStorm, isCodeLike, type SearchOpts } from '..
 import type { Course, ServerSearchResult } from '../domain/types';
 import { isSportsCourse } from '../domain/flags';
 import { normTeacher, teacherHit } from '../domain/match';
-import { conflictsWithPreview, buildPreviewSlotIndex } from '../domain/conflict';
+import { conflictsWithPreview, buildPreviewSpans } from '../domain/conflict';
 import { mergeRows, session } from './session.svelte.ts';
 import { fgEnter, fgExit, onLaunchDone } from './bus.svelte.ts';
 
@@ -161,9 +161,9 @@ function computeDisplayed(): Course[] {
   }
   const cf2 = search.local.conflict;
   if (cf2) {
-    const idx = buildPreviewSlotIndex(previewPoolForConflict(), session.manualEvents);
+    const spans = buildPreviewSpans(previewPoolForConflict(), session.manualEvents);
     list = list.filter(c => {
-      const conflicts = conflictsWithPreview(c, idx);
+      const conflicts = conflictsWithPreview(c, spans);
       return cf2 === 'noconflict' ? conflicts.length === 0 : conflicts.length > 0;
     });
   }
