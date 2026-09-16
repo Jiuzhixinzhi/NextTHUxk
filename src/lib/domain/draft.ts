@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Draft, DraftCourse, Flag } from './types';
 import { allowedFlags, baseFlag, entryBaseFlag, typeCodeToFlag } from './flags';
-import { normSeq } from '../core/utils';
+import { keyOf } from '../core/utils';
 
 export function draftCourseFrom(c: Course, flag: Flag, zy: number, fallbackFlag: Flag = 'rx'): DraftCourse {
   return {
@@ -123,7 +123,7 @@ export function newDraft(name: string, courses: DraftCourse[]): Draft {
 }
 
 export function draftKeyOf(c: { code: string; seq: string | number }) {
-  return c.code + '_' + normSeq(c.seq);
+  return keyOf(c.code, c.seq);
 }
 
 /** 差量对齐（用户定稿）：复合键相同且志愿/属性一致才算重合，重合课不退不重选；
@@ -140,16 +140,16 @@ export function sameAsDraft(selected: Course, dc: DraftCourse): boolean {
 
 export function draftDiff(currentSelected: Course[], draftCourses: DraftCourse[]): DraftDiff {
   const curMap = new Map<string, Course>();
-  currentSelected.forEach(s => curMap.set(s.code + '_' + normSeq(s.seq), s));
+  currentSelected.forEach(s => curMap.set(keyOf(s.code, s.seq), s));
   const toDrop = currentSelected.filter(s => {
-    const c = draftCourses.find(x => x.code === s.code && normSeq(x.seq) === normSeq(s.seq));
+    const c = draftCourses.find(x => keyOf(x.code, x.seq) === keyOf(s.code, s.seq));
     return !(c && sameAsDraft(s, c));
   });
   const toAdd: DraftCourse[] = [];
   const addedKeys = new Set<string>();
   draftCourses.forEach(c => {
     if (c.queued) return; // 排队中课程不参与差量提交（退队走候选队列/卡片）
-    const k = c.code + '_' + normSeq(c.seq);
+    const k = keyOf(c.code, c.seq);
     const cur = curMap.get(k);
     if (cur && sameAsDraft(cur, c)) return;
     if (addedKeys.has(k)) return;

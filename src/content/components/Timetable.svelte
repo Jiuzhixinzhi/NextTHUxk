@@ -2,7 +2,7 @@
   import { draftStore, setPreview, removeActiveCourse, previewRowsNow } from '../../lib/stores/drafts.svelte.ts';
 
   const previewRows = $derived.by(() => previewRowsNow());
-  import { session, removeManualEvent, backfillSelTimes, resetBfBudget, doDropCourse, selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
+  import { session, removeManualEvent, backfillSelTimes, resetBfBudget, dropCourseFlow, selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
   import { search, jumpTo } from '../../lib/stores/search.svelte.ts';
   import { layoutPreview, axisHours, dayNames, type PreviewBlock } from '../../lib/domain/timetable-layout';
   import { calcProb, probBg } from '../../lib/domain/probability';
@@ -10,7 +10,7 @@
   import { typeCodeToFlag } from '../../lib/domain/flags';
   import { hm, ORIGIN_COLORS } from '../../lib/domain/time';
   import { previewBlockMeta } from '../../lib/domain/preview';
-  import { openWindow, confirmDialog } from '../../lib/stores/modal.svelte.ts';
+  import { openWindow } from '../../lib/stores/modal.svelte.ts';
   import { showToast } from '../../lib/stores/toast.svelte.ts';
   import { keyOf } from '../../lib/core/utils';
   import type { Course, ManualEvent } from '../../lib/domain/types';
@@ -66,9 +66,7 @@
     }
     if (draftStore.preview.kind === 'selected') {
       const c = session.allCourses.find((x) => keyOf(x.code, x.seq) === keyOf(b.code || '', b.seq || '0'));
-      if (!(await confirmDialog('确认退选「' + (c?.name || b.label) + '」？', ''))) return;
-      const res = await doDropCourse(b.code!, b.seq || '0');
-      showToast(res.ok, res.msg);
+      await dropCourseFlow(b.code!, b.seq || '0', c?.name || b.label);
       return;
     }
     const idx = previewRows.findIndex((x) => x.code === b.code && String(x.seq || '0') === String(b.seq || '0'));

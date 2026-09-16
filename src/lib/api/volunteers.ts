@@ -6,7 +6,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Ctx, VolDatum } from '../domain/types';
 import { TAG } from '../core/constants';
-import { normSeq } from '../core/utils';
+import { keyOf, normSeq } from '../core/utils';
 import { fetchPage, fetchPost } from '../net/http';
 import { pagedFetch } from '../net/paged';
 import { deptCodeOf, deptOfCourse } from './dept';
@@ -20,7 +20,7 @@ export function parseVolFromHtml(html: string): Record<string, VolDatum> {
   while ((m = regex.exec(html)) !== null) {
     // 墓碑行过滤：capacity==0 && applied==0 = 已满课不在志愿池；报名>0 的 0 容量保留
     if (!(parseInt(m[4]!) || 0) && !(parseInt(m[5]!) || 0)) continue;
-    const key = m[1]! + '_' + normSeq(m[2]!);
+    const key = keyOf(m[1]!, m[2]!);
     map[key] = {
       code: m[1]!,
       seq: m[2]!,
@@ -41,7 +41,7 @@ export function parseVolSportsFromHtml(html: string): Record<string, VolDatum> {
   let m: RegExpExecArray | null;
   while ((m = regex.exec(html)) !== null) {
     if (!(parseInt(m[3]!) || 0) && !(parseInt(m[4]!) || 0)) continue;
-    const key = m[1]! + '_' + normSeq(m[2]!);
+    const key = keyOf(m[1]!, m[2]!);
     map[key] = { code: m[1]!, seq: m[2]!, capacity: parseInt(m[3]!) || 0, applied: parseInt(m[4]!) || 0, volSports: m[5] };
   }
   return map;
@@ -76,38 +76,47 @@ export async function fetchVolCourse(ctx: Ctx, code: string): Promise<Record<str
   return out;
 }
 
-export interface VolSession {
-  depts: Record<string, number>;
-  retried: Record<string, number>;
-  /** BR 键=院系码（Record 返回）；Ty 键='ty'（VolDatum[]）——共享池仅做 in-flight 去重 */
-  inflight: Record<string, Promise<unknown>>;
-}
-
-export const volSession: VolSession = { depts: {}, retried: {}, inflight: {} };
+/** in-flight 共享池（模块私有；仅做并发去重，非会话状态） */
+const inflight: Record<string, Promise<unknown>> = {};
 
 export interface VolOpts {
   force?: boolean;
   onDept?: (partial: Record<string, VolDatum>) => void;
-  /** 检查点窗口新鲜度判定：ts 处于当前窗口 → false（跳过重拉） */
-  fresh?: (ts: number) => boolean;
+  /** 检查点窗口新鲜度判定：ts 已过当前窗口 → true（需重拉）。
+   *  缺省恒 true（保守：宁可多拉一次，勿留陈旧） */
+  needsRefresh?: (ts: number) => boolean;
   onPersist?: () => void;
+  /** 院系 → 最近抓取时间戳（由 store 持有并注入；本函数就地更新，api 层不持有会话状态） */
+  done: Record<string, number>;
+}
+
+/** 本批需拉取的院系码（纯函数、可测）：force · 未见 · 已过检查点窗口 三者取并
+ *  v1.5.0 语义（v2 data.js:473 同款正向判定）——注意是「过期则拉」，
+ *  取反会让检查点同步失效、同窗口反复重拉（v3 改写期曾整式取反） */
+export function deptsToFetch(
+  pool: Course[],
+  done: Record<string, number>,
+  needsRefresh: (ts: number) => boolean,
+  force = false,
+): string[] {
+  const out = new Set<string>();
+  for (const c of pool) {
+    const code = deptOfCourse(c);
+    if (code && (force || !done[code] || needsRefresh(done[code]!))) out.add(code);
+  }
+  return Array.from(out);
 }
 
 /** 院系定向爬取；返回本批全部行；in-flight 共享；失败容忍不记 done。 */
-export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts = {}): Promise<Record<string, VolDatum>> {
+export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts): Promise<Record<string, VolDatum>> {
   if (!ctx.isZhjwxk) return {};
   const force = !!opts.force;
   const onDept = opts.onDept;
-  const done = volSession.depts;
-  const inflight = volSession.inflight;
-  const fresh = (ts: number) => (opts.fresh ? opts.fresh(ts) : true);
+  const done = opts.done;
+  const needsRefresh = (ts: number) => (opts.needsRefresh ? opts.needsRefresh(ts) : true);
   const pool = (courses || []).filter(c => c && c.code && !c.isCandidate);
   const map: Record<string, VolDatum> = {};
-  const deptCodes = new Set<string>();
-  pool.forEach(c => {
-    const code = deptOfCourse(c);
-    if (code && (force || !done[code] || fresh(done[code]))) deptCodes.add(code);
-  });
+  const deptCodes = new Set<string>(deptsToFetch(pool, done, needsRefresh, force));
   const hasSports = pool.some(c => isSportsCourse(c));
   const parseVol = (parseFn: (h: string) => Record<string, VolDatum>) => (html: string) => {
     const b = parseFn(html);
@@ -129,7 +138,7 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
           maxPages: 25,
           concurrency: 3,
           throttle: 50,
-          dedupe: v => v.code + '_' + normSeq(v.seq),
+          dedupe: v => keyOf(v.code, v.seq),
           expectPages: pg.pages,
           label: 'vol-BR-' + code,
         });
@@ -139,7 +148,7 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
           return m;
         }
         items.forEach(v => {
-          m[v.code + '_' + normSeq(v.seq)] = v;
+          m[keyOf(v.code, v.seq)] = v;
         });
         done[code] = Date.now();
       } catch (e) {
@@ -173,7 +182,7 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
       }
     }
   }
-  if (hasSports && (force || !done.ty || fresh(done.ty))) {
+  if (hasSports && (force || !done.ty || needsRefresh(done.ty))) {
     try {
       const items: VolDatum[] = await (async () => {
         let p = inflight['ty'] as Promise<VolDatum[]> | undefined;
@@ -189,7 +198,7 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
               maxPages: 20,
               concurrency: 3,
               throttle: 50,
-              dedupe: v => v.code + '_' + normSeq(v.seq),
+              dedupe: v => keyOf(v.code, v.seq),
               expectPages: pg.pages,
               label: 'vol-Ty',
             });
@@ -205,7 +214,7 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
         return p;
       })();
       items.forEach(v => {
-        const k = v.code + '_' + normSeq(v.seq);
+        const k = keyOf(v.code, v.seq);
         map[k] = Object.assign({ capacity: 0, applied: 0, volRequired: '', volElective: '', volOptional: '' }, map[k], v);
       });
       done.ty = Date.now();
@@ -229,14 +238,12 @@ export async function fetchVolunteer(ctx: Ctx, courses: Course[], opts: VolOpts 
 export function applyVolunteer(courses: Course[], volData: Record<string, VolDatum> | undefined): boolean {
   const byCodeAll: Record<string, VolDatum[]> = {};
   for (const v of Object.values(volData || {})) (byCodeAll[v.code] = byCodeAll[v.code] || []).push(v);
-  const norm = (s: string | number) => String(parseInt(String(s), 10) || 0);
   let changed = 0;
   (courses || []).forEach(c => {
     const rows = byCodeAll[c.code] || [];
     const v =
-      volData?.[c.code + '_' + (c.seq || '0')] ||
-      volData?.[c.code + '_' + norm(c.seq)] ||
-      rows.find(r => norm(r.seq) === norm(c.seq)) ||
+      volData?.[keyOf(c.code, c.seq)] ||
+      rows.find(r => normSeq(r.seq) === normSeq(c.seq)) ||
       (rows.length === 1 ? rows[0] : null);
     if (v) {
       const eq =

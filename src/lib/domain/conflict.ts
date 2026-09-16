@@ -1,9 +1,11 @@
 // ═══════════════════════════════════════════════════════════════
 // NextTHUxk — 冲突检测（区间重叠制，OneTHU 同款语义）
-// 课程大节 → 钟点区间，自定义占用直接用钟点区间；跨边界部分重叠也能测出。
+// 课程大节 → 钟点区间，外校课走文字说明钟点，自定义占用直接用钟点区间；
+// 跨边界部分重叠、周次不相交（1-8 周 vs 9-16 周、单周 vs 双周）均能正确判定。
 // ═══════════════════════════════════════════════════════════════
 import type { Course, ManualEvent } from './types';
-import { DAY_NAMES, spansOf } from './time';
+import { DAY_NAMES, spansOf, weeksOverlap, type TimeSpan } from './time';
+import { keyOf } from '../core/utils';
 
 export interface Conflict {
   day: string;
@@ -12,60 +14,57 @@ export interface Conflict {
   b: string;
 }
 
+/** 唯一重叠判据（检测与预览共用）：同星期 + 钟点区间相交 + 周次占用相交 */
+export function spansIntersect(a: TimeSpan, b: TimeSpan): boolean {
+  return a.dayN === b.dayN && a.begin < b.end && b.begin < a.end && weeksOverlap(a.occ, b.occ);
+}
+
 export function detectConflicts(courses: (Course | ManualEvent)[], manualEvents: ManualEvent[]): Conflict[] {
-  const spans: { dayN: number; begin: number; end: number; name: string; when: string }[] = [];
+  const spans: { span: TimeSpan; name: string }[] = [];
   const conflicts: Conflict[] = [];
-  const addSpan = (dayN: number, begin: number, end: number, name: string, when: string) => {
-    for (const s of spans) {
-      if (s.dayN === dayN && begin < s.end && s.begin < end) {
-        conflicts.push({ day: DAY_NAMES[dayN - 1]!, slot: when, a: s.name, b: name });
+  for (const c of courses.concat(manualEvents)) {
+    for (const span of spansOf(c)) {
+      for (const s of spans) {
+        if (spansIntersect(s.span, span)) conflicts.push({ day: DAY_NAMES[span.dayN - 1]!, slot: span.when, a: s.name, b: c.name });
       }
+      spans.push({ span, name: c.name });
     }
-    spans.push({ dayN, begin, end, name, when });
-  };
-  courses.concat(manualEvents).forEach(c => {
-    for (const s of spansOf(c)) addSpan(s.dayN, s.begin, s.end, c.name, s.when);
-  });
+  }
   return conflicts;
 }
 
-// ─── 预览槽位索引（相同 day|slot 键 → 占用课程列表）─────────────
+// ─── 预览冲突（草稿/已选/候补行 + 自定义占用的时段表）───────────
 
-export interface PreviewHit {
+/** 预览时段：带行身份（keyOf 归一，自排除不受 '01'/'1' 拼写影响）的占用区间 */
+export interface PreviewSpan extends TimeSpan {
+  key: string;
   name: string;
-  code: string;
-  seq: string;
 }
 
-export function buildPreviewSlotIndex(
-  previewCourses: (Course | ManualEvent)[],
-  manualEvents: ManualEvent[],
-): Map<string, PreviewHit[]> {
-  const idx = new Map<string, PreviewHit[]>();
-  previewCourses.concat(manualEvents).forEach(pc => {
-    for (const { dayN, when } of spansOf(pc)) {
-      const k = dayN + '|' + when;
-      if (!idx.has(k)) idx.set(k, []);
-      idx.get(k)!.push({ name: pc.name || pc.code, code: pc.code, seq: String(pc.seq || '0') });
-    }
-  });
-  return idx;
+/** 行 → 时段表（已选/候补/草稿 + 自定义占用） */
+export function buildPreviewSpans(previewRows: (Course | ManualEvent)[], manualEvents: ManualEvent[]): PreviewSpan[] {
+  const out: PreviewSpan[] = [];
+  for (const pc of previewRows.concat(manualEvents)) {
+    const key = keyOf(pc.code, pc.seq);
+    const name = pc.name || pc.code;
+    for (const span of spansOf(pc)) out.push({ ...span, key, name });
+  }
+  return out;
 }
 
-export function conflictsWithPreview(course: Course, idx: Map<string, PreviewHit[]>): { name: string; day: string; slot: string }[] {
-  if (!idx.size) return [];
-  const selfSeq = String(course.seq || '0');
+export function conflictsWithPreview(course: Course, spans: PreviewSpan[]): { name: string; day: string; slot: string }[] {
+  if (!spans.length) return [];
+  const selfKey = keyOf(course.code, course.seq);
   const conflicts: { name: string; day: string; slot: string }[] = [];
   const seen = new Set<string>();
-  for (const { dayN, when } of spansOf(course)) {
-    const hits = idx.get(dayN + '|' + when);
-    if (!hits) continue;
-    for (const h of hits) {
-      if (h.code === course.code && h.seq === selfSeq) continue;
-      const k = h.name + '|' + dayN + '|' + when;
+  for (const mine of spansOf(course)) {
+    for (const h of spans) {
+      if (h.key === selfKey) continue;
+      if (!spansIntersect(mine, h)) continue;
+      const k = h.name + '|' + h.dayN + '|' + h.when;
       if (seen.has(k)) continue;
       seen.add(k);
-      conflicts.push({ name: h.name, day: DAY_NAMES[dayN - 1]!, slot: when });
+      conflicts.push({ name: h.name, day: DAY_NAMES[h.dayN - 1]!, slot: h.when });
     }
   }
   return conflicts;

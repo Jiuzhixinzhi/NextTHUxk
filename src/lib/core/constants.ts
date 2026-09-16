@@ -42,5 +42,8 @@ export const ZY_LIMITS: Record<Flag, [number, number][]> = {
 /** 教务志愿统计检查点（每日 8/12/16/20） */
 export const VOL_CHECKPOINTS = [8, 12, 16, 20];
 
+/** 志愿缺行自愈预算：同一院系/同一课号每会话最多重拉次数 */
+export const VOL_RETRY_BUDGET = 3;
+
 /** 服务端每页条数（OneTHU 同款） */
 export const PAGE_SIZE = 20;

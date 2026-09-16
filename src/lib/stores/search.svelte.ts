@@ -10,8 +10,8 @@ import { serverSearch, serverSearchStorm, isCodeLike, type SearchOpts } from '..
 import type { Course, ServerSearchResult } from '../domain/types';
 import { isSportsCourse } from '../domain/flags';
 import { normTeacher, teacherHit } from '../domain/match';
-import { conflictsWithPreview, buildPreviewSlotIndex } from '../domain/conflict';
-import { mergeRows, session } from './session.svelte.ts';
+import { conflictsWithPreview } from '../domain/conflict';
+import { mergeRows, previewConflictSpans, session } from './session.svelte.ts';
 import { fgEnter, fgExit, onLaunchDone } from './bus.svelte.ts';
 
 /** 前台查询占用包裹：进出计数供后台补拉让路（服务端 kkxxSearch 会话游标敏感） */
@@ -161,9 +161,9 @@ function computeDisplayed(): Course[] {
   }
   const cf2 = search.local.conflict;
   if (cf2) {
-    const idx = buildPreviewSlotIndex(previewPoolForConflict(), session.manualEvents);
+    const spans = previewConflictSpans();
     list = list.filter(c => {
-      const conflicts = conflictsWithPreview(c, idx);
+      const conflicts = conflictsWithPreview(c, spans);
       return cf2 === 'noconflict' ? conflicts.length === 0 : conflicts.length > 0;
     });
   }
@@ -210,13 +210,6 @@ function computeDisplayed(): Course[] {
     });
   }
   return list;
-}
-
-function previewPoolForConflict(): Course[] {
-  const sel = session.allCourses.filter(c => c.selected);
-  const seen = new Set(sel.map(c => keyOf(c.code, c.seq)));
-  const candidates = session.candidateCourses.filter(cc => !seen.has(keyOf(cc.code, cc.seq)));
-  return sel.concat(candidates);
 }
 
 export function isSearchMode(): boolean {
@@ -341,10 +334,8 @@ export function loadAll(): void {
       if (serverSig() !== sigAtStart) {
         console.warn(TAG, 'load all 过期丢弃（查询已变化）');
       } else {
-        applyMarks(res.rows || []);
-        search.rows = res.rows || [];
-        if ((res.rows || []).length) mergeRows(res.rows);
-        search.incomplete = !!(res.totalRows && (res.rows || []).length < res.totalRows);
+        const rows = applyServerRows(res);
+        search.incomplete = !!(res.totalRows && rows.length < res.totalRows);
         if (res.totalPages) search.totalPages = res.totalPages;
         if (res.totalRows) search.totalRows = res.totalRows;
         search.error = pageError(res);
@@ -355,6 +346,15 @@ export function loadAll(): void {
       search.loadingAll = false;
     }
   })();
+}
+
+/** 落定服务端结果（三处调用点共用的三连）：标记行内状态 → 替换展示行 → 并池 */
+function applyServerRows(res: ServerSearchResult): Course[] {
+  const rows = res.rows || [];
+  applyMarks(rows);
+  search.rows = rows;
+  if (rows.length) mergeRows(rows);
+  return rows;
 }
 
 function applyMarks(rows: Course[]): void {
@@ -447,13 +447,11 @@ export async function runServerQuery(): Promise<void> {
           break;
         } else {
           if (!queryMode) search.browseRestore = null;
-          applyMarks(res.rows || []);
-          search.rows = res.rows || [];
-          search.browseHasMore = res.pageKind === 'ok' && (res.rows || []).length > 0;
-          if ((res.rows || []).length) mergeRows(res.rows);
+          const rows = applyServerRows(res);
+          search.browseHasMore = res.pageKind === 'ok' && rows.length > 0;
           search.totalPages = res.totalPages || 0;
           search.totalRows = res.totalRows || 0;
-          search.incomplete = queryMode && !!(res.totalRows && (res.rows || []).length < res.totalRows);
+          search.incomplete = queryMode && !!(res.totalRows && rows.length < res.totalRows);
           search.error = pageError(res);
         }
       } catch (e) {
@@ -545,9 +543,7 @@ export async function highlightJumpTarget(): Promise<void> {
       const opts = Object.assign({}, search.optsSnapshot || buildSearchOpts(), { forceAll: true });
       const res = await withForeground(() => serverSearchStorm(toCtx(), opts));
       if (serverSig() !== sigAt) return;
-      applyMarks(res.rows || []);
-      search.rows = res.rows || [];
-      if ((res.rows || []).length) mergeRows(res.rows);
+      applyServerRows(res);
       search.incomplete = false;
       rows = search.rows || [];
       hit = findTiered();

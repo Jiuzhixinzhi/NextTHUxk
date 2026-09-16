@@ -1,6 +1,6 @@
 ﻿<script lang="ts">
   import { search as st, gotoPage, browseGoto, loadAll, runServerQuery, getDisplayed, getVisibleRows, getPager, isSearchMode, isLocalFiltersActive } from '../../lib/stores/search.svelte.ts';
-  import { session } from '../../lib/stores/session.svelte.ts';
+  import { session, previewConflictSpans } from '../../lib/stores/session.svelte.ts';
   import { uicards, setCardsExpand } from '../../lib/stores/uicards.svelte.ts';
   import { keyOf } from '../../lib/core/utils';
   import CourseCard from './CourseCard.svelte';
@@ -11,6 +11,8 @@
   const displayed = $derived.by(() => getDisplayed());
   const visibleRows = $derived.by(() => getVisibleRows());
   const pagerInfo = $derived.by(() => getPager());
+  /** 冲突时段表全列表只算一次（此前每卡各建一份） */
+  const conflictSpans = $derived.by(() => previewConflictSpans());
 
   let listEl: HTMLDivElement;
   let consumedSeq = 0;
@@ -93,9 +95,9 @@
       <button type="button" class="nx-list-tool" onclick={() => setAllExpand(false)}>全部收起</button>
     </div>
     <div bind:this={listEl}>
-      {#each visibleRows as c (c.code + '_' + (c.seq || '0'))}
+      {#each visibleRows as c (keyOf(c.code, c.seq))}
         <div class="nx-card-holder" data-code={c.code} data-seq={c.seq || '0'}>
-          <CourseCard course={c} />
+          <CourseCard course={c} {conflictSpans} />
         </div>
       {/each}
     </div>

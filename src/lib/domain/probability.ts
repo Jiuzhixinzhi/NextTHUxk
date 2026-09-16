@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, CreditSimItem, Flag, ProbResult, QueueDatum } from './types';
 import { allowedFlags, baseFlag, flagName, isSportsCourse } from './flags';
-import { normSeq } from '../core/utils';
+import { keyOf } from '../core/utils';
 
 export const fmtVol = (v: string | undefined | null): string => {
   if (!v) return '';
@@ -48,6 +48,27 @@ export function capacityStatus(c: Course, q: QueueDatum | undefined): CapacitySt
   const queue = q ? q.qQueue : 0;
   const used = rem != null && Number(rem) >= 0 ? Math.min(Math.max(0, cap - Number(rem)), cap) : Math.max(0, Number(c.volApplied) || 0);
   return { cap, used, rem: rem != null ? Math.max(0, Number(rem)) : null, queue, pct: Math.min((used / cap) * 100, 100) };
+}
+
+/** 课余量余位档位：有余 → 可占；无余但有排队 → 候补排队；皆无 → 已满 */
+export type QueueCapLevel = 'ok' | 'queued' | 'full';
+
+/** 档位配色（徽章/数字/底色同源；三处消费：课表块元数据 · 草稿行 · 课程卡） */
+export const QUEUE_CAP_STYLE: Record<QueueCapLevel, { color: string; bg: string }> = {
+  ok: { color: '#07c160', bg: 'rgba(7,193,96,.14)' },
+  queued: { color: '#ff9f1a', bg: 'rgba(255,159,26,.14)' },
+  full: { color: '#ee4d4d', bg: 'rgba(238,77,77,.14)' },
+};
+
+export function queueCapLevel(rem: number | null | undefined, queue: number): QueueCapLevel {
+  if (rem != null && Number(rem) > 0) return 'ok';
+  if (Number(queue) > 0) return 'queued';
+  return 'full';
+}
+
+/** 课余量三数提示串（已选X · 余Y · 排队Z · 容量C）：卡片与折叠行共用同一口径 */
+export function queueCapTitle(cs: CapacityStatus): string {
+  return `已选${cs.used} · 余${cs.rem ?? '—'} · 排队${cs.queue} · 容量${cs.cap}`;
 }
 
 /** 上批已选（锁定）：搜索页 容量-余量；数据不齐/越界（如队列期余位被覆盖）返回 null */
@@ -248,7 +269,7 @@ export function creditSimItems(
     if (!(Number(c.credits) > 0)) return;
     let prob: number | null = null;
     const ac = ctx.courseLookup(c.code, c.seq);
-    const qkey = c.code + '_' + normSeq(c.seq);
+    const qkey = keyOf(c.code, c.seq);
     if (ctx.isQueuePhase) {
       if (ctx.certainKeys?.has(qkey)) {
         prob = 1; // 正选锁定：已确认选入与余量无关

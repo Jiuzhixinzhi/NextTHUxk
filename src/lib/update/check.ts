@@ -1,7 +1,7 @@
 // ═══════════════════════════════════════════════════════════════
 // NextTHUxk — 版本更新检查（GitHub Releases）
 // ═══════════════════════════════════════════════════════════════
-import { curVer, DANGEROUS_VERS, TAG } from '../core/constants';
+import { curVer, DANGEROUS_VERS, TAG, VOL_CHECKPOINTS } from '../core/constants';
 import { K, store } from '../storage/store';
 
 /** 更新检查目标：fork 自己的 releases（上游 smartThise 是另一代码世系，
@@ -60,7 +60,7 @@ export function volNeedsRefresh(ts: number): boolean {
 }
 
 export function nextVolCheckpoint(now: number): Date {
-  const cp = [8, 12, 16, 20];
+  const cp = VOL_CHECKPOINTS;
   const d = new Date(now);
   for (const h of cp) {
     const t = new Date(d);
@@ -75,7 +75,7 @@ export function nextVolCheckpoint(now: number): Date {
 
 /** 当前检查点窗口起点：最近一个 ≤ now 的检查点（今天都未到则取昨日 20:00） */
 export function volWindowStart(now: number = Date.now()): Date {
-  const cp = [8, 12, 16, 20];
+  const cp = VOL_CHECKPOINTS;
   const d = new Date(now);
   for (let i = cp.length - 1; i >= 0; i--) {
     const t = new Date(d);

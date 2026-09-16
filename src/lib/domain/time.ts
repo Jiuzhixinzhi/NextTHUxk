@@ -84,6 +84,51 @@ function mergeWeek(a: string, b: string): string {
   return a === b ? a : a + ',' + b;
 }
 
+// ─── 周次占用（冲突判据用：1-8 周与 9-16 周本是互斥时段）───────────
+/** 周次占用：具体周号集合 | 'all'（全周/无周信息）| 'unknown'（无法数值化 → 保守判重叠） */
+export type WeekOcc = Set<number> | 'all' | 'unknown';
+
+/** 单周 = 奇数周集，双周 = 偶数周集（1-25 足够覆盖任何学期周数，交集运算不受上界影响） */
+function parityWeeks(odd: boolean): Set<number> {
+  const out = new Set<number>();
+  for (let i = 1; i <= 25; i++) if (i % 2 === (odd ? 1 : 0)) out.add(i);
+  return out;
+}
+
+/** 周串 → 周次占用（分段并集；任一段不可数值化即 unknown，宁多报不漏报） */
+export function weeksOf(week: string | undefined | null): WeekOcc {
+  const s = String(week || '').replace(/\s/g, '');
+  if (!s || s === '全周') return 'all';
+  const out = new Set<number>();
+  for (const part of s.split(/[,，、·]/)) {
+    if (!part) continue;
+    if (part === '全周') return 'all';
+    if (part === '单周') {
+      for (const n of parityWeeks(true)) out.add(n);
+      continue;
+    }
+    if (part === '双周') {
+      for (const n of parityWeeks(false)) out.add(n);
+      continue;
+    }
+    const m = /^(\d+)(?:-(\d+))?周?$/.exec(part);
+    if (!m) return 'unknown';
+    const a = parseInt(m[1]!);
+    const b = m[2] ? parseInt(m[2]!) : a;
+    if (a < 1 || b < a || b > 25) return 'unknown';
+    for (let i = a; i <= b; i++) out.add(i);
+  }
+  return out.size ? out : 'unknown';
+}
+
+/** 两段周次占用是否相交（all/unknown 一律判相交：缺信息时不漏报冲突） */
+export function weeksOverlap(a: WeekOcc, b: WeekOcc): boolean {
+  if (a === 'all' || b === 'all' || a === 'unknown' || b === 'unknown') return true;
+  const [small, big] = a.size <= b.size ? [a, b] : [b, a];
+  for (const n of small) if (big.has(n)) return true;
+  return false;
+}
+
 /** 时间串解析 + 同类项合并（缓存：全校时间串种类有限） */
 export function parseTimeSlots(timeStr: string | undefined | null): Slot[] {
   if (!timeStr) return [];
@@ -185,28 +230,46 @@ export function pvColorOf(name: string): string {
 export const hm = (m: number) =>
   String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0');
 
-/** 大节/钟点 → 冲突区间（semantics 与旧 detectConflicts 一致；week 供预览块标题） */
+/** 时段占用（冲突判据 + 课表布局共用；week 供显示、occ 供周次相交判定） */
+export interface TimeSpan {
+  dayN: number;
+  begin: number;
+  end: number;
+  when: string;
+  week: string;
+  occ: WeekOcc;
+}
+
+/** 大节/钟点 → 时段占用（semantics 与旧 detectConflicts 一致）
+ *  本校课走「大节」解析；无大节（外校课）时兜底解析选课文字说明里的真实钟点，
+ *  使外校课与自定义占用一样真正参与冲突检测与课表预览。 */
 export function spansOf(
   c: {
     time?: string;
     note?: string;
+    xkTextNote?: string;
     manual?: boolean;
     day?: number;
     begin?: string;
     end?: string;
   },
   pvToMinFn = pvToMin,
-): { dayN: number; begin: number; end: number; when: string; week: string }[] {
-  const out: { dayN: number; begin: number; end: number; when: string; week: string }[] = [];
+): TimeSpan[] {
+  const out: TimeSpan[] = [];
   if (c.manual && c.begin && c.end && Number(c.day) >= 1 && pvToMinFn(c.begin) < pvToMinFn(c.end)) {
-    out.push({ dayN: Number(c.day), begin: pvToMinFn(c.begin), end: pvToMinFn(c.end), when: c.begin + '-' + c.end, week: '' });
+    out.push({ dayN: Number(c.day), begin: pvToMinFn(c.begin), end: pvToMinFn(c.end), when: c.begin + '-' + c.end, week: '', occ: 'all' });
     return out;
   }
   for (const { day, slot, week } of parseTimeSlots(c.time || '')) {
     const d = DAY_NAMES.indexOf(day) + 1;
     const s = SLOT_NAMES.indexOf(slot) + 1;
     const r = SLOT_RANGE[s - 1];
-    if (d && r) out.push({ dayN: d, begin: r[0]!, end: r[1]!, when: slot, week });
+    if (d && r) out.push({ dayN: d, begin: r[0]!, end: r[1]!, when: slot, week, occ: weeksOf(week) });
+  }
+  if (!out.length) {
+    for (const { day, begin, end, tag } of clockRangesOf(c.note || c.xkTextNote || '', c.time || '')) {
+      out.push({ dayN: day, begin, end, when: hm(begin) + '-' + hm(end), week: tag, occ: weeksOf(tag) });
+    }
   }
   return out;
 }

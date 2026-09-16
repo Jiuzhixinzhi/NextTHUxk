@@ -2,9 +2,9 @@
 // NextTHUxk — 域逻辑测试：时间解析 / 冲突 / 概率 / 草稿差量 / GBK
 // ═══════════════════════════════════════════════════════════════
 import { describe, expect, it } from 'vitest';
-import { parseTimeSlots, clockRangesOf, pvToMin, spansOf } from '../src/lib/domain/time';
-import { detectConflicts } from '../src/lib/domain/conflict';
-import { calcProb, capacityStatus, cascadeOf, lockedOf, parseVolArr, probResult, priProb, probGridData, creditDist, creditSimItems } from '../src/lib/domain/probability';
+import { parseTimeSlots, clockRangesOf, pvToMin, spansOf, weeksOf, weeksOverlap } from '../src/lib/domain/time';
+import { detectConflicts, buildPreviewSpans, conflictsWithPreview } from '../src/lib/domain/conflict';
+import { calcProb, capacityStatus, cascadeOf, lockedOf, parseVolArr, probResult, priProb, probGridData, creditDist, creditSimItems, queueCapLevel, queueCapTitle } from '../src/lib/domain/probability';
 import { draftDiff, draftCourseFrom, draftKeyOf, mergeSelectedIntoDraft, repairDraftCourse, sameAsDraft } from '../src/lib/domain/draft';
 import { gbkPercentEncode } from '../src/lib/net/gbk';
 import { normSeq, keyOf } from '../src/lib/core/utils';
@@ -114,7 +114,7 @@ describe('冲突检测（区间重叠）', () => {
 describe('spansOf（manual 自由钟点）', () => {
   it('manual 走 begin/end 钟点分支，不经大节解析', () => {
     const s = spansOf({ manual: true, day: 3, begin: '18:30', end: '21:00', time: '' });
-    expect(s).toEqual([{ dayN: 3, begin: 18 * 60 + 30, end: 21 * 60, when: '18:30-21:00', week: '' }]);
+    expect(s).toEqual([{ dayN: 3, begin: 18 * 60 + 30, end: 21 * 60, when: '18:30-21:00', week: '', occ: 'all' }]);
   });
 
   it('manual 起止倒置/缺日 → 空区间', () => {
@@ -126,6 +126,92 @@ describe('spansOf（manual 自由钟点）', () => {
     const s = spansOf({ time: '1-2(1-16周)', begin: '18:30', end: '21:00' });
     expect(s).toHaveLength(1);
     expect(s[0]!.when).toBe('3-4节');
+    expect(s[0]!.occ).not.toBe('unknown');
+  });
+
+  it('无大节 → 兜底解析文字说明钟点（外校课参与冲突/课表）', () => {
+    const s = spansOf({ time: '', note: '周二 18:30-21:30(1-16周)' });
+    expect(s).toHaveLength(1);
+    expect(s[0]).toMatchObject({ dayN: 2, begin: 18 * 60 + 30, end: 21 * 60 + 30, when: '18:30-21:30', week: '1-16周' });
+    expect(s[0]!.occ).not.toBe('unknown');
+  });
+});
+
+describe('周次占用（1-8 周与 9-16 周本不冲突）', () => {
+  const occCmp = (a: string, b: string) => weeksOverlap(weeksOf(a), weeksOf(b));
+
+  it('周段不相交 → 不重叠；相交 → 重叠', () => {
+    expect(occCmp('1-8周', '9-16周')).toBe(false);
+    expect(occCmp('1-8周', '8-16周')).toBe(true);
+    expect(occCmp('1-8周', '1-8周')).toBe(true);
+  });
+
+  it('单周 vs 双周不重叠；与全周/周段重叠', () => {
+    expect(occCmp('单周', '双周')).toBe(false);
+    expect(occCmp('单周', '全周')).toBe(true);
+    expect(occCmp('单周', '1-8周')).toBe(true);
+    expect(occCmp('1-8周', '双周')).toBe(true);
+  });
+
+  it('全周/缺信息 = 全占；无法数值化 = 保守判重叠', () => {
+    expect(occCmp('全周', '1-8周')).toBe(true);
+    expect(occCmp('', '9-16周')).toBe(true);
+    expect(occCmp('开学后择期', '9-16周')).toBe(true);
+    expect(weeksOf('开学后择期')).toBe('unknown');
+    expect(weeksOf('')).toBe('all');
+  });
+
+  it('多段并集与单双周混排', () => {
+    expect(occCmp('1-8周,10-16周', '9-10周')).toBe(true);
+    expect(occCmp('1-7周,9周', '8-16周')).toBe(true);
+    expect(occCmp('1-8周,10-16周', '9周')).toBe(false);
+  });
+
+  it('冲突检测按周次判互斥', () => {
+    const a = { code: '1', seq: '01', name: '前半', time: '1-2(1-8周)' };
+    const b = { code: '2', seq: '01', name: '后半', time: '1-2(9-16周)' };
+    expect(detectConflicts([a, b] as never, [])).toHaveLength(0);
+    const c = { code: '3', seq: '01', name: '全周', time: '1-2(1-16周)' };
+    expect(detectConflicts([a, c] as never, [])).toHaveLength(1);
+  });
+
+  it('单周课与双周课同格不冲突，同奇偶则冲突', () => {
+    const odd = { code: '1', seq: '01', name: '单', time: '1-2(单周)' };
+    const even = { code: '2', seq: '01', name: '双', time: '1-2(双周)' };
+    const odd2 = { code: '3', seq: '01', name: '单2', time: '1-2(单周)' };
+    expect(detectConflicts([odd, even] as never, [])).toHaveLength(0);
+    expect(detectConflicts([odd, odd2] as never, [])).toHaveLength(1);
+  });
+
+  it('周次不可数值化 → 保守判冲突', () => {
+    const a = { code: '1', seq: '01', name: '甲', time: '1-2(待定周次)' };
+    const b = { code: '2', seq: '01', name: '乙', time: '1-2(9-16周)' };
+    expect(detectConflicts([a, b] as never, [])).toHaveLength(1);
+  });
+});
+
+describe('预览冲突（buildPreviewSpans / conflictsWithPreview）', () => {
+  const course = (code: string, seq: string, name: string, time: string) => ({ code, seq, name, time });
+  const ev = { code: 'manual-1', seq: '0', name: '社团', day: 1, begin: '09:00', end: '10:30', manual: true as const, time: '', credits: 0 };
+
+  it('周次不相交不报；相交才报（周段时间被纳入）', () => {
+    const mine = course('9', '01', '我的', '1-2(9-16周)');
+    const spans = buildPreviewSpans([course('1', '01', '前半', '1-2(1-8周)')], []);
+    expect(conflictsWithPreview(mine as never, spans)).toHaveLength(0);
+    const spans2 = buildPreviewSpans([course('1', '01', '全周', '1-2(1-16周)')], []);
+    expect(conflictsWithPreview(mine as never, spans2)).toHaveLength(1);
+  });
+
+  it('自定义占用按区间相交命中（不再受槽位键限制）', () => {
+    const mine = course('9', '01', '我的', '1-2(1-16周)');
+    const spans = buildPreviewSpans([], [ev as never]);
+    expect(conflictsWithPreview(mine as never, spans)).toHaveLength(1);
+  });
+
+  it('自排除按 keyOf 归一：01/1 拼写不再「与自己冲突」', () => {
+    const mine = course('9', '01', '我的', '1-2(1-16周)');
+    const spans = buildPreviewSpans([course('9', '1', '我的', '1-2(1-16周)')], []);
+    expect(conflictsWithPreview(mine as never, spans)).toHaveLength(0);
   });
 });
 
@@ -189,6 +275,36 @@ describe('capacityStatus（课余量：已选 · 余量 · 排队）', () => {
 
   it('无容量 → null', () => {
     expect(capacityStatus(c({ capacity: 0 }), undefined)).toBeNull();
+  });
+});
+
+describe('queueCapLevel / queueCapTitle（课余量档位三处同源）', () => {
+  it('有余 → ok；无余有排队 → queued；皆无 → full', () => {
+    expect(queueCapLevel(3, 0)).toBe('ok');
+    expect(queueCapLevel(0, 5)).toBe('queued');
+    expect(queueCapLevel(0, 0)).toBe('full');
+    expect(queueCapLevel(null, 0)).toBe('full');
+    expect(queueCapLevel(undefined, 2)).toBe('queued');
+  });
+
+  it('提示串：已选 · 余（缺 → —） · 排队 · 容量', () => {
+    expect(queueCapTitle({ cap: 40, used: 33, rem: 7, queue: 5, pct: 82.5 })).toBe('已选33 · 余7 · 排队5 · 容量40');
+    expect(queueCapTitle({ cap: 40, used: 40, rem: 0, queue: 0, pct: 100 })).toBe('已选40 · 余0 · 排队0 · 容量40');
+  });
+
+  it('previewBlockMeta 文案/配色取自同一档位表（余 / 排队 / 已满）', async () => {
+    const { previewBlockMeta } = await import('../src/lib/domain/preview');
+    const c = { code: 'a', seq: '01', name: 'A', time: '', credits: 1 } as never;
+    const qd = (qRemaining: number, qQueue: number) => ({ a_1: { qRemaining, qQueue, qCapacity: 30 } });
+    expect(previewBlockMeta(c, true, false, false, qd(2, 0), undefined, null)).toEqual({
+      color: '#07c160', label: '余2', bg: 'rgba(7,193,96,.14)',
+    });
+    expect(previewBlockMeta(c, true, false, false, qd(0, 4), undefined, null)).toEqual({
+      color: '#ff9f1a', label: '排队4人', bg: 'rgba(255,159,26,.14)',
+    });
+    expect(previewBlockMeta(c, true, false, false, qd(0, 0), undefined, null)).toEqual({
+      color: '#ee4d4d', label: '已满', bg: 'rgba(238,77,77,.14)',
+    });
   });
 });
 

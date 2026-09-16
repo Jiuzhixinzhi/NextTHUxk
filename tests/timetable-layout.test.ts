@@ -85,3 +85,41 @@ describe('layoutPreview 占用覆盖层', () => {
     expect(mb.overlap).toBe(false);
   });
 });
+
+describe('layoutPreview 块键（day/tag 维度）', () => {
+  it('同一大节跨两日 → 两块，且各自的 when 只含自己那天', () => {
+    // 周一第2大节 + 周三第2大节（time 串 day-大节：1-2=周一第2大节，slot 名 '3-4节'）
+    // slot 同名，旧键（无 day）会被 merged 并成一块、丢掉周三
+    const layout = layoutPreview([course('A', '1-2(全周),3-2(全周)')], metaOf);
+    const blocks = layout.blocks.filter((b) => !b.manual);
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map((b) => b.day).sort()).toEqual([1, 3]);
+    expect(blocks.find((b) => b.day === 1)!.when).toBe('1-3-4节(全周)');
+    expect(blocks.find((b) => b.day === 3)!.when).toBe('3-3-4节(全周)');
+  });
+
+  it('拆周段仍是同一块（when 文本并集，回归保护）', () => {
+    const layout = layoutPreview([course('A', '1-2(1-8周),1-2(10-16周)')], metaOf);
+    const blocks = layout.blocks.filter((b) => !b.manual);
+    expect(blocks).toHaveLength(1);
+    expect(blocks[0]!.when).toContain('1-8周');
+    expect(blocks[0]!.when).toContain('10-16周');
+  });
+
+  it('外校课复合日钟点（周二、周四同钟点）→ 两块，day 2 与 day 4', () => {
+    const ext: Course = { code: 'PK10001', seq: '1', name: '外校课', time: '', note: '周二、周四 15:00-16:30' };
+    const layout = layoutPreview([ext], metaOf);
+    const blocks = layout.blocks.filter((b) => !b.manual);
+    expect(blocks).toHaveLength(2);
+    expect(blocks.map((b) => b.day).sort()).toEqual([2, 4]);
+    expect(layout.undet).toHaveLength(0);
+  });
+
+  it('同日两段钟点 → 两块且分道不互相覆盖', () => {
+    const ext: Course = { code: 'PK10002', seq: '1', name: '外校课', time: '', note: '周二 08:00-09:35;周二 15:00-16:30' };
+    const layout = layoutPreview([ext], metaOf);
+    const blocks = layout.blocks.filter((b) => !b.manual);
+    expect(blocks).toHaveLength(2);
+    expect(new Set(blocks.map((b) => b.when)).size).toBe(2);
+  });
+});

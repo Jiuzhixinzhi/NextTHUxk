@@ -1,16 +1,18 @@
 <script lang="ts">
   import type { DraftCourse, Flag } from '../../lib/domain/types';
   import { allowedFlags, flagName } from '../../lib/domain/flags';
-  import { currentProbMeta } from '../../lib/domain/probability';
+  import { currentProbMeta, QUEUE_CAP_STYLE, queueCapLevel } from '../../lib/domain/probability';
   import { session } from '../../lib/stores/session.svelte.ts';
   import { jumpTo } from '../../lib/stores/search.svelte.ts';
   import { keyOf } from '../../lib/core/utils';
 
   let { course, onFlag, onZy, onRemove }: { course: DraftCourse; onFlag: (f: Flag) => void; onZy: (z: number) => void; onRemove: () => void } = $props();
 
-  const ac = $derived.by(() => session.allCourses.find((x: { code: string; seq: string }) => x.code === course.code && String(x.seq || '0') === String(course.seq || '0')));
+  const ac = $derived.by(() => session.allCourses.find((x: { code: string; seq: string }) => keyOf(x.code, x.seq) === keyOf(course.code, course.seq)));
   const meta = $derived.by(() => (ac ? currentProbMeta(ac, course.flag, course.zy) : null));
   const qd = $derived.by(() => session.queueDataMap[keyOf(course.code, course.seq)]);
+  /** 余位档位（与课表块/课程卡同源）：无 qd 数据在课余量阶段按已满显示（旧版同款） */
+  const capLv = $derived.by(() => queueCapLevel(qd?.qRemaining, qd?.qQueue ?? 0));
   // 已选/排队徽章：派生自池行状态（快照行不落冗余字段）——上游 PR #53 同款
   const selState = $derived.by(() => {
     const k = keyOf(course.code, course.seq);
@@ -55,13 +57,9 @@
   </select>
 
   {#if session.isQueuePhase}
-    {#if qd && qd.qRemaining > 0}
-      <span style="font-size:10px;color:#07c160;font-weight:600;white-space:nowrap;">余{qd.qRemaining}/{qd.qCapacity}</span>
-    {:else if qd && qd.qQueue > 0}
-      <span style="font-size:10px;color:#ff9f1a;font-weight:600;white-space:nowrap;">排队{qd.qQueue}人</span>
-    {:else}
-      <span style="font-size:10px;color:#ee4d4d;font-weight:600;white-space:nowrap;">已满</span>
-    {/if}
+    <span style="font-size:10px;color:{QUEUE_CAP_STYLE[capLv].color};font-weight:600;white-space:nowrap;"
+      >{capLv === 'ok' ? `余${qd!.qRemaining}/${qd!.qCapacity}` : capLv === 'queued' ? `排队${qd!.qQueue}人` : '已满'}</span
+    >
   {:else}
     {#if meta}
       <span

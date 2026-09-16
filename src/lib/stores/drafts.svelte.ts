@@ -5,7 +5,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Draft, DraftCourse, Flag } from '../domain/types';
 import { TAG } from '../core/constants';
-import { keyOf, normSeq } from '../core/utils';
+import { keyOf } from '../core/utils';
 import { K, store } from '../storage/store';
 import {
   draftCourseFrom,
@@ -85,8 +85,8 @@ export function setPreview(kind: PreviewTarget): void {
 }
 
 export async function loadDrafts(): Promise<void> {
-  const saved = (await store.get<Draft[]>(K.drafts).catch(() => [])) || [];
-  draftStore.drafts = saved;
+  // 坏形态自愈：storage 可能被异物写成真值非数组（同理 staticData.plan 故障类）
+  draftStore.drafts = await store.getArray<Draft>(K.drafts).catch(() => []);
   if (draftStore.drafts.some(d => !d.id)) {
     draftStore.drafts.forEach(d => {
       if (!d.id) d.id = Date.now();
@@ -94,6 +94,8 @@ export async function loadDrafts(): Promise<void> {
   }
   let migrated = false;
   draftStore.drafts.forEach(d => {
+    // 单份草稿的 courses 也可能是坏形态（外部写入），先归一再遍历
+    if (!Array.isArray(d.courses)) d.courses = [];
     d.courses.forEach(c => {
       if (!c.baseFlag) {
         const ac = session.allCourses.find(x => x.code === c.code);
@@ -291,7 +293,7 @@ export function importJson(jsonStr: string): AddResult {
   data.courses.forEach((raw: unknown) => {
     const c = raw as Partial<DraftCourse>;
     if (!c || typeof c !== 'object' || !c.code) return;
-    const k = c.code + '_' + normSeq(String(c.seq || '0'));
+    const k = keyOf(c.code, c.seq);
     if (seen.has(k)) return;
     seen.add(k);
     const fallbackFlag = (c.baseFlag as Flag) || 'rx';
@@ -387,7 +389,7 @@ export async function promote(draft: Draft): Promise<void> {
       return;
     }
     const current = await fetchSelectedCourses({ SEM: session.SEM, BASE: session.BASE, isZhjwxk: session.isZhjwxk, isZhjw: session.isZhjw, isWebvpn: session.isWebvpn });
-    const queuedKeys = new Set(session.candidateCourses.map(c => c.code + '_' + normSeq(c.seq)));
+    const queuedKeys = new Set(session.candidateCourses.map(c => keyOf(c.code, c.seq)));
     // 候选表可信（队列阶段且本轮权威取得，含合法空表）→ 才清理陈旧 queued 标记/过滤差量；
     // 拉取失败（ok=false）时保守保留，避免误提交仍排队的课
     const candTrusted = session.isQueuePhase && session.candidateFetchOk;
@@ -404,7 +406,7 @@ export async function promote(draft: Draft): Promise<void> {
       });
     } else if (session.candidateFetchOk) {
       draft.courses.forEach(c => {
-        if (c.queued && !queuedKeys.has(c.code + '_' + normSeq(c.seq))) {
+        if (c.queued && !queuedKeys.has(keyOf(c.code, c.seq))) {
           c.queued = undefined;
           queuedStale = true;
         }
@@ -414,7 +416,7 @@ export async function promote(draft: Draft): Promise<void> {
     const { kept, toDrop, toAdd: rawToAdd } = draftDiff(current, draft.courses);
     // 候补（排队中）课程不重复提交：queued=true 行已在 draftDiff 内跳过，此处再按实时候选表兜底
     // （手动加入草稿的排队课可能无 queued 标记）
-    const toAdd = candTrusted ? rawToAdd.filter(c => !queuedKeys.has(c.code + '_' + normSeq(c.seq))) : rawToAdd;
+    const toAdd = candTrusted ? rawToAdd.filter(c => !queuedKeys.has(keyOf(c.code, c.seq))) : rawToAdd;
     const queuedSkipped = rawToAdd.length - toAdd.length;
     if (!toDrop.length && !toAdd.length) {
       showToast(true, queuedSkipped ? '课表「' + draft.name + '」与当前已选一致（候补 ' + queuedSkipped + ' 门不重复提交）' : '课表「' + draft.name + '」与当前已选一致，无需提交');
@@ -477,6 +479,3 @@ export function repairCourseFlag(c: DraftCourse): Flag {
   return c.flag;
 }
 
-export function normSeqK(s: string | number): string {
-  return normSeq(s);
-}

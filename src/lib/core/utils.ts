@@ -11,10 +11,6 @@ export const normSeq = (s: string | number | undefined | null) => String(parseIn
 export const keyOf = (code: string | number, seq: string | number | undefined | null) =>
   String(code) + '_' + normSeq(seq);
 
-/** 原键（不归一，用于源数据寻址） */
-export const rawKeyOf = (code: string | number, seq: string | number | undefined | null) =>
-  String(code) + '_' + String(seq ?? '0');
-
 /** 固定并发度跑完一批异步任务 */
 export async function runPool<T>(items: T[], concurrency: number, fn: (item: T, idx: number) => Promise<void>): Promise<void> {
   let i = 0;

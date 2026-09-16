@@ -5,7 +5,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Ctx, ServerSearchResult } from '../domain/types';
 import { TAG } from '../core/constants';
-import { normSeq, runPool, sleep } from '../core/utils';
+import { keyOf, runPool, sleep } from '../core/utils';
 import { fetchPage, fetchPost } from '../net/http';
 import { gbkPercentEncode } from '../net/gbk';
 import { creditsOf } from '../domain/credits';
@@ -259,7 +259,7 @@ export async function serverSearchStorm(ctx: Ctx, o: SearchOpts = {}): Promise<S
   const probeTo = exactCode && !o.forceAll ? 1 : o.forceAll ? (tp > 0 ? tp : 25) : tp > 0 ? (tp <= 25 ? tp : 5) : 25;
   if (probeTo > 1) {
     const merged = new Map<string, Course>();
-    rows.forEach(r => merged.set(r.code + '_' + (r.seq || '0'), r));
+    rows.forEach(r => merged.set(keyOf(r.code, r.seq), r));
     const pages: number[] = [];
     for (let p = 2; p <= probeTo; p++) pages.push(p);
     // 页抓取：0 行（serverSearch 内部吞网络/死页错误返回 0 行，不抛）或 0 新键
@@ -274,7 +274,7 @@ export async function serverSearchStorm(ctx: Ctx, o: SearchOpts = {}): Promise<S
           (r.rows || []).forEach(row => {
             // 精确课号深页护栏：教务忽略筛选回吐未过滤行，只收课号前缀命中（防污染池）
             if (exactCode && !String(row.code || '').startsWith((o.kch || '').trim())) return;
-            const k = row.code + '_' + (row.seq || '0');
+            const k = keyOf(row.code, row.seq);
             if (!merged.has(k)) {
               merged.set(k, row);
               rows.push(row);
@@ -316,6 +316,3 @@ export function isCodeLike(kw: string): boolean {
   return k.length >= 5 && !/[\u4e00-\u9fff]/.test(k) && /\d/.test(k) && /^[A-Za-z0-9][-A-Za-z0-9]*$/.test(k);
 }
 
-export function normSeqOf(seq: string | number) {
-  return normSeq(seq);
-}

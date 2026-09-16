@@ -4,9 +4,9 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Ctx, PlanCourse, QueueDatum } from '../domain/types';
 import { TAG } from '../core/constants';
-import { normSeq, runPool, sleep } from '../core/utils';
+import { keyOf, runPool, sleep } from '../core/utils';
 import { fetchPage, fetchPageDual, fetchPost } from '../net/http';
-import { pickDecoded } from '../net/decode';
+import { pickDecoded, pickDecodedWithSource } from '../net/decode';
 import { gbkPercentEncode } from '../net/gbk';
 import { isSportsCourse } from '../domain/flags';
 import { creditsOf } from '../domain/credits';
@@ -27,7 +27,7 @@ export async function fetchSelectedCourses(ctx: Ctx): Promise<Course[]> {
     while ((zm = zyRe.exec(html)) !== null) {
       const [, code, seq, zy, typeCode, isSports] = zm;
       const typeLabel = isSports === '是' ? '体育' : ({ '006': '必修', '008': '限选', '007': '任选' } as Record<string, string>)[typeCode!] || '';
-      zyMap[code + '_' + normSeq(seq)] = { zy: parseInt(zy!), typeCode: typeCode!, typeLabel };
+      zyMap[keyOf(code ?? '', seq)] = { zy: parseInt(zy!), typeCode: typeCode!, typeLabel };
     }
     const rows = doc.querySelectorAll('tr.trr2');
     const selected: Course[] = [];
@@ -39,7 +39,7 @@ export async function fetchSelectedCourses(ctx: Ctx): Promise<Course[]> {
       if (!code) return;
       const tds = row.querySelectorAll('td');
       const cell = (i: number) => (tds[i]?.textContent || '').trim().replace(/\s+/g, ' ');
-      const zyInfo = (zyMap[code + '_' + normSeq(seq)] || {}) as { zy: number; typeCode: string; typeLabel: string };
+      const zyInfo = (zyMap[keyOf(code, seq)] || {}) as { zy: number; typeCode: string; typeLabel: string };
       const cell2 = cell(2) || '';
       // 列序变更史（2026-2027-1 起课号独立成列）致 cell(2) 不可靠 → 退回整行匹配「第X志愿」
       const zyFromCell = cell2.match(/第([一二三])志愿/) || row.textContent!.match(/第([一二三])志愿/) || null;
@@ -203,11 +203,10 @@ export async function fetchCandidateCourses(ctx: Ctx): Promise<CandidateFetchRes
       return null;
     });
     if (dual && dual.gbk.includes('accessDenied') && dual.utf8.includes('accessDenied')) return { rows: [], ok: false };
-    // 双解码择优（pickDecoded 同款：行数多者胜，平分回退 gbk）；此处保留胜出原文以取 token/共X页
-    const gRows = dual ? parseDlRows(dual.gbk) : [];
-    const uRows = dual ? parseDlRows(dual.utf8) : [];
-    const candidates = uRows.length > gRows.length ? uRows : gRows;
-    const html0 = dual ? (uRows.length > gRows.length ? dual.utf8 : dual.gbk) : '';
+    // 双解码择优（与 pickDecoded 同一判据）：同时保留胜出原文以取 token/共X页
+    const picked = dual ? pickDecodedWithSource(parseDlRows, dual) : { value: [] as Course[], html: '' };
+    const candidates = picked.value;
+    const html0 = picked.html;
     // 防御性翻页：候补表分页时单 GET 首页会静默丢行（镜像 fetchCategoryAttrs 的 token POST；
     // 单页者 totalPages=1，零额外请求）
     const token = (html0.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';
@@ -219,7 +218,7 @@ export async function fetchCandidateCourses(ctx: Ctx): Promise<CandidateFetchRes
       for (let p = 2; p <= totalPages; p++) {
         try {
           const h = await fetchPost(BASE + '/xkBks.vxkBksXkbBs.do', new URLSearchParams({ m: 'dlSearch', page: String(p), token, p_xnxq: SEM }));
-          const more = parseDlRows(h).filter(c => !candidates.some(x => x.code + '_' + normSeq(x.seq) === c.code + '_' + normSeq(c.seq)));
+          const more = parseDlRows(h).filter(c => !candidates.some(x => keyOf(x.code, x.seq) === keyOf(c.code, c.seq)));
           candidates.push(...more);
           console.log(TAG, 'dlSearch 第' + p + '页: +' + more.length);
         } catch (e) {
@@ -308,7 +307,7 @@ export async function fetchLevelTable(ctx: Ctx): Promise<Record<string, { typeCo
       const isSports = !attr;
       const typeLabel = isSports ? '体育' : attr;
       const typeCode = isSports ? 'ty' : attr === '必修' ? '006' : attr === '限选' ? '008' : '007';
-      map[code + '_' + normSeq(seq)] = { typeCode, typeLabel, attr };
+      map[keyOf(code, seq)] = { typeCode, typeLabel, attr };
     }
     console.log(TAG, 'level table:', Object.keys(map).length, 'courses');
     return map;
@@ -325,7 +324,7 @@ export function applyLevelMap(rows: Course[], levelMap: Record<string, { typeCod
     if (p.code && p.attr) planAttr.set(p.code, p.attr);
   });
   rows.forEach(c => {
-    const e = levelMap[c.code + '_' + normSeq(c.seq)];
+    const e = levelMap[keyOf(c.code, c.seq)];
     if (e) {
       if (e.attr) c.attr = e.attr;
       c.typeLabel = e.typeLabel;
@@ -385,7 +384,7 @@ export async function fetchCategoryAttrs(ctx: Ctx): Promise<Record<string, { typ
       let n = 0;
       for (const h of htmls)
         for (const r of parseRows(h)) {
-          out[r.code + '_' + normSeq(r.seq)] = { attr: tab.attr, typeCode: tab.code, typeLabel: tab.attr };
+          out[keyOf(r.code, r.seq)] = { attr: tab.attr, typeCode: tab.code, typeLabel: tab.attr };
           n++;
         }
       console.log(TAG, 'category ' + tab.attr + ': ' + n + ' 门（' + totalPages + ' 页）');
@@ -408,7 +407,7 @@ export async function fetchQueueData(ctx: Ctx, courses: Course[]): Promise<{ map
     const map: Record<string, QueueDatum> = {};
     let gm: RegExpExecArray | null;
     while ((gm = gridRegex.exec(firstHtml)) !== null) {
-      const key = gm[1]! + '_' + normSeq(gm[2]!);
+      const key = keyOf(gm[1]!, gm[2]!);
       map[key] = { code: gm[1]!, seq: gm[2]!, qCapacity: parseInt(gm[3]!) || 0, qRemaining: parseInt(gm[4]!) || 0, qQueue: 0 };
     }
     const token = (firstHtml.match(/name="token"\s+value="([^"]+)"/) || [])[1] || '';
@@ -441,7 +440,7 @@ export async function fetchQueueData(ctx: Ctx, courses: Course[]): Promise<{ map
         let pm: RegExpExecArray | null;
         kylRe.lastIndex = 0;
         while ((pm = kylRe.exec(html)) !== null) {
-          const key = pm[1]! + '_' + normSeq(pm[2]!);
+          const key = keyOf(pm[1]!, pm[2]!);
           if (!map[key]) {
             map[key] = { code: pm[1]!, seq: pm[2]!, qCapacity: parseInt(pm[3]!) || 0, qRemaining: parseInt(pm[4]!) || 0, qQueue: 0 };
             n++;
@@ -469,6 +468,7 @@ export async function fetchQueueData(ctx: Ctx, courses: Course[]): Promise<{ map
         }
       });
     }
+    // 提交给教务的课班标识（SEM;code;seq）必须保留原始课序拼写，勿改 keyOf
     const parts = Object.values(map).map(q => SEM + '_' + q.code + '_' + q.seq);
     const batches: string[][] = [];
     for (let i = 0; i < parts.length; i += 100) batches.push(parts.slice(i, i + 100));
@@ -491,7 +491,7 @@ export async function fetchQueueData(ctx: Ctx, courses: Course[]): Promise<{ map
               const qData = JSON.parse(qText);
               if (Array.isArray(qData)) {
                 qData.forEach(obj => {
-                  const key = obj.kch + '_' + normSeq(obj.kxh);
+                  const key = keyOf(obj.kch, obj.kxh);
                   if (map[key]) map[key].qQueue = parseInt(obj.dlrs) || 0;
                 });
                 qFailStreak = 0;

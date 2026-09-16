@@ -4,7 +4,7 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Ctx, DraftCourse, ManualEvent, PlanCourse, QueueDatum, VolDatum } from '../domain/types';
 import { DATA_VER, TAG } from '../core/constants';
-import { keyOf, normSeq, sleep } from '../core/utils';
+import { keyOf, sleep } from '../core/utils';
 import { K, cleanupLegacyKeys, store } from '../storage/store';
 import { knoteLoad, makeKnoteRemember, type KnoteMap } from '../storage/knote';
 import { ensureSiteIdentity } from '../site/webvpn';
@@ -21,23 +21,22 @@ import {
   fetchQueueData,
   fetchSelectedCourses,
 } from '../api/records';
-import { applyVolunteer, volSession } from '../api/volunteers';
+import { applyVolunteer } from '../api/volunteers';
 import { dropCourse, submitCourse, changeVolunteer } from '../api/write';
 import { attachScores, ensureScores } from '../api/scores';
 import { typeCodeToFlag } from '../domain/flags';
+import { buildPreviewSpans, type PreviewSpan } from '../domain/conflict';
 import { matchPoolRow } from '../domain/match';
-import { parseTimeSlots, clockRangesOf } from '../domain/time';
+import { applyQueueToPool, hasParsedTime, markCandidates, mergeCandidateRows, mergePoolRows } from '../domain/pool';
 import { checkPlanCoverage } from '../domain/plancov';
-import { showXkResult } from './toast.svelte.ts';
+import { showToast, showXkResult } from './toast.svelte.ts';
 import { clearCardExpansions } from './uicards.svelte.ts';
-import { promptDialog, zyConfirm } from './modal.svelte.ts';
-import { vol, volCacheHydrate, volCachePersist, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
+import { confirmDialog, promptDialog, zyConfirm } from './modal.svelte.ts';
+import { vol, volCacheHydrate, volCachePersist, volNewDepts, volNeedsDeptRetry, volSessionReset, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
 import { probHistHydrate } from './probhist.svelte.ts';
 import { emitServerRowsMerged, emitLaunchDone, emitSelectedChanged, fgBusy, launchSettled, markLaunchStart } from './bus.svelte.ts';
 import { checkUpdate } from '../update/check';
 import { ensureIndex, tbAttach, setOnIndexChange } from '../reviews/reviews';
-import { deptOfCourse } from '../api/dept';
-import { volNeedsRefresh as volNeedsRefreshLocal } from '../update/check';
 
 export interface LevelInfo {
   typeCode: string;
@@ -87,6 +86,13 @@ export function selectedPreviewRows(): Course[] {
   const seen = new Set(sel.map(c => keyOf(c.code, c.seq)));
   const cand = session.candidateCourses.filter(cc => !seen.has(keyOf(cc.code, cc.seq)));
   return sel.concat(cand);
+}
+
+/** 预览冲突时段表（已选/候补行 + 自定义占用）——全列表共用一份：
+ *  卡片冲突徽章与搜索「冲突」筛选同源，避免每卡各自 buildPreviewSpans。
+ *  响应式：读 $state，组件以 $derived.by(() => previewConflictSpans()) 包裹。 */
+export function previewConflictSpans(): PreviewSpan[] {
+  return buildPreviewSpans(selectedPreviewRows(), session.manualEvents);
 }
 
 /** 培养方案覆盖（正选 + 全部草稿）——launch 完成后（bus onLaunchDone）与草稿/已选变更时重算。
@@ -148,10 +154,18 @@ export async function launch(): Promise<void> {
     await store.set(K.sem, session.SEM);
     const SEM0 = session.SEM;
     await cleanupLegacyKeys();
-    session.manualEvents = (await store.get<ManualEvent[]>(K.manualEvents)) || [];
+    session.manualEvents = await store.getArray<ManualEvent>(K.manualEvents);
     let sd: { ver: number; plan: PlanCourse[] } | null = (await store.get<{ ver: number; plan: PlanCourse[] }>(K.staticData)) || null;
     if (sd && sd.ver !== DATA_VER) {
       console.log(TAG, 'data version mismatch, clearing cache');
+      sd = null;
+      await store.set(K.staticData, null).catch(() => {});
+    }
+    // 坏形态自愈：plan 非数组（storage 损坏/异物写入）时清缓存重拉。
+    // 历史故障：sd.ver 命中但 plan 为真值非数组 → applyLevelMap 的 (plan||[]).forEach 抛
+    // 「(n||[]).forEach is not a function」，launch 整体死掉、工作台打不开。
+    if (sd && !Array.isArray(sd.plan)) {
+      console.warn(TAG, 'staticData.plan 形态非法，清缓存重拉:', typeof sd.plan);
       sd = null;
       await store.set(K.staticData, null).catch(() => {});
     }
@@ -193,9 +207,7 @@ export async function launch(): Promise<void> {
     if (candRes.rows.length) {
       await backfillCandidateMeta(ctx(), candRes.rows).catch(e => console.warn(TAG, 'cand meta:', e));
     }
-    session.candidateCourses.forEach(c => {
-      if (!session.allCourses.some(p => keyOf(p.code, p.seq) === keyOf(c.code, c.seq))) session.allCourses.push({ ...c, isCandidate: true });
-    });
+    mergeCandidateRows(session.allCourses, session.candidateCourses);
     session.knote = await knoteLoad().catch(e => {
       console.warn(TAG, 'knote:', e);
       return {};
@@ -213,14 +225,7 @@ export async function launch(): Promise<void> {
       session.queueDataMap = qResult.map;
       session.isQueuePhase = qResult.phase;
       if (qResult.phase) {
-        session.allCourses.forEach(c => {
-          const q = session.queueDataMap[c.code + '_' + normSeq(c.seq)];
-          if (q) {
-            c.available = q.qRemaining > 0;
-            if (q.qRemaining > 0) c.remaining = q.qRemaining;
-            c.capacity = q.qCapacity;
-          }
-        });
+        applyQueueToPool(session.allCourses, session.queueDataMap);
       } else {
         try {
           await fetchVolForPoolLaunch(session.allCourses);
@@ -314,7 +319,9 @@ async function resolveCourseZy(courses: Course[], selMap: Record<string, Course>
   let levelMap: Record<string, LevelInfo> | null = null;
   let selectedChanged = false;
   for (const c of courses) {
-    const key = c.code + '_' + (c.seq || '0');
+    // keyOf 归一：selMap/zyCache 与 fetchLevelTable 的键拼写必须一致
+    // （历史 Bug：此处用原始课序拼键查归一后的 levelMap，前导零课班取不到 typeCode/typeLabel）
+    const key = keyOf(c.code, c.seq);
     const s = selMap[key];
     if (c.selected !== !!s) selectedChanged = true;
     c.selected = !!s;
@@ -355,7 +362,7 @@ async function resolveCourseZy(courses: Course[], selMap: Record<string, Course>
     if (session.isQueuePhase) {
       missingZy.forEach(c => {
         c.zy = 3;
-        zyCache[c.code + '_' + (c.seq || '0')] = { zy: 3, typeCode: c.typeCode || '', typeLabel: c.typeLabel || '', confirmed: false };
+        zyCache[keyOf(c.code, c.seq)] = { zy: 3, typeCode: c.typeCode || '', typeLabel: c.typeLabel || '', confirmed: false };
       });
       cacheUpdated = true;
     } else if (withModal) {
@@ -363,7 +370,7 @@ async function resolveCourseZy(courses: Course[], selMap: Record<string, Course>
       missingZy.forEach((c, i) => {
         if (values[i] && values[i]! > 0) {
           c.zy = values[i]!;
-          zyCache[c.code + '_' + (c.seq || '0')] = { zy: c.zy, typeCode: c.typeCode || '', typeLabel: c.typeLabel || '', confirmed: false };
+          zyCache[keyOf(c.code, c.seq)] = { zy: c.zy, typeCode: c.typeCode || '', typeLabel: c.typeLabel || '', confirmed: false };
           cacheUpdated = true;
         }
       });
@@ -384,7 +391,7 @@ export async function refreshSelected(withModal = true): Promise<void> {
   const selected = await fetchSelectedCourses(ctx());
   const selMap: Record<string, Course> = {};
   selected.forEach(s => {
-    selMap[s.code + '_' + (s.seq || '0')] = s;
+    selMap[keyOf(s.code, s.seq)] = s;
   });
   session.levelMap = await fetchLevelTable(ctx()).catch(() => session.levelMap || {});
   applyLevelMap(session.allCourses, session.levelMap, session.planData);
@@ -397,23 +404,13 @@ export async function refreshSelected(withModal = true): Promise<void> {
     /* 保持现有候补数据不变；标记置不可信，避免 promote 依据过期名单 */
     session.candidateFetchOk = false;
   }
-  const candKeys = new Set(session.candidateCourses.map(c => c.code + '_' + String(c.seq || '0')));
-  session.allCourses.forEach(c => {
-    c.isCandidate = candKeys.has(c.code + '_' + (c.seq || '0'));
-  });
+  markCandidates(session.allCourses, session.candidateCourses);
   try {
     const qResult = await fetchQueueData(ctx(), session.allCourses);
     session.queueDataMap = qResult.map;
     session.isQueuePhase = qResult.phase;
     if (session.isQueuePhase) {
-      session.allCourses.forEach(c => {
-        const q = session.queueDataMap[c.code + '_' + normSeq(c.seq)];
-        if (q) {
-          c.available = q.qRemaining > 0;
-          if (q.qRemaining > 0) c.remaining = q.qRemaining;
-          c.capacity = q.qCapacity;
-        }
-      });
+      applyQueueToPool(session.allCourses, session.queueDataMap);
     } else if (Object.keys(vol.map).length) {
       applyVolunteer(session.allCourses, vol.map);
     }
@@ -433,21 +430,9 @@ export async function syncQueueAndVol(): Promise<void> {
   session.candidateFetchOk = cr.ok;
   // 检查点同步（定时器触发）：候补回填过前台闸门，避免与浏览翻页并发 kkxxSearch
   if (session.candidateCourses.length) await backfillCandidateMeta(ctx(), session.candidateCourses, fgBusy).catch(() => {});
-  const candKeys = new Set(session.candidateCourses.map(c => c.code + '_' + String(c.seq || '0')));
-  session.allCourses.forEach(c => {
-    c.isCandidate = candKeys.has(c.code + '_' + String(c.seq || '0'));
-  });
-  session.candidateCourses.forEach(c => {
-    if (!session.allCourses.some(ac => keyOf(ac.code, ac.seq) === keyOf(c.code, c.seq))) session.allCourses.push({ ...c, isCandidate: true });
-  });
-  session.allCourses.forEach(c => {
-    const q = session.queueDataMap[c.code + '_' + normSeq(c.seq)];
-    if (q) {
-      c.available = q.qRemaining > 0;
-      if (q.qRemaining > 0) c.remaining = q.qRemaining;
-      c.capacity = q.qCapacity;
-    }
-  });
+  markCandidates(session.allCourses, session.candidateCourses);
+  mergeCandidateRows(session.allCourses, session.candidateCourses);
+  applyQueueToPool(session.allCourses, session.queueDataMap);
   if (!session.isQueuePhase) {
     void (async () => {
       try {
@@ -486,7 +471,7 @@ function applyLocalRemoval(code: string, seq: string): void {
 }
 
 export async function doDropCourse(code: string, seq: string): Promise<{ ok: boolean; msg: string }> {
-  const isQueue = session.candidateCourses.some(c => c.code === code && String(c.seq) === String(seq));
+  const isQueue = session.candidateCourses.some(c => keyOf(c.code, c.seq) === keyOf(code, seq));
   const res = await dropCourse(ctx(), code, seq, isQueue);
   if (res.ok) {
     applyLocalRemoval(code, seq);
@@ -501,68 +486,48 @@ export async function doChangeVolunteer(code: string, seq: string, targetZy: num
   return { ok: res.ok, msg: res.msg };
 }
 
+// ─── 单课动作互斥（同一课班在途动作拒绝重入）────────────────────
+
+/** 在途单课动作键（组件据此禁用按钮）：候选队列/课表预览历史上没有守卫，
+ *  连点会并发提交同一课班的退选/退队（双提交窗口） */
+export const courseActionBusy = $state({ keys: [] as string[] });
+
+export function isCourseActionBusy(code: string, seq: string): boolean {
+  return courseActionBusy.keys.includes(keyOf(code, seq));
+}
+
+/** 退选/退队流程（确认文案 + 互斥 + 结果 toast）：课程卡 / 候选队列 / 课表预览共用
+ *  是否候补按当时名单判定（单一口径），调用方只需给课班与展示名。
+ *  互斥键在确认弹窗之前登记（覆盖「确认 → 提交」全程）：连点不会叠出第二个弹窗，
+ *  也不会让首问的 promise 悬空（后问会覆盖 modal.cur） */
+export async function dropCourseFlow(code: string, seq: string, name?: string): Promise<void> {
+  const k = keyOf(code, seq);
+  if (courseActionBusy.keys.includes(k)) return;
+  courseActionBusy.keys = [...courseActionBusy.keys, k];
+  try {
+    const isQueue = session.candidateCourses.some(c => keyOf(c.code, c.seq) === k);
+    const label = name || code;
+    const ok = await confirmDialog(
+      isQueue ? `退出候补队列「${label}」？` : `退选「${label}」？`,
+      isQueue ? '候补位次将丢失，重新排队需等待。' : '教务确认后生效。',
+    );
+    if (!ok) return;
+    const res = await doDropCourse(code, seq);
+    showToast(res.ok, res.msg);
+  } finally {
+    courseActionBusy.keys = courseActionBusy.keys.filter(x => x !== k);
+  }
+}
+
 // ─── 课程行合并（搜索/回填行 → 会话池）────────────────────────
 
-const parses = (c: Course) => parseTimeSlots(c.time || '').length > 0 || clockRangesOf(c.note || c.xkTextNote || '', c.time || '').length > 0;
-
-/** 合并服务端搜索行（code_seq 去重；回填缺失字段；借用已选/候补时间） */
+/** 合并服务端搜索行（code_seq 去重；回填缺失字段；借用已选/候补时间）
+ *  合并策略全在 domain/pool.mergePoolRows（纯函数、可测），此处只做副作用接线 */
 export function mergeRows(rows: Course[]): number {
   if (!rows || !rows.length) return 0;
-  const byKey = new Map(session.allCourses.map(c => [keyOf(c.code, c.seq), c]));
-  let added = 0;
-  let filled = 0;
-  const borrowersByCode = new Map<string, Course[]>();
-  for (const c of session.allCourses) {
-    if ((c.selected || c.isCandidate) && !parses(c)) {
-      if (!borrowersByCode.has(c.code)) borrowersByCode.set(c.code, []);
-      borrowersByCode.get(c.code)!.push(c);
-    }
-  }
-  for (const r of rows) {
-    const k = keyOf(r.code, r.seq);
-    const ex = byKey.get(k);
-    if (!ex) {
-      session.allCourses.push(r);
-      byKey.set(k, r);
-      added++;
-    } else {
-      const before = ex.note + '|' + ex.time;
-      if (!ex.note && r.note) ex.note = r.note;
-      if (!ex.time && r.time) ex.time = r.time;
-      else if (!parses(ex) && parses(r)) ex.time = r.time || ex.time;
-      if (!ex.teacher && r.teacher) ex.teacher = r.teacher;
-      if (!ex.credits && r.credits) ex.credits = r.credits;
-      if (!ex.department && r.department) ex.department = r.department;
-      if (!ex.xkTextNote && r.xkTextNote) ex.xkTextNote = r.xkTextNote;
-      // 容量/余量刷新（上游 f0a1090 同款，用户实锤「形策跳转左边看得见余量、右边暂存不显示」）：
-      // 旧池行残值（列漂时代容量 0）吃不到新行真值；r.capacity>0 才动（页签 0/0 占位不覆盖）；
-      // 余量含 0（「余 0=已满」是信息，不是未知）
-      const rCap = r.capacity || 0;
-      const rRem = r.remaining ?? 0;
-      if (rCap > 0 && (ex.capacity !== rCap || ex.remaining !== rRem)) {
-        ex.capacity = rCap;
-        ex.remaining = rRem;
-        ex.available = rRem > 0;
-        filled++;
-      }
-      if (before !== ex.note + '|' + ex.time) filled++;
-    }
-    if (parses(r)) {
-      knoteRemember(r.code, r.seq, r.note || r.xkTextNote || '', r.time || '');
-      const borrowers = (borrowersByCode.get(r.code) || []).filter(ex2 => ex2 !== ex && !parses(ex2));
-      for (const ex2 of borrowers) {
-        if (!ex2.note && r.note) {
-          ex2.note = r.note;
-          filled++;
-        }
-        if (!parses(ex2) && r.time) {
-          ex2.time = r.time;
-          filled++;
-        }
-        if (!ex2.xkTextNote && (r.note || r.xkTextNote)) ex2.xkTextNote = r.note || r.xkTextNote;
-      }
-    }
-  }
+  const { added, filled } = mergePoolRows(session.allCourses, rows, r =>
+    knoteRemember(r.code, r.seq, r.note || r.xkTextNote || '', r.time || ''),
+  );
   // 每次合并都补挂（校评 + 社区评价）：重复行（added=0）的展示对象是本次新解析的行，
   // 不挂会让搜索结果的徽章丢失（刷新首搜显示、再搜消失）；未就绪时空转，下次合并自愈
   attachScores(rows);
@@ -570,28 +535,17 @@ export function mergeRows(rows: Course[]): number {
   applyLevelMap(rows, session.levelMap, session.planData);
   if (rows.length) {
     const wa = rows.filter(r => r.attr).length;
-    console.log(TAG, 'server rows 属性: ' + wa + '/' + rows.length + ' | 样例: ' + rows.slice(0, 3).map(r => r.code + '_' + (r.seq || '0') + '→' + (r.attr || '空')).join(' , '));
+    console.log(TAG, 'server rows 属性: ' + wa + '/' + rows.length + ' | 样例: ' + rows.slice(0, 3).map(r => keyOf(r.code, r.seq) + '→' + (r.attr || '空')).join(' , '));
   }
   if (!session.isQueuePhase) {
     if (Object.keys(vol.map).length) applyVolunteer(rows, vol.map);
-    const newDepts = Array.from(new Set(rows.map(c => deptOfCourseFallback(c)).filter(Boolean))).filter(dc => !volSession.depts[dc] || volNeedsRefreshLocal(volSession.depts[dc]!));
-    const retried = volSession.retried;
-    const needRetry = rows.some(r => {
-      if (!(r && r.code)) return false;
-      const dc = deptOfCourseFallback(r);
-      const has = !!vol.map[r.code + '_' + normSeq(r.seq || '0')];
-      return !!dc && (session.isQueuePhase ? false : !has) && (retried[dc] || 0) < 3;
-    });
-    if (newDepts.length || needRetry) {
+    const newDepts = volNewDepts(rows);
+    if (newDepts.length || volNeedsDeptRetry(rows)) {
       scheduleVolFetch(vctx(), rows, newDepts);
     }
   }
   emitServerRowsMerged(rows, filled);
   return added;
-}
-
-function deptOfCourseFallback(c: Course): string {
-  return deptOfCourse(c);
 }
 
 // ─── 手动占用 ─────────────────────────────────────────────────
@@ -647,10 +601,10 @@ export async function backfillSelTimes(): Promise<void> {
   if (!(await waitForegroundIdle())) return;
   const tried = _selTried;
   const sel = session.allCourses.filter(c => c.selected && !c.isCandidate);
-  const needsTime = (r: Course): boolean => parseTimeSlots(r.time || '').length === 0 && clockRangesOf(r.note || r.xkTextNote || '', r.time || '').length === 0;
+  const needsTime = (r: Course): boolean => !hasParsedTime(r);
   const unparsed = sel.filter(needsTime);
   // 触发范围：时间解析不出 或 学分缺失（WL 已选表列位漂移致 credits=0，用户报形势与政策）
-  const need = sel.filter(r => needsTime(r) || !r.credits).filter(r => (tried.get(r.code + '_' + (r.seq || '0')) || 0) < 2);
+  const need = sel.filter(r => needsTime(r) || !r.credits).filter(r => (tried.get(keyOf(r.code, r.seq)) || 0) < 2);
   if (!need.length) {
     if (unparsed.length && !_selBfLogged) {
       _selBfLogged = true;
@@ -658,12 +612,12 @@ export async function backfillSelTimes(): Promise<void> {
     }
     return;
   }
-  console.log(TAG, '已选元数据回填: 查 ' + need.map(r => r.code + '_' + (r.seq || '0')).join(','));
+  console.log(TAG, '已选元数据回填: 查 ' + need.map(r => keyOf(r.code, r.seq)).join(','));
   const outcome: string[] = [];
   for (let i = 0; i < need.length; i += 5) {
     await Promise.all(
       need.slice(i, i + 5).map(async r => {
-        const k = r.code + '_' + (r.seq || '0');
+        const k = keyOf(r.code, r.seq);
         try {
           // 前台占用则不发起后台请求（服务端会话游标敏感，上游 PR #46）；不消耗 2 次预算
           if (fgBusy()) {
@@ -766,7 +720,7 @@ export async function changeSemester(newSem: string): Promise<void> {
   session.queueDataMap = {};
   clearCardExpansions();
   vol.map = {};
-  Object.keys(volSession.depts).forEach(k => delete volSession.depts[k]);
+  volSessionReset();
   session.fetchWarn = '';
   await launch();
 }

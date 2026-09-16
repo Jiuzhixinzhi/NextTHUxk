@@ -2,12 +2,13 @@
 // NextTHUxk — 预览行合成（join 池行 note/time，外校课时间载体）
 // ═══════════════════════════════════════════════════════════════
 import type { Course, ManualEvent } from './types';
-import { clockRangesOf, parseTimeSlots } from './time';
+import { parseTimeSlots } from './time';
+import { hasParsedTime } from './pool';
 import { keyOf } from '../core/utils';
 import { matchPoolRow } from './match';
+import { QUEUE_CAP_STYLE, queueCapLevel } from './probability';
 
-const parses = (c: Course) =>
-  parseTimeSlots(c.time || '').length > 0 || clockRangesOf(c.note || c.xkTextNote || '', c.time || '').length > 0;
+const parses = hasParsedTime;
 
 /** OneTHU buildRows join：已选/候补/草稿行时间解析不出 → 当场按课号借池行的
  *  note/time 合成预览行（池里有目录行立即能用；不再依赖回填时序）。
@@ -42,7 +43,7 @@ export function previewJoinRows(rows: Course[], pool: Course[], knote: Record<st
     let hit: Course | undefined = matchPoolRow(poolRows, s.seq, s.teacher);
     if (!hit) {
       const knoteKey = Object.keys(knote).find(k => k.indexOf(s.code + '_') === 0);
-      hit = (knote[s.code + '_' + (s.seq || '0')] as Course | undefined) || (knoteKey ? (knote[knoteKey] as Course | undefined) : undefined);
+      hit = (knote[keyOf(s.code, s.seq)] as Course | undefined) || (knoteKey ? (knote[knoteKey] as Course | undefined) : undefined);
     }
     if (!hit) {
       out.push(s);
@@ -84,11 +85,12 @@ export function previewBlockMeta(
   if (isQueued && cand?.myPos) return { color: '#ff9f1a', label: '排队第' + cand.myPos + '/' + (cand.queueTotal || 0) + '人', bg: 'rgba(255,159,26,.14)' };
   if (isQueued) return { color: '#ff9f1a', label: '候选中', bg: 'rgba(255,159,26,.14)' };
   if (isQueuePhase) {
-    const qd = queueDataMap[String(cc.code) + '_' + String(parseInt(String(cc.seq || '0'), 10) || 0)];
+    const qd = queueDataMap[keyOf(cc.code, cc.seq)];
     if (qd) {
-      if (qd.qRemaining > 0) return { color: '#07c160', label: '余' + qd.qRemaining, bg: 'rgba(7,193,96,.14)' };
-      if (qd.qQueue > 0) return { color: '#ff9f1a', label: '排队' + qd.qQueue + '人', bg: 'rgba(255,159,26,.14)' };
-      return { color: '#ee4d4d', label: '已满', bg: 'rgba(238,77,77,.14)' };
+      const lv = queueCapLevel(qd.qRemaining, qd.qQueue);
+      const st = QUEUE_CAP_STYLE[lv];
+      const label = lv === 'ok' ? '余' + qd.qRemaining : lv === 'queued' ? '排队' + qd.qQueue + '人' : '已满';
+      return { color: st.color, label, bg: st.bg };
     }
     return { color: '', label: '', bg: '' };
   }

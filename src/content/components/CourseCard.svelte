@@ -1,22 +1,20 @@
 <script lang="ts">
   import type { Course, Flag } from '../../lib/domain/types';
-  import { ZY_LIMITS } from '../../lib/core/constants';
-  import { allowedFlags, entryBaseFlag, canAdjustZy, flagName, typeCodeToFlag } from '../../lib/domain/flags';
-  import { capacityStatus, cascadeOf, currentProbMeta, lockedOf, probGridData, volColor } from '../../lib/domain/probability';
-  import { ORIGIN_COLORS, originOf, parseTimeSlots } from '../../lib/domain/time';
+  import { allowedFlags, entryBaseFlag, flagName, typeCodeToFlag } from '../../lib/domain/flags';
+  import { ORIGIN_COLORS } from '../../lib/domain/time';
+  import { courseCardModel, type ChainNode } from '../../lib/domain/card-model';
   import { deptCodeFromCode, deptNameOf } from '../../lib/api/dept';
   import { scoreLv } from '../../lib/domain/scores';
-  import { session, doChangeVolunteer, doDropCourse, doSubmitCourse, selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
+  import { session, doChangeVolunteer, doSubmitCourse, dropCourseFlow } from '../../lib/stores/session.svelte.ts';
   import { addCourseToActive } from '../../lib/stores/drafts.svelte.ts';
   import { probHist } from '../../lib/stores/probhist.svelte.ts';
-  import { trendDelta } from '../../lib/domain/probhist';
   import { showToast, showXkResult } from '../../lib/stores/toast.svelte.ts';
   import { confirmDialog, openWindow } from '../../lib/stores/modal.svelte.ts';
   import { cardExpanded, toggleCard } from '../../lib/stores/uicards.svelte.ts';
-  import { buildPreviewSlotIndex, conflictsWithPreview } from '../../lib/domain/conflict';
-  import { keyOf, normSeq } from '../../lib/core/utils';
+  import type { PreviewSpan } from '../../lib/domain/conflict';
+  import { keyOf } from '../../lib/core/utils';
 
-  let { course }: { course: Course } = $props();
+  let { course, conflictSpans }: { course: Course; conflictSpans: PreviewSpan[] } = $props();
 
   let busy = $state(false);
   let selFlag = $state<string>(entryBaseFlag(course));
@@ -31,23 +29,33 @@
     if (nz !== selZy) selZy = nz;
   });
 
-  const origins = $derived(originOf(course.code));
-  const vc = $derived(volColor(course, session.isQueuePhase));
+  // ─── 视图模型：容量条/开课线/中签链/涨跌/折叠行数字/冲突摘要口径全在 domain/card-model ───
+  const model = $derived.by(() =>
+    courseCardModel({
+      course,
+      isQueuePhase: session.isQueuePhase,
+      selFlag: selFlag as Flag,
+      selZy,
+      queueDataMap: session.queueDataMap,
+      candidateCourses: session.candidateCourses,
+      allCourses: session.allCourses,
+      hist: probHist.map[keyOf(course.code, course.seq)],
+      conflictSpans,
+    }),
+  );
+  const meta = $derived(model.meta);
+  const capText = $derived(model.capText);
+  const openRisk = $derived(model.openRisk);
+  const chain = $derived(model.chain);
+  const cardDelta = $derived(model.delta);
+  const miniNum = $derived(model.miniNum);
+  const conflicts = $derived(model.conflicts);
+  const conflictMini = $derived(model.conflictMini);
+  const subText = $derived(model.subText);
+  const origins = $derived(model.origins);
+  const selZyDisp = $derived(model.selZyDisp);
+
   const scoreRef = $derived(course._scoreRef);
-
-  const qKey = $derived(course.code + '_' + normSeq(course.seq));
-  const qd = $derived(session.queueDataMap[qKey]);
-  const cand = $derived(session.candidateCourses.find((cc) => keyOf(cc.code, cc.seq) === keyOf(course.code, course.seq)));
-
-  const curFlag = $derived(course.selected ? typeCodeToFlag(course.typeCode) : (selFlag as Flag));
-  const curZy = $derived(course.selected ? course.zy || 3 : selZy);
-  const selZyDisp = $derived(course.zy || 0); // 志愿档缺失（0）时整段隐藏，同旧版兜底
-  const meta = $derived.by(() => currentProbMeta(course, curFlag, curZy));
-
-  const conflicts = $derived.by(() => {
-    const idx = buildPreviewSlotIndex(selectedPreviewRows() as Course[], session.manualEvents);
-    return conflictsWithPreview(course, idx);
-  });
 
   // ─── 课号拆段：首位·院系码(蓝)·尾段（尾段末位承载学分：放大加粗） ───
   const codeParts = $derived.by(() => {
@@ -62,115 +70,6 @@
   const codeTitle = $derived.by(() => {
     const name = deptNameOf(String(course.code || ''));
     return name ? `${course.code} · ${name}` : course.code;
-  });
-
-  // ─── 时间标签（口径与冲突/课表一致：周四·11-12节） ───
-  const timeSlots = $derived(parseTimeSlots(course.time));
-
-  const flagShort = (f: Flag): string => (f === 'bx' ? '必' : f === 'xx' ? '限' : f === 'rx' ? '任' : '体');
-
-  /** 级联中签率链：节点=类型×志愿，底色=各自概率；当前选法描边；点击查看趋势 */
-  interface ChainNode {
-    key: string;
-    label: string;
-    pct: string;
-    muted: boolean;
-    color: string;
-    ratio: string;
-    active: boolean;
-    title: string;
-    flag: Flag;
-    zy: number;
-  }
-  const chain = $derived.by(() => {
-    if (session.isQueuePhase) return [] as ChainNode[];
-    const out: ChainNode[] = [];
-    for (const row of probGridData(course)) {
-      for (const cell of row.cells) {
-        const pri = !!cell.pri;
-        const active = !pri && row.flag === curFlag && cell.zy === curZy;
-        const muted = (cell.prob ?? -1) < 0;
-        const ratio = cell.ratioLabel || '';
-        const title = (pri ? '任选 优先任选' : `${flagName(row.flag)} ${cell.zy}志愿`) + ` · ${cell.percentLabel || cell.label}${ratio && ratio !== '无数据' ? ' · ' + ratio : ''} · 点击看趋势`;
-        out.push({
-          key: row.flag + (pri ? 'p' : cell.zy),
-          label: pri ? '优先' : flagShort(row.flag) + cell.zy,
-          pct: cell.percentLabel || cell.label || '—',
-          muted,
-          color: cell.color,
-          ratio,
-          active,
-          title,
-          flag: row.flag,
-          zy: cell.zy,
-        });
-      }
-    }
-    return out;
-  });
-
-  /** 相对上一志愿窗口的涨跌（百分点；历史不足 2 点 → null 不显示） */
-  const cardDelta = $derived.by(() => {
-    if (session.isQueuePhase) return null;
-    return trendDelta(probHist.map[keyOf(course.code, course.seq)], curFlag, curZy);
-  });
-
-  /** 课余量容量状态（仅课余量阶段；预选走级联口径） */
-  const cs = $derived(session.isQueuePhase ? capacityStatus(course, qd) : null);
-
-  /** 预选级联拆解：随当前「类型×志愿」选择器联动 */
-  const cascade = $derived(session.isQueuePhase ? null : cascadeOf(course, curFlag, curZy));
-
-  /** 容量条文字：课余量「候补位次 · 已选X · 余Y · 排队Z」；预选「同志愿N争s · 已选锁定+优先」 */
-  const capText = $derived.by(() => {
-    if (session.isQueuePhase) {
-      if (!cs) return null;
-      const rem = cs.rem != null ? `余${cs.rem}` : '';
-      const queue = cs.queue > 0 ? `排队${cs.queue}` : '';
-      const base = `已选${cs.used}` + (rem ? ` · ${rem}` : '') + (queue ? ` · ${queue}` : '');
-      const prefix = cand ? `候补第${cand.myPos}/${cand.queueTotal} · ` : '';
-      const title = `已选${cs.used} · 余${cs.rem ?? '—'} · 排队${cs.queue} · 容量${cs.cap}`;
-      return { text: prefix + base, title, pct: cs.pct, color: vc.color };
-    }
-    const lo = lockedOf(course);
-    if (cascade) {
-      const denom = (lo && lo.cap) || cascade.pool;
-      if (cascade.hasVol) {
-        // 条宽=需求口径：上批锁定 + 本批报名(统计页已报) vs 总容量；文字仍显本档 同志愿N争s · 已选锁定+优先
-        const used = (lo ? lo.locked : 0) + cascade.prior;
-        const demand = (lo ? lo.locked : 0) + (Number(course.volApplied) || 0);
-        return {
-          text: `${cascade.peers}/${cascade.seats}` + (lo ? ` · 已选${used}` : ''),
-          title: (lo ? `已选${lo.locked}(上批)+${cascade.prior}(优先)` : `已选${cascade.prior}(优先)`) + ` · 同志愿${cascade.peers}争${cascade.seats} · 总容量${denom}`,
-          pct: Math.min(100, (demand / denom) * 100),
-          color: meta.color,
-        };
-      }
-    }
-    // 本批志愿数据缺：回退搜索页裸数据（灰条）
-    if (lo) {
-      return {
-        text: `已选${lo.locked} · 余${lo.rem}`,
-        title: `已选${lo.locked} · 余${lo.rem} · 总容量${lo.cap}（本批志愿数据缺）`,
-        pct: (lo.locked / lo.cap) * 100,
-        color: '#9aa1ac',
-      };
-    }
-    return null;
-  });
-
-  /** 开课线：课余量已选 / 预选 上批锁定+本批报名 少于 5 人有停开风险 */
-  const OPEN_LINE = 5;
-  const openRisk = $derived.by(() => {
-    if (session.isQueuePhase) {
-      if (!cs) return null;
-      if (cs.used <= 0 || cs.used >= OPEN_LINE) return null;
-      return { used: cs.used, label: '已选' };
-    }
-    const lo = lockedOf(course);
-    const used = (lo ? lo.locked : 0) + (Number(course.volApplied) || 0);
-    if (used <= 0 || used >= OPEN_LINE) return null;
-    return { used, label: '报名' };
   });
 
   // ─── 渐进式披露：手动覆盖优先，自动规则兜底
@@ -197,46 +96,6 @@
     toggleExp();
   }
 
-  /** 教师·课序·时间合并小字（折叠行与展开态标签行共用；title 保留原始时间串） */
-  const subText = $derived.by(() => {
-    const parts: string[] = [];
-    if (course.teacher) parts.push(course.teacher);
-    if (course.seq) parts.push(course.seq + '课序');
-    if (timeSlots.length) {
-      parts.push(timeSlots.map((s) => s.day + '·' + s.slot + (s.week !== '全周' ? '(' + s.week + ')' : '')).join(' / '));
-    } else if (course.time) {
-      parts.push(course.time);
-    }
-    return parts.join(' · ');
-  });
-
-  /** 折叠行关键数字：已选显志愿档；课余量「候补x/y · 余Y · 排队Z」；预选当前选法概率% */
-  const miniNum = $derived.by(() => {
-    if (course.selected) {
-      if (selZyDisp > 0) return { text: '第' + selZyDisp + '志愿', color: '#07a150', title: course.typeLabel || '' };
-      return course.typeLabel ? { text: course.typeLabel, color: '#07a150', title: '' } : null;
-    }
-    if (session.isQueuePhase) {
-      if (!cs) return null;
-      const rem = cs.rem != null ? '余' + cs.rem : '';
-      const q = cs.queue > 0 ? ' · 排队' + cs.queue : '';
-      const prefix = cand ? `候补${cand.myPos ?? '?'}/${cand.queueTotal ?? '?'} · ` : '';
-      return { text: prefix + rem + q, color: vc.color, title: `已选${cs.used} · 余${cs.rem ?? '—'} · 排队${cs.queue} · 容量${cs.cap}` };
-    }
-    const ratio = meta.ratioLabel && meta.ratioLabel !== '无数据' ? ' · ' + meta.ratioLabel : '';
-    return { text: meta.prob >= 0 ? meta.percentLabel : meta.label, color: meta.color, title: `${meta.flagLabel} ${meta.zy}志愿${ratio}` };
-  });
-
-  /** 折叠行冲突明示：首条课节+课名必须可见（不止悬浮），title 带完整清单 */
-  const conflictMini = $derived.by(() => {
-    if (!conflicts.length) return null;
-    const first = conflicts[0]!;
-    return {
-      label: `冲突 ${first.day}${first.slot} ${first.name}` + (conflicts.length > 1 ? ` +${conflicts.length - 1}` : ''),
-      title: '时间冲突：' + conflicts.map((cf) => `${cf.day}${cf.slot} 与「${cf.name}」`).join('；'),
-    };
-  });
-
   /** 级联链完整渲染由操作行概率按钮（.nx-prob-btn）切换 chainFull 驱动 */
 
   function onAddDraft() {
@@ -245,12 +104,9 @@
   }
 
   async function onDrop() {
-    const isQueue = session.candidateCourses.some((c) => keyOf(c.code, c.seq) === keyOf(course.code, course.seq));
-    if (!(await confirmDialog(isQueue ? `退出候补队列「${course.name}」？` : `退选「${course.name}」？`, isQueue ? '候补位次将丢失，重新排队需等待。' : '教务确认后生效。'))) return;
     busy = true;
     try {
-      const res = await doDropCourse(course.code, course.seq);
-      showToast(res.ok, res.msg);
+      await dropCourseFlow(course.code, course.seq, course.name);
     } finally {
       busy = false;
     }
@@ -282,10 +138,6 @@
     const res = await doChangeVolunteer(course.code, course.seq, target);
     showToast(res.ok, res.msg);
   }
-
-  function canAdj(target: number): boolean {
-    return canAdjustZy(session.allCourses, course, target, ZY_LIMITS);
-  }
 </script>
 
 <div class:selected={course.selected} class="nx-card" class:mini={!exp} onclick={onCardClick}>
@@ -301,6 +153,33 @@
       }}
     >{node.pct}</button
     >
+  {/snippet}
+
+  {#snippet probBtn()}
+    {#if !session.isQueuePhase}
+      <button
+        type="button"
+        class="nx-prob-btn"
+        style="color:{meta.color};background:{meta.bg};"
+        title={chainFull ? '收起全部类型×志愿概率' : '展开全部类型×志愿概率'}
+        onclick={() => {
+          if (chain.length) chainFull = !chainFull;
+        }}
+      >{meta.prob >= 0 ? meta.percentLabel : meta.label}{chain.length ? (chainFull ? ' ▴' : ' ▾') : ''}</button>
+      {#if cardDelta !== null}
+        <span class="nx-trend-delta {cardDelta > 0 ? 'up' : cardDelta < 0 ? 'down' : ''}" title="相对上一志愿检查点窗口">
+          {cardDelta > 0 ? '▲ +' + cardDelta + '%' : cardDelta < 0 ? '▼ ' + cardDelta + '%' : '– 0%'}
+        </span>
+      {/if}
+    {/if}
+  {/snippet}
+
+  {#snippet selTag()}
+    {#if course.selected}
+      <span class="nx-tag nx-tag-sel">已选</span>
+    {:else if !course.available}
+      <span class="nx-tag nx-tag-no">已满</span>
+    {/if}
   {/snippet}
   {#if exp}
     <div class="flex items-center gap-2">
@@ -348,11 +227,7 @@
       {#if origins}
         <span class="nx-tag" style="color:#fff;background:{ORIGIN_COLORS[origins] || '#666'};border:none;">{origins}</span>
       {/if}
-      {#if course.selected}
-        <span class="nx-tag nx-tag-sel">已选</span>
-      {:else if !course.available}
-        <span class="nx-tag nx-tag-no">已满</span>
-      {/if}
+      {@render selTag()}
       {#if subText}
         <span class="nx-tagline-soft" title="{course.time}">{subText}</span>
       {/if}
@@ -412,27 +287,12 @@
         {:else if course.typeLabel}
           <span style="font-size:11px;color:var(--nx-ink-soft);">{course.typeLabel}</span>
         {/if}
-        {#if !session.isQueuePhase}
-          <button
-            type="button"
-            class="nx-prob-btn"
-            style="color:{meta.color};background:{meta.bg};"
-            title={chainFull ? '收起全部类型×志愿概率' : '展开全部类型×志愿概率'}
-            onclick={() => {
-              if (chain.length) chainFull = !chainFull;
-            }}
-          >{meta.prob >= 0 ? meta.percentLabel : meta.label}{chain.length ? (chainFull ? ' ▴' : ' ▾') : ''}</button>
-          {#if cardDelta !== null}
-            <span class="nx-trend-delta {cardDelta > 0 ? 'up' : cardDelta < 0 ? 'down' : ''}" title="相对上一志愿检查点窗口">
-              {cardDelta > 0 ? '▲ +' + cardDelta + '%' : cardDelta < 0 ? '▼ ' + cardDelta + '%' : '– 0%'}
-            </span>
-          {/if}
-        {/if}
+        {@render probBtn()}
         <button
           type="button"
           class="nx-vol-btn"
-          disabled={!(course.zy && course.zy > 1 && canAdj(course.zy - 1))}
-          title={course.zy && course.zy > 1 ? (canAdj(course.zy - 1) ? '升为第' + (course.zy - 1) + '志愿' : '该志愿名额已满') : ''}
+          disabled={!model.zyUp}
+          title={model.zyUpTitle}
           onclick={() => {
             void onVolChange('up');
           }}
@@ -441,8 +301,8 @@
         <button
           type="button"
           class="nx-vol-btn"
-          disabled={!(course.zy && course.zy < 3 && canAdj(course.zy + 1))}
-          title={course.zy && course.zy < 3 ? (canAdj(course.zy + 1) ? '降为第' + (course.zy + 1) + '志愿' : '该志愿名额已满') : ''}
+          disabled={!model.zyDown}
+          title={model.zyDownTitle}
           onclick={() => {
             void onVolChange('down');
           }}
@@ -476,22 +336,7 @@
           <option value="2">2志愿</option>
           <option value="1">1志愿</option>
         </select>
-        {#if !session.isQueuePhase}
-          <button
-            type="button"
-            class="nx-prob-btn"
-            style="color:{meta.color};background:{meta.bg};"
-            title={chainFull ? '收起全部类型×志愿概率' : '展开全部类型×志愿概率'}
-            onclick={() => {
-              if (chain.length) chainFull = !chainFull;
-            }}
-          >{meta.prob >= 0 ? meta.percentLabel : meta.label}{chain.length ? (chainFull ? ' ▴' : ' ▾') : ''}</button>
-          {#if cardDelta !== null}
-            <span class="nx-trend-delta {cardDelta > 0 ? 'up' : cardDelta < 0 ? 'down' : ''}" title="相对上一志愿检查点窗口">
-              {cardDelta > 0 ? '▲ +' + cardDelta + '%' : cardDelta < 0 ? '▼ ' + cardDelta + '%' : '– 0%'}
-            </span>
-          {/if}
-        {/if}
+        {@render probBtn()}
         <button class="nx-select-btn" disabled={busy} onclick={() => { void onSelect(); }}>
           {session.isQueuePhase && !course.available ? '排队选课' : '选课'}
         </button>
@@ -503,11 +348,7 @@
   {:else}
     <div class="nx-mini-row">
       <span class="nx-mini-name" title="{course.name}">{course.name}</span>
-      {#if course.selected}
-        <span class="nx-tag nx-tag-sel">已选</span>
-      {:else if !course.available}
-        <span class="nx-tag nx-tag-no">已满</span>
-      {/if}
+      {@render selTag()}
       {#if conflictMini}
         <span class="nx-mini-conflict" title="{conflictMini.title}">{conflictMini.label}</span>
       {/if}
