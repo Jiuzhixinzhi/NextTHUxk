@@ -1,9 +1,8 @@
 <script lang="ts">
   import type { Course } from '../../lib/domain/types';
-  import { session, doDropCourse } from '../../lib/stores/session.svelte.ts';
+  import { session, dropCourseFlow, isCourseActionBusy } from '../../lib/stores/session.svelte.ts';
   import { addCourseToActive } from '../../lib/stores/drafts.svelte.ts';
   import { jumpTo } from '../../lib/stores/search.svelte.ts';
-  import { confirmDialog } from '../../lib/stores/modal.svelte.ts';
   import { showToast } from '../../lib/stores/toast.svelte.ts';
   import { entryBaseFlag } from '../../lib/domain/flags';
   import { keyOf } from '../../lib/core/utils';
@@ -15,11 +14,8 @@
     ),
   );
 
-  async function onDrop(code: string, seq: string) {
-    const c = session.candidateCourses.find((x) => keyOf(x.code, x.seq) === keyOf(code, seq));
-    if (!(await confirmDialog('退出候补队列「' + (c?.name || code) + '」？', ''))) return;
-    const res = await doDropCourse(code, seq);
-    showToast(res.ok, res.msg);
+  async function onDrop(code: string, seq: string, name?: string) {
+    await dropCourseFlow(code, seq, name);
   }
 
   /** 暂存到活跃草稿：类型/志愿取候补行真值（上游 PR #53 暂存按钮同款） */
@@ -57,7 +53,8 @@
             class="nx-drop-btn"
             style="height:22px;padding:0 10px;font-size:11px;"
             title="退出候补队列"
-            onclick={() => void onDrop(c.code, c.seq)}
+            disabled={isCourseActionBusy(c.code, c.seq)}
+            onclick={() => void onDrop(c.code, c.seq, c.name)}
           >退队</button
           >
         </div>

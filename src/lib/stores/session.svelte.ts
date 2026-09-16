@@ -29,9 +29,9 @@ import { buildPreviewSpans, type PreviewSpan } from '../domain/conflict';
 import { matchPoolRow } from '../domain/match';
 import { applyQueueToPool, hasParsedTime, markCandidates, mergeCandidateRows, mergePoolRows } from '../domain/pool';
 import { checkPlanCoverage } from '../domain/plancov';
-import { showXkResult } from './toast.svelte.ts';
+import { showToast, showXkResult } from './toast.svelte.ts';
 import { clearCardExpansions } from './uicards.svelte.ts';
-import { promptDialog, zyConfirm } from './modal.svelte.ts';
+import { confirmDialog, promptDialog, zyConfirm } from './modal.svelte.ts';
 import { vol, volCacheHydrate, volCachePersist, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
 import { probHistHydrate } from './probhist.svelte.ts';
 import { emitServerRowsMerged, emitLaunchDone, emitSelectedChanged, fgBusy, launchSettled, markLaunchStart } from './bus.svelte.ts';
@@ -487,6 +487,44 @@ export async function doChangeVolunteer(code: string, seq: string, targetZy: num
   const res = await changeVolunteer(ctx(), code, seq, targetZy);
   if (res.ok) await refreshSelected(false);
   return { ok: res.ok, msg: res.msg };
+}
+
+// ─── 单课动作互斥（同一课班在途动作拒绝重入）────────────────────
+
+/** 在途单课动作键（组件据此禁用按钮）：候选队列/课表预览历史上没有守卫，
+ *  连点会并发提交同一课班的退选/退队（双提交窗口） */
+export const courseActionBusy = $state({ keys: [] as string[] });
+
+export function isCourseActionBusy(code: string, seq: string): boolean {
+  return courseActionBusy.keys.includes(keyOf(code, seq));
+}
+
+async function withCourseAction<T>(code: string, seq: string, fn: () => Promise<T>): Promise<T | null> {
+  const k = keyOf(code, seq);
+  if (courseActionBusy.keys.includes(k)) return null;
+  courseActionBusy.keys = [...courseActionBusy.keys, k];
+  try {
+    return await fn();
+  } finally {
+    courseActionBusy.keys = courseActionBusy.keys.filter(x => x !== k);
+  }
+}
+
+/** 退选/退队流程（确认文案 + 互斥 + 结果 toast）：课程卡 / 候选队列 / 课表预览共用
+ *  是否候补按当时名单判定（单一口径），调用方只需给课班与展示名 */
+export async function dropCourseFlow(code: string, seq: string, name?: string): Promise<void> {
+  if (isCourseActionBusy(code, seq)) return;
+  const isQueue = session.candidateCourses.some(c => keyOf(c.code, c.seq) === keyOf(code, seq));
+  const label = name || code;
+  const ok = await confirmDialog(
+    isQueue ? `退出候补队列「${label}」？` : `退选「${label}」？`,
+    isQueue ? '候补位次将丢失，重新排队需等待。' : '教务确认后生效。',
+  );
+  if (!ok) return;
+  await withCourseAction(code, seq, async () => {
+    const res = await doDropCourse(code, seq);
+    showToast(res.ok, res.msg);
+  });
 }
 
 // ─── 课程行合并（搜索/回填行 → 会话池）────────────────────────

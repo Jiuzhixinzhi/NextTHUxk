@@ -5,7 +5,7 @@
   import { courseCardModel, type ChainNode } from '../../lib/domain/card-model';
   import { deptCodeFromCode, deptNameOf } from '../../lib/api/dept';
   import { scoreLv } from '../../lib/domain/scores';
-  import { session, doChangeVolunteer, doDropCourse, doSubmitCourse } from '../../lib/stores/session.svelte.ts';
+  import { session, doChangeVolunteer, doSubmitCourse, dropCourseFlow } from '../../lib/stores/session.svelte.ts';
   import { addCourseToActive } from '../../lib/stores/drafts.svelte.ts';
   import { probHist } from '../../lib/stores/probhist.svelte.ts';
   import { showToast, showXkResult } from '../../lib/stores/toast.svelte.ts';
@@ -104,12 +104,9 @@
   }
 
   async function onDrop() {
-    const isQueue = session.candidateCourses.some((c) => keyOf(c.code, c.seq) === keyOf(course.code, course.seq));
-    if (!(await confirmDialog(isQueue ? `退出候补队列「${course.name}」？` : `退选「${course.name}」？`, isQueue ? '候补位次将丢失，重新排队需等待。' : '教务确认后生效。'))) return;
     busy = true;
     try {
-      const res = await doDropCourse(course.code, course.seq);
-      showToast(res.ok, res.msg);
+      await dropCourseFlow(course.code, course.seq, course.name);
     } finally {
       busy = false;
     }
