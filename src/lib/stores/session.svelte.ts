@@ -540,7 +540,7 @@ export function mergeRows(rows: Course[]): number {
   if (!session.isQueuePhase) {
     if (Object.keys(vol.map).length) applyVolunteer(rows, vol.map);
     const newDepts = volNewDepts(rows);
-    if (newDepts.length || volNeedsDeptRetry(rows, session.isQueuePhase)) {
+    if (newDepts.length || volNeedsDeptRetry(rows)) {
       scheduleVolFetch(vctx(), rows, newDepts);
     }
   }

@@ -119,9 +119,9 @@ export function volNewDepts(rows: Course[]): string[] {
   return Array.from(new Set(rows.map(deptOfCourse).filter(Boolean))).filter(dc => !depts[dc] || volNeedsRefresh(depts[dc]!));
 }
 
-/** 缺行自愈判定：池内仍有缺志愿统计的行，且该院系未耗尽重试预算（排队阶段不补拉） */
-export function volNeedsDeptRetry(rows: Course[], isQueuePhase: boolean): boolean {
-  if (isQueuePhase) return false;
+/** 缺行自愈判定：池内仍有缺志愿统计的行，且该院系未耗尽重试预算
+ *  （排队阶段不补拉由调用方在 !isQueuePhase 分支内保证） */
+export function volNeedsDeptRetry(rows: Course[]): boolean {
   return rows.some(r => {
     if (!(r && r.code)) return false;
     const dc = deptOfCourse(r);

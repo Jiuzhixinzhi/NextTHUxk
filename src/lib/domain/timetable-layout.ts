@@ -82,7 +82,7 @@ export function layoutPreview(
     const teacher = (c as Course).teacher;
     const lbl = teacher ? c.name + '(' + teacher + ')' : c.name;
     const mk = (day: number, begin: number, end: number, tag: string, when: string): RawBlock => ({
-      key: (c.code || 'm') + '_' + (c.seq || '0') + '_' + tag,
+      key: (c.code || 'm') + '_' + (c.seq || '0') + '_' + day + '_' + tag,
       day,
       begin,
       end,
@@ -100,11 +100,14 @@ export function layoutPreview(
     });
     const spans = spansOf(c);
     // 同大节多周段（如 1-2(1-9周),1-2(10-16周)）会生成同 key 同起止的重复块——
-    // 按键聚合（when 文本并集），杜绝 each_key_duplicate
+    // 按键聚合（when 文本并集），杜绝 each_key_duplicate。
+    // key 含 day 与 tag：跨日/同日不同钟点段必须各自成块（laneOf 也按此 key）
     const merged = new Map<string, RawBlock>();
     for (const s of spans) {
       const sc = SLOT_NAMES.indexOf(s.when) + 1;
-      const b = mk(s.dayN, s.begin, s.end, '' + sc, s.dayN + '-' + s.when + (s.week ? '(' + s.week + ')' : ''));
+      // 钟点 span（外校课/无大节）indexOf = -1：用 when 做 tag，保证同日多段互异
+      const tag = sc > 0 ? String(sc) : s.when;
+      const b = mk(s.dayN, s.begin, s.end, tag, s.dayN + '-' + s.when + (s.week ? '(' + s.week + ')' : ''));
       const k = b.key + '_' + b.begin + '_' + b.end;
       const ex = merged.get(k);
       if (ex) {
