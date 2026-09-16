@@ -334,10 +334,8 @@ export function loadAll(): void {
       if (serverSig() !== sigAtStart) {
         console.warn(TAG, 'load all 过期丢弃（查询已变化）');
       } else {
-        applyMarks(res.rows || []);
-        search.rows = res.rows || [];
-        if ((res.rows || []).length) mergeRows(res.rows);
-        search.incomplete = !!(res.totalRows && (res.rows || []).length < res.totalRows);
+        const rows = applyServerRows(res);
+        search.incomplete = !!(res.totalRows && rows.length < res.totalRows);
         if (res.totalPages) search.totalPages = res.totalPages;
         if (res.totalRows) search.totalRows = res.totalRows;
         search.error = pageError(res);
@@ -348,6 +346,15 @@ export function loadAll(): void {
       search.loadingAll = false;
     }
   })();
+}
+
+/** 落定服务端结果（三处调用点共用的三连）：标记行内状态 → 替换展示行 → 并池 */
+function applyServerRows(res: ServerSearchResult): Course[] {
+  const rows = res.rows || [];
+  applyMarks(rows);
+  search.rows = rows;
+  if (rows.length) mergeRows(rows);
+  return rows;
 }
 
 function applyMarks(rows: Course[]): void {
@@ -440,13 +447,11 @@ export async function runServerQuery(): Promise<void> {
           break;
         } else {
           if (!queryMode) search.browseRestore = null;
-          applyMarks(res.rows || []);
-          search.rows = res.rows || [];
-          search.browseHasMore = res.pageKind === 'ok' && (res.rows || []).length > 0;
-          if ((res.rows || []).length) mergeRows(res.rows);
+          const rows = applyServerRows(res);
+          search.browseHasMore = res.pageKind === 'ok' && rows.length > 0;
           search.totalPages = res.totalPages || 0;
           search.totalRows = res.totalRows || 0;
-          search.incomplete = queryMode && !!(res.totalRows && (res.rows || []).length < res.totalRows);
+          search.incomplete = queryMode && !!(res.totalRows && rows.length < res.totalRows);
           search.error = pageError(res);
         }
       } catch (e) {
@@ -538,9 +543,7 @@ export async function highlightJumpTarget(): Promise<void> {
       const opts = Object.assign({}, search.optsSnapshot || buildSearchOpts(), { forceAll: true });
       const res = await withForeground(() => serverSearchStorm(toCtx(), opts));
       if (serverSig() !== sigAt) return;
-      applyMarks(res.rows || []);
-      search.rows = res.rows || [];
-      if ((res.rows || []).length) mergeRows(res.rows);
+      applyServerRows(res);
       search.incomplete = false;
       rows = search.rows || [];
       hit = findTiered();

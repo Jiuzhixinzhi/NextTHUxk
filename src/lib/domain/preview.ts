@@ -2,13 +2,13 @@
 // NextTHUxk — 预览行合成（join 池行 note/time，外校课时间载体）
 // ═══════════════════════════════════════════════════════════════
 import type { Course, ManualEvent } from './types';
-import { clockRangesOf, parseTimeSlots } from './time';
+import { parseTimeSlots } from './time';
+import { hasParsedTime } from './pool';
 import { keyOf } from '../core/utils';
 import { matchPoolRow } from './match';
 import { QUEUE_CAP_STYLE, queueCapLevel } from './probability';
 
-const parses = (c: Course) =>
-  parseTimeSlots(c.time || '').length > 0 || clockRangesOf(c.note || c.xkTextNote || '', c.time || '').length > 0;
+const parses = hasParsedTime;
 
 /** OneTHU buildRows join：已选/候补/草稿行时间解析不出 → 当场按课号借池行的
  *  note/time 合成预览行（池里有目录行立即能用；不再依赖回填时序）。
