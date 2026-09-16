@@ -39,6 +39,11 @@ export const store = {
       }
     });
   },
+  /** 读数组：坏形态（真值非数组）归一到 [] —— storage 损坏/异物写入的历史故障类
+   *  （历史事故：plan 为真值非数组 → launch 的 (plan||[]).forEach 抛错、工作台打不开） */
+  getArray<T>(k: string): Promise<T[]> {
+    return store.get<unknown>(k).then(v => (Array.isArray(v) ? (v as T[]) : []));
+  },
 };
 
 /** 存储键（不含前缀） */

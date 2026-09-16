@@ -86,8 +86,7 @@ export function setPreview(kind: PreviewTarget): void {
 
 export async function loadDrafts(): Promise<void> {
   // 坏形态自愈：storage 可能被异物写成真值非数组（同理 staticData.plan 故障类）
-  const saved = await store.get<Draft[]>(K.drafts).catch(() => []);
-  draftStore.drafts = Array.isArray(saved) ? saved : [];
+  draftStore.drafts = await store.getArray<Draft>(K.drafts).catch(() => []);
   if (draftStore.drafts.some(d => !d.id)) {
     draftStore.drafts.forEach(d => {
       if (!d.id) d.id = Date.now();
@@ -95,6 +94,8 @@ export async function loadDrafts(): Promise<void> {
   }
   let migrated = false;
   draftStore.drafts.forEach(d => {
+    // 单份草稿的 courses 也可能是坏形态（外部写入），先归一再遍历
+    if (!Array.isArray(d.courses)) d.courses = [];
     d.courses.forEach(c => {
       if (!c.baseFlag) {
         const ac = session.allCourses.find(x => x.code === c.code);

@@ -156,8 +156,7 @@ export async function launch(): Promise<void> {
     await store.set(K.sem, session.SEM);
     const SEM0 = session.SEM;
     await cleanupLegacyKeys();
-    const savedManual = await store.get<ManualEvent[]>(K.manualEvents);
-    session.manualEvents = Array.isArray(savedManual) ? savedManual : [];
+    session.manualEvents = await store.getArray<ManualEvent>(K.manualEvents);
     let sd: { ver: number; plan: PlanCourse[] } | null = (await store.get<{ ver: number; plan: PlanCourse[] }>(K.staticData)) || null;
     if (sd && sd.ver !== DATA_VER) {
       console.log(TAG, 'data version mismatch, clearing cache');
