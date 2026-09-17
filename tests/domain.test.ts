@@ -672,7 +672,9 @@ describe('matchPoolRow 池行三段匹配', () => {
   });
   it('课序无匹配 → 同课同师（多师行含单师）', () => {
     expect(matchPoolRow(rows, '9', '乙')!.seq).toBe('2');
-    expect(matchPoolRow(rows, '9', '丙')).toBe(rows[0]);
+  });
+  it('课序/教师均不命中 → undefined（多班不盲取首行，宁缺勿错）', () => {
+    expect(matchPoolRow(rows, '9', '丙')).toBeUndefined();
   });
   it('teacherHit 只做正向包含', () => {
     expect(teacherHit(rows[2] as never, '乙')).toBe(true);

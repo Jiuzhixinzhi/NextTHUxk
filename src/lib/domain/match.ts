@@ -2,6 +2,8 @@
 // NextTHUxk — 课程身份匹配（纯函数）
 // 课序号会陈旧/缺位，教师才是最高身份（上游 #33「课序会骗人」）；
 // 池行三段匹配修同课号多班借错时间/学分（上游 d28bdb5 同款）。
+// 盲取首行已除（用户报：形策一课号多班，已选行被「左侧列表第一项」借走时间）——
+// 课序/教师均不命中即返回 undefined，宁缺勿错，交由如实缺省。
 // ═══════════════════════════════════════════════════════════════
 import type { Course } from './types';
 import { normSeq } from '../core/utils';
@@ -19,15 +21,11 @@ export function teacherHit(r: Course, teacher: string): boolean {
   return !!t && (t === teacher || t.includes(teacher));
 }
 
-/** 池行三段匹配：归一精确课序 → 同课同师 → 首行兜底（rows 须已按课号过滤）。
- *  同课号多班下直接取 rows[0] 会借错时间/学分张冠李戴。 */
+/** 池行匹配：归一精确课序 → 同课同师；均不命中返回 undefined（rows 须已按课号过滤）。
+ *  同课号多班下取 rows[0] 会借错时间张冠李戴（用户报形策），故不再兜底首行。 */
 export function matchPoolRow(rows: Course[], seq: string | number | undefined | null, teacher?: string | null): Course | undefined {
   if (!rows || !rows.length) return undefined;
   const ns = normSeq(seq || '0');
   const t = normTeacher(teacher);
-  return (
-    rows.find(x => normSeq(x.seq || '0') === ns) ||
-    (t ? rows.find(x => teacherHit(x, t)) : undefined) ||
-    rows[0]
-  );
+  return rows.find(x => normSeq(x.seq || '0') === ns) || (t ? rows.find(x => teacherHit(x, t)) : undefined);
 }

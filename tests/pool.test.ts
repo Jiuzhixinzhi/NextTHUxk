@@ -63,18 +63,34 @@ describe('mergePoolRows（搜索行入池）', () => {
     expect(pool[0]).toMatchObject({ capacity: 40, remaining: 0 });
   });
 
-  it('借时间：可解析新行之时间/说明借给池内未解析的已选/候补行', () => {
+  it('借时间：同师行的时间/说明借给池内未解析的已选/候补行', () => {
     const pool: Course[] = [
-      c({ code: 'A', seq: '01', selected: true, time: '' }),
-      c({ code: 'A', seq: '02', isCandidate: true, time: '' }),
-      c({ code: 'A', seq: '03', time: '' }), // 非已选/候补 → 不借
+      c({ code: 'A', seq: '02', teacher: '张三', selected: true, time: '' }),
+      c({ code: 'A', seq: '04', teacher: '张三', isCandidate: true, time: '' }),
+      c({ code: 'A', seq: '05', time: '' }), // 非已选/候补 → 不借
     ];
-    mergePoolRows(pool, [c({ code: 'A', seq: '01', time: '1-2(1-16周)', note: '说明' })]);
+    mergePoolRows(pool, [c({ code: 'A', seq: '01', teacher: '张三', time: '1-2(1-16周)', note: '说明' })]);
     expect(pool[0]!.time).toBe('1-2(1-16周)');
     expect(pool[0]!.note).toBe('说明');
     expect(pool[1]!.time).toBe('1-2(1-16周)');
     expect(pool[1]!.xkTextNote).toBe('说明');
     expect(pool[2]!.time).toBe('');
+  });
+
+  it('形策式回归：同课号多班只借同课序，不借列表首项', () => {
+    // 已选班 seq 02 时间缺失；干扰班（列表首项）seq 01 与正确班 seq 02 同批到达
+    const pool: Course[] = [c({ code: 'A', seq: '02', selected: true, time: '' })];
+    mergePoolRows(pool, [
+      c({ code: 'A', seq: '01', time: '4-6(1-8周),5-6(4周)' }),
+      c({ code: 'A', seq: '02', time: '4-6(1-8周),2-4(5周)' }),
+    ]);
+    expect(pool[0]!.time).toBe('4-6(1-8周),2-4(5周)');
+  });
+
+  it('同课号多班且无课序/教师匹配 → 不盲借首行（宁缺勿错）', () => {
+    const pool: Course[] = [c({ code: 'A', seq: '09', selected: true, time: '' })];
+    mergePoolRows(pool, [c({ code: 'A', seq: '01', time: '4-6(1-8周),5-6(4周)' })]);
+    expect(pool[0]!.time).toBe('');
   });
 
   it('可解析行回调一次（供调用方写 knote 时间记忆）', () => {
