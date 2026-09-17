@@ -52,7 +52,7 @@ src/
 
 ## 硬性规则
 
-1. **版本字段**：运行时版本由 `curVer()` 单源读 `chrome.runtime.getManifest().version`（勿在别处硬编码版本）；发版时同步 `manifest.json` version 与 `BUILD`（src/lib/core/constants.ts）；存储结构变更递增 `DATA_VER`（不匹配即整体清缓存）；严重缺陷版本加入 `DANGEROUS_VERS`。
+1. **版本字段**：运行时版本由 `curVer()` 单源读 `chrome.runtime.getManifest().version`（勿在别处硬编码版本）；发版时同步 `manifest.json` version 与 `BUILD`（src/lib/core/constants.ts）；存储结构变更递增 `DATA_VER`（不匹配即整体清缓存）；严重缺陷版本加入 `DANGEROUS_VERS`。例外：满足「防御读 + 首写覆写 + 失败可退」三条的收紧可豁免递增，须登记先例（见 `docs/adr/0005`；先例 `zyCache` 裸 map → `{sem, map}`）。
 2. **GBK 双向契约**：中文查询参数必须经 `gbkPercentEncode`（net/gbk.ts）编码（p_kcm / p_zjjsxm / pathContent，UTF-8 直发 0 行）；响应解码用 `decodeBest` / `fetchPageDual`+`pickDecoded`，不得假定单编码。**gbk-table.ts 勿手改**（改 gbk.js 数据后由 node 运行时导出重生；表条目与 b64 半表长度必须一致——历史 Bug：正则截取多了 5 个字符导致整表错位）。
 3. **风暴护栏**（api/search.ts `serverSearchStorm`）：精确课号只探 1 页；≤25 页全量，>25 只探 5 页；5 并发 + 30ms×槽位错峰；定向志愿补拉 `p_kch` 限 4 门/次（本批优先、池内旧行分批补）——严禁加深深页探测（历史教训：25 连发打满代理 token）。
 4. **一次性 token 链**（api/write.ts `fetchFormSubmit`）：排队二段提交必须从第一段响应 HTML 提取新 token（旧 token 已消耗）；缺新 token 显式报错，不得复用。

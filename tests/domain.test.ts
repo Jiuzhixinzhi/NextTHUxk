@@ -11,7 +11,8 @@ import { normSeq, keyOf } from '../src/lib/core/utils';
 import { checkPlanCoverage } from '../src/lib/domain/plancov';
 import { creditsOf } from '../src/lib/domain/credits';
 import { matchPoolRow, teacherHit } from '../src/lib/domain/match';
-import { entryBaseFlag } from '../src/lib/domain/flags';
+import { entryBaseFlag, canAdjustZy } from '../src/lib/domain/flags';
+import { ZY_LIMITS } from '../src/lib/core/constants';
 
 describe('parseTimeSlots', () => {
   it('解析标准大节（教务时间串 = 周X-第几节）', () => {
@@ -717,5 +718,97 @@ describe('培养方案覆盖', () => {
     const pool = [{ code: 'X1', seq: '1', name: '第二外国语(日语)', attr: '任选' }] as never;
     const cov = checkPlanCoverage(plan, pool, []);
     expect(cov[0]!.covered).toBe(false);
+  });
+});
+
+describe('canAdjustZy（志愿档位上限；B1 尾项 keyOf 自排除）', () => {
+  const sports = (v: Record<string, unknown>) => ({ name: '太极', typeLabel: '体育', typeCode: 'ty', ...v }) as never;
+
+  it("同课班前导零拼写不占自己档位（'01' vs '1'）", () => {
+    // 池内自己（seq '1'，志愿 2）在体育 2 志愿档（上限 1）；卡片是同一课班（seq '01'）
+    const pool = [sports({ code: 'A', seq: '1', selected: true, zy: 2 })];
+    const course = sports({ code: 'A', seq: '01', zy: 1 });
+    expect(canAdjustZy(pool, course, 2, ZY_LIMITS)).toBe(true);
+  });
+
+  it('他课占满同档位仍拦截', () => {
+    const pool = [sports({ code: 'B', seq: '1', selected: true, zy: 2 })];
+    const course = sports({ code: 'A', seq: '01', zy: 1 });
+    expect(canAdjustZy(pool, course, 2, ZY_LIMITS)).toBe(false);
+  });
+
+  it('必修 1 志愿上限 1：已有一门即拦截，改投 3 志愿放行', () => {
+    const bx = (v: Record<string, unknown>) => ({ name: '高数', typeLabel: '必修', typeCode: '006', ...v }) as never;
+    const pool = [bx({ code: 'A', seq: '1', selected: true, zy: 1 })];
+    const course = bx({ code: 'B', seq: '1', zy: 2 });
+    expect(canAdjustZy(pool, course, 1, ZY_LIMITS)).toBe(false);
+    expect(canAdjustZy(pool, course, 3, ZY_LIMITS)).toBe(true);
+  });
+});
+
+describe('cascadeOf 边界（B10 尾项）', () => {
+  const c = (v: Record<string, unknown>) => v as never;
+
+  it('无容量数据 → null', () => {
+    expect(cascadeOf(c({ code: 'x', seq: '1', name: '课' }), 'bx', 1)).toBeNull();
+    expect(cascadeOf(c({ code: 'x', seq: '1', name: '课', volCapacity: 0 }), 'bx', 1)).toBeNull();
+  });
+
+  it('体育按 volSports 拆档：prior 为低志愿之和，seats 截 0', () => {
+    const ty = cascadeOf(c({ code: 'x', seq: '1', name: '太极', volCapacity: 10, volSports: '(1)2,4,5' }), 'ty', 2)!;
+    expect(ty.pool).toBe(10);
+    expect(ty.prior).toBe(2);
+    expect(ty.peers).toBe(4);
+    expect(ty.seats).toBe(8);
+    expect(ty.hasVol).toBe(true);
+  });
+
+  it('必修 3 志愿：prior 为 1/2 志愿之和，seats = pool - prior', () => {
+    const bx = cascadeOf(c({ code: 'x', seq: '1', name: '高数', volCapacity: 50, volRequired: '(1)15,20,25' }), 'bx', 3)!;
+    expect(bx.prior).toBe(35);
+    expect(bx.peers).toBe(25);
+    expect(bx.seats).toBe(15);
+  });
+
+  it('prior 超池 → seats 截 0（不为负）', () => {
+    const bx = cascadeOf(c({ code: 'x', seq: '1', name: '高数', volCapacity: 10, volRequired: '(1)15,20,25' }), 'bx', 3)!;
+    expect(bx.seats).toBe(0);
+  });
+});
+
+describe('creditDist（B10 尾项：伯努利卷积边界）', () => {
+  const item = (credits: number, prob: number | null): never => ({ name: 'c', credits, prob, liveProb: prob }) as never;
+
+  it('空池 → 单点 0 学分概率 1', () => {
+    const d = creditDist([]);
+    expect(d).toEqual({ points: [{ credits: 0, prob: 1 }], expected: 0, mode: 0, total: 0 });
+  });
+
+  it('概率 0 参与总学分但分布点仍在 0', () => {
+    const d = creditDist([item(3, 0)]);
+    expect(d.total).toBe(3);
+    expect(d.expected).toBe(0);
+    expect(d.points).toEqual([{ credits: 0, prob: 1 }]);
+  });
+
+  it('确定中签 → 期望=学分、众数=学分', () => {
+    const d = creditDist([item(3, 1)]);
+    expect(d.expected).toBe(3);
+    expect(d.mode).toBe(3);
+    expect(d.points).toEqual([{ credits: 3, prob: 1 }]);
+  });
+
+  it('两门独立卷积：四状态等权，expected=Σ p·学分，众数取最小并列', () => {
+    const d = creditDist([item(3, 0.5), item(2, 0.5)]);
+    expect(d.total).toBe(5);
+    expect(d.points).toHaveLength(4);
+    expect(d.points.map(p => p.credits)).toEqual([0, 2, 3, 5]);
+    expect(d.expected).toBeCloseTo(2.5);
+    expect(d.mode).toBe(0);
+  });
+
+  it('prob 非法（null / >1）与 0 学分条目被剔除', () => {
+    const d = creditDist([item(3, null), item(0, 1), item(2, 1.5)]);
+    expect(d).toEqual({ points: [{ credits: 0, prob: 1 }], expected: 0, mode: 0, total: 0 });
   });
 });

@@ -44,7 +44,21 @@
 - **深化方向**：池拥有 `applyServerResult` / `applyQueue` / `mergeCandidates` 三个操作；一个 domain join 供 preview 与 pool 共用。
 - **收益**：合并策略进 vitest（现在只能靠网络 mock）；「已选X · 余Y · 排队Z」口径单一归属。
 
-### B3. session 拆解：启动编排根 + 元数据回填引擎 + zy 解析
+### B3. session 拆解：启动编排根 + 元数据回填引擎 + zy 解析 —— ✅ 已完成
+> 已落地：编排根独立为 `stores/launch.svelte.ts`（launch 两阶段显式序列 + banner + 子系统接线 +
+> `changeSemester`/`closeWorkbench`/`openWorkbench` 生命周期；`main.ts bootAndLaunch` 与
+> `App.svelte openWorkbench` 两份复制入口合龙）；两份回填引擎收拢为 `domain/backfill.ts` 纯核
+> （`runBackfillRow` + 批式/池式两驱动，步调数值原样）＋ `stores/backfill.svelte.ts` IO 接线
+> （`backfillCandidateMeta` 自 api/records 上移，api 层不必再注入 `shouldPause`）；志愿号解析
+> 独立为 `domain/zy.ts`（分配纯核）+ `stores/zy.svelte.ts`（缓存水合/弹窗策略）；前台让路协议
+> 收拢进 bus（`withForeground`/`waitForegroundIdle`）。session 由 731 行降至约 360 行。
+> **顺带修复 4 处 v3 改写期回归/缺口**：① `zyCache` 只写不读（v2 `state.js:554` 有水合，
+> v3 丢失）→ 恢复 `{sem, map}` 防御水合（异学期/旧形态即弃，不递增 DATA_VER）；② `zyConfirm`
+> 弹窗不可达（`refreshSelected` 全调用点传 `withModal=false`）→ launch 后台尾部
+> `resolveZyMissing` 恢复 v2「缺号补问」语义，手填 `confirmed:true` 持久不再重复询问；
+> ③ `changeSemester` 不重置回填预算/扫描缓存（`_selTried` 跨学期残留）→ 补 `resetBfBudget()`；
+> ④ 死代码 `zyCacheDirty`/`bfStatusFor`/`_bfStatus` 清除。新增 `tests/zy.test.ts`（10 例）与
+> `tests/backfill.test.ts`（8 例）锁死分配优先级/手填持久语义/让路不耗预算/两种匹配口径。
 - **文件**：`src/lib/stores/session.svelte.ts`（777 行、~12 项职责）、`api/records.ts`。
 - **问题**：`launch()`（127-307）是组合根却蹲在状态模块（还管 banner 281-289 / 更新检查 / reviews/scores 接线）；「补齐缺失元数据」引擎两份——`backfillSelTimes`（626-751，96 行，batch5 + sleep60 + `_selTried` 预算 + `_bfScanP` 扫描）vs `backfillCandidateMeta`（records.ts:256-280，runPool4 + sleep30），预算/步调互异；`resolveCourseZy`（309-381）函数中途弹 modal（控制流依赖 UI）；前台让路协议散在 `bus` / `search.withForeground` / `session.waitForegroundIdle`（636-643）/ `records` 注入的 `shouldPause`（256-261）四文件。
 - **深化方向**：抽一个可注入的回填引擎（两调用方参数化预算/步调）；zy 解析独立；`launch` 退化为显式编排序列；子系统「注册进 launch + hydrate + changeSemester 重置」模式给单一归属。
@@ -114,28 +128,28 @@
 
 ## C. 层内其它已知摩擦（小项，可顺手）
 
-- `src/lib/stores/uicards.svelte.ts`（27 行）：map + 4 个一行函数，接口≈实现；可并入卡片视图状态。`CourseList.svelte:27` 还在直改 `uicards.map[key]`。
-- `src/lib/stores/backup.svelte.ts`：非模块而是编排脚本，直改 `draftStore.drafts` / `session.manualEvents` / `probHist.map` 并绕过各自 persist 路径；导入/合并归属应在各 store。
+- `src/lib/stores/uicards.svelte.ts`（27 行）：map + 4 个一行函数，接口≈实现；可并入卡片视图状态。~~`CourseList.svelte:27` 还在直改 `uicards.map[key]`~~ ✅ 已改道（顺带批次：走 `setCardsExpand`）。
+- `src/lib/stores/backup.svelte.ts`：非模块而是编排脚本，直改 `draftStore.drafts` / `session.manualEvents` / `probHist.map` 并绕过各自 persist 路径；导入/合并归属应在各 store（导入草稿 id 已改走 `nextDraftId()`）。
 - `drafts.svelte.ts` 对 `DraftPanel.svelte` 导出 16 个符号（宽接口）；`DraftPanel` 内联导入确认绕过 modal。
-- 两个「预览行」入口：`session.selectedPreviewRows()`（session:85）vs `drafts.previewRowsNow()`（drafts:53），`Timetable.svelte:2,5` 同时 import 两者；`:125 void search;` 为未用 import 续命。
-- 组件越过 stores 直连 storage：`FilterBar.svelte:3,9,20`（filtersOpen）、`TopBar.svelte:29-31`（lastUpdateCheck）。
-- `main.ts:58-67 bootAndLaunch` 与 `App.svelte:17-21 openWorkbench` 重复 loadDrafts→launch 序列；`main.ts:35-45`/`45-55` chrome/browser onMessage 双胞胎。
-- 死代码：`TopBar.svelte:10` import `banner` 未用；`CourseCard:292-304 chainNode` 单处使用。（`utils.ts rawKeyOf`/`normSeqOf`/`normSeqK` 已在 B1 删除）
-- 纯函数不纯：`domain/draft.ts:122 newDraft` 用 `Date.now()` 造 id（同 ms 撞 id）；`domain/scores.ts:71 slimScores` 内嵌 `Date.now()`；`domain/time.ts:43 slotCache` 返回共享引用（可外部变异污染）。
+- 两个「预览行」入口：`session.selectedPreviewRows()`（session:85）vs `drafts.previewRowsNow()`（drafts:53），`Timetable.svelte:2,5` 同时 import 两者。~~`:125 void search;` 为未用 import 续命~~ ✅ 已清（顺带批次）。
+- ~~组件越过 stores 直连 storage：`FilterBar.svelte:3,9,20`（filtersOpen）、`TopBar.svelte:29-31`（lastUpdateCheck）~~ ✅ 已修（顺带批次：filtersOpen 归 search store；lastUpdateCheck 走 `resetUpdateThrottle()`）。
+- ~~`main.ts:58-67 bootAndLaunch` 与 `App.svelte:17-21 openWorkbench` 重复 loadDrafts→launch 序列~~ ✅ 已修（B3：`launch.svelte.ts openWorkbench` 单入口）；~~`main.ts:35-45`/`45-55` chrome/browser onMessage 双胞胎~~ ✅ 已去重（顺带批次）。
+- 死代码：~~`TopBar.svelte:10` import `banner` 未用~~ ✅ 已清（B3）；`CourseCard:292-304 chainNode` 单处使用。（`utils.ts rawKeyOf`/`normSeqOf`/`normSeqK` 已在 B1 删除；`zyCacheDirty`/`bfStatusFor`/`_bfStatus` 已在 B3 清除）
+- ~~纯函数不纯：`domain/draft.ts:122 newDraft` 用 `Date.now()` 造 id（同 ms 撞 id）；`domain/scores.ts:71 slimScores` 内嵌 `Date.now()`；`domain/time.ts:43 slotCache` 返回共享引用（可外部变异污染）~~ ✅ 已修（顺带批次：id/ts 注入 + `parseTimeSlots` 返回副本；草稿 id 走 store 单调 `nextDraftId()`）。
 - `api/records.ts:484` `fetchQueueData` 裸 `fetch`（绕过 net/http 的超时/解编码/壳页自愈）并内嵌 `qFailStreak>=3` 熔断。
 - `paged.ts` 接口泄漏：调用方须知道 0/1 都映射未分页 URL、页 0-indexed、且需自备 `expectPages`。
 - ~~**`domain/timetable-layout.ts:85,106,122` 块键 `code_seq_tag` 不含 day**~~ ✅ 已修（`a130dac`）：
   键改 `code_seq_day_tag`（merge/`laneOf` 按日隔离），钟点 span 的 tag 由恒 0 改为 `when`；
   另有 4 例测试（同大节跨两日 / 拆周段仍并 / 外校课复合日 / 同日两段钟点）。
-- **剩余裸课序比较（B1 尾项）**：`domain/flags.ts:64`（`canAdjustZy` 自我排除——同一课班两种拼写会占掉
-  自己的志愿档，语义最重）、`stores/drafts.svelte.ts:313,:449`、`Timetable.svelte:72,:108`
-  （`findIndex` 失配 → 移除按钮静默无效）。`CreditSimModal`/`DraftCourseRow` 已在 `5b200c3` 收编。
-- **`domain/pool.ts:11 hasParsedTime` 兼任 `backfillSelTimes`（session.svelte.ts:609）的「需回填」判定**：
+- ~~**剩余裸课序比较（B1 尾项）**：`domain/flags.ts:64`（`canAdjustZy` 自我排除）· `stores/drafts.svelte.ts:313,:449` ·
+  `Timetable.svelte:72,:108`（`findIndex` 失配 → 移除按钮静默无效）~~ ✅ 已全部收编到 `keyOf`（顺带批次，附
+  `canAdjustZy` 3 例守门测试）；`CreditSimModal`/`DraftCourseRow` 已在 `5b200c3` 收编。
+- **`domain/pool.ts:11 hasParsedTime` 兼任 `backfillSelTimes` 的「需回填」判定**：
   选课文字说明里含任意 `HH:MM-HH:MM`（如实验/练习时段）即判为「时间已解析」→ 该行不再走服务端回填，
   可能长期挂在这个说明钟点上。v1.5.0 起即如此（本批次只是收拢改名），要分离须新增「大节已解析」谓词。
 - `stores/volunteer.svelte.ts:123 volNeedsDeptRetry` ~~的 `isQueuePhase` 形参在唯一调用点恒 false
   （session.svelte.ts:548 已在 `!session.isQueuePhase` 内）→ 该早退分支不可达~~ ✅ 已删参（`a130dac`）。
-- `storage/knote.ts knoteLoad` 的旧键迁移只改内存映射，要等下次 `knote` 写入才落盘（幂等，无正确性影响）。
+- ~~`storage/knote.ts knoteLoad` 的旧键迁移只改内存映射，要等下次 `knote` 写入才落盘（幂等，无正确性影响）~~ ✅ 已修（顺带批次：迁移有差异即落盘一次）。
 
 ---
 
@@ -143,18 +157,21 @@
 
 1. ~~**B6**~~ ✅ 已完成（本批次）
 2. ~~**B1**~~ ✅ 已完成（本批次）
-3. ~~**B2**~~ ✅ 已完成（本批次）；**B3** 待做（依赖 B2 已立的池操作）
-4. **B5**（缓存 owner，为 B3 铺路）
+3. ~~**B2 / B3**~~ ✅ 已完成（B2 本批次 · B3 后续会话）；B3 已立池操作/回填/zy 三处接缝
+4. ~~**B5**~~（缓存 owner，为 B3 铺路）✅ 已完成（本批次）
 5. **B4**（技术风险最高，需先立守门测试；风暴护栏数值锁死）
-6. ~~**B7 / B8**~~（B8 ✅ 已完成；B7 ModalHost 拆解待做）
+6. ~~**B8**~~（B8 ✅ 已完成；B7 ModalHost 拆解 ✅ 部分完成，尾项待做）
 7. ~~**B9** /~~ B10（B9 ✅ 已完成；B10 可并行，任意批次的必备搭子）
 
-已完成批次：B1 `721bf4c` · B2 `8e7a96e` · B5 `18f2a6e` · B6 `b096496` · B7(部分) `12aa979` · B8 `8b91558` · B9 `02e35f8` · B10(部分) `0e9824e`
+已完成批次：B1 `721bf4c` · B2 `8e7a96e` · B3（后续会话）· B5 `18f2a6e` · B6 `b096496` · B7(部分) `12aa979` · B8 `8b91558` · B9 `02e35f8` · B10(部分) `0e9824e`
 评审跟进（PR #32 首轮 review）：Step 1 `5b200c3`（学分模拟/草稿行课班查找归一 + 互斥覆盖确认阶段）· Step 2 `d02c04f`（志愿院系拉取判定取反 → 恢复 v1.5.0「过期则拉」，附 `tests/volunteers.test.ts` 7 例守门）
 评审跟进（二轮 review）：`a130dac`（课表块键补 day 维度 + 钟点 span 用几何做 tag + `volNeedsDeptRetry` 删死参，附 4 例测试）
-剩余未做：**B3**（session 拆解，最大）· **B4**（分页重试统一，风险最高）· B7 尾项（DraftPanel 导入确认）· B10 尾项（见上）· C 节小项（含 B1 尾项裸课序比较等）
+B3 后续会话：`launch.svelte.ts`（编排根/横幅/生命周期/openWorkbench）· `domain/backfill.ts` + `stores/backfill.svelte.ts`（回填引擎合一）· `domain/zy.ts` + `stores/zy.svelte.ts`（志愿号解析）· bus 前台让路收拢；顺带修 zyCache 不水合 / zyConfirm 不可达 / changeSemester 生命周期缺口 / 死代码，附 `tests/zy.test.ts`(10) + `tests/backfill.test.ts`(8)
+顺带批次：B1 尾项裸课序比较全收编（flags/drafts/Timetable + `canAdjustZy` 3 例）· 纯函数不纯三处（newDraft id / slimScores ts / slotCache 共享引用）· knote 迁移落盘 · 组件直连 storage 归位（filtersOpen 入 search store / `resetUpdateThrottle`）· main.ts onMessage 去重 · CourseList 走 uicards API · Timetable 死 import；新增 `tests/update-check.test.ts`(10) + `domain.test.ts` 补 `cascadeOf`/`creditDist`/`canAdjustZy`；`docs/adr/` 四条决策落档
+评审跟进（三轮 review）：`toggleWorkbench` 统一 popup/launch 按钮翻转（launch 中弹「正在加载」不关台；旧 popup 会中途关台）· 回填前台中途接手恢复「⊘前台占用跳过」标签（`runBackfillRow` 补 0 行 + 占用判跳过，附 1 例）· Timetable import 拆行 · `refreshSelected` 默认 withModal 注释澄清 · zyCache 豁免落 `docs/adr/0005` + AGENTS 规则 1 注记
+剩余未做：**B4**（分页重试统一，风险最高）· B7 尾项（DraftPanel 导入确认）· B10 尾项（`fetchLevelTable` 启发式判据 / `fetchQueueData` 裸 fetch / `update` 与 `probability` 补测）· C 节遗留大项（backup 直改 / 双预览行入口 / hasParsedTime 兼任判定 / paged 接口泄漏）
 
-## E. 需记录的决策（建议补 ADR，仓库当前无 docs/adr/）
+## E. 已记录的决策（✅ 顺带批次落档 `docs/adr/`）
 
 - 周次冲突：单双周互斥、`unknown` 保守判重叠、自定义占用保持全周、外校课入冲突与课表、预览叠加不按周切换（本批次据用户口头决策实现，仅落在 CONTEXT.md「时间冲突」词条）。
 - 兼容底线：Firefox 128+、单 IIFE content script、chrome/Firefox storage 双形态（不得引入 ES module content script）。
@@ -162,6 +179,8 @@
 - **窗口新鲜度函数命名约定**（`d02c04f` 教训）：判定函数一律写「过期 → true」，直接把 `volNeedsRefresh`
   传进去（`VolOpts.needsRefresh`）；禁止再套 `ts => !volNeedsRefresh(ts)` 这类双重否定——
   v3 改写期正是这样把 v1.5.0 的「过期则拉」整式取反，且被缺行自愈的 `force=true` 路径掩盖了两代版本。
+- **存储形状变更豁免 `DATA_VER`**（ADR 0005）：同时满足「防御读（异形态/异学期即弃）+ 首写覆写 + 失败可退」三条时
+  可不递增；先例 `zyCache` 裸 map → `{sem, map}`。不满足任一条仍须递增。
 
 ## F. 依赖方向（评审红线）
 

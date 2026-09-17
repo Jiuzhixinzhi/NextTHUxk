@@ -2,8 +2,9 @@
   import { draftStore, setPreview, removeActiveCourse, previewRowsNow } from '../../lib/stores/drafts.svelte.ts';
 
   const previewRows = $derived.by(() => previewRowsNow());
-  import { session, removeManualEvent, backfillSelTimes, resetBfBudget, dropCourseFlow, selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
-  import { search, jumpTo } from '../../lib/stores/search.svelte.ts';
+  import { session, removeManualEvent, dropCourseFlow, selectedPreviewRows } from '../../lib/stores/session.svelte.ts';
+  import { retrySelBackfill } from '../../lib/stores/launch.svelte.ts';
+  import { jumpTo } from '../../lib/stores/search.svelte.ts';
   import { layoutPreview, axisHours, dayNames, type PreviewBlock } from '../../lib/domain/timetable-layout';
   import { calcProb, probBg } from '../../lib/domain/probability';
   import { draftCourseFromSelected } from '../../lib/domain/draft';
@@ -69,7 +70,7 @@
       await dropCourseFlow(b.code!, b.seq || '0', c?.name || b.label);
       return;
     }
-    const idx = previewRows.findIndex((x) => x.code === b.code && String(x.seq || '0') === String(b.seq || '0'));
+    const idx = previewRows.findIndex((x) => keyOf(x.code, x.seq) === keyOf(b.code || '', b.seq || '0'));
     if (idx >= 0) removeActiveCourse(idx);
   }
 
@@ -95,8 +96,7 @@
   }
 
   function onRetry() {
-    resetBfBudget();
-    void backfillSelTimes();
+    retrySelBackfill();
   }
 
   function undetClick(u: { manual: boolean; code: string; seq: string; id?: number }) {
@@ -105,7 +105,7 @@
       return;
     }
     if (draftStore.preview.kind !== 'selected') {
-      const idx = previewRows.findIndex((x) => x.code === u.code && String(x.seq || '0') === String(u.seq));
+      const idx = previewRows.findIndex((x) => keyOf(x.code, x.seq) === keyOf(u.code, u.seq));
       if (idx >= 0) removeActiveCourse(idx);
     } else {
       // 未定时间块无教师字段：从池行回查（候补/已选均可能）
@@ -119,8 +119,6 @@
   function originColorOf(b: PreviewBlock): string {
     return ORIGIN_COLORS[b.origin] || '#666';
   }
-
-  void search;
 </script>
 
 <div class="nx-sec">

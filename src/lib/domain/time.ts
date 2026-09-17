@@ -129,11 +129,12 @@ export function weeksOverlap(a: WeekOcc, b: WeekOcc): boolean {
   return false;
 }
 
-/** 时间串解析 + 同类项合并（缓存：全校时间串种类有限） */
+/** 时间串解析 + 同类项合并（缓存：全校时间串种类有限）。
+ *  返回数组副本——缓存数组是共享引用，调用方变异不得污染后续解析（B3 顺带加固）。 */
 export function parseTimeSlots(timeStr: string | undefined | null): Slot[] {
   if (!timeStr) return [];
   const hit = slotCache.get(timeStr);
-  if (hit) return hit;
+  if (hit) return hit.slice();
   const slots: Slot[] = [];
   const re = /(\d+)\s*[-–—]\s*(\d+)\s*\(([^)]*)\)/g;
   let m: RegExpExecArray | null;
@@ -153,7 +154,7 @@ export function parseTimeSlots(timeStr: string | undefined | null): Slot[] {
   }
   const out = [...merged.values()];
   slotCache.set(timeStr, out);
-  return out;
+  return out.slice();
 }
 
 // ── 外校课（北大/北外）时间与来源（OneTHU Courses.tsx 移植）──

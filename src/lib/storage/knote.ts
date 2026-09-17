@@ -15,10 +15,15 @@ export async function knoteLoad(): Promise<KnoteMap> {
     if (!v || typeof v !== 'object') return {};
     // 键迁移：历史版本用原始课序拼键（'01'），统一为 keyOf 归一拼写（含 '01'/'1' 双写法去重）
     const out: KnoteMap = {};
+    let changed = false;
     for (const [k, val] of Object.entries(v)) {
       const i = k.indexOf('_');
-      out[i >= 0 ? keyOf(k.slice(0, i), k.slice(i + 1)) : k] = val;
+      const nk = i >= 0 ? keyOf(k.slice(0, i), k.slice(i + 1)) : k;
+      if (nk !== k) changed = true;
+      out[nk] = val;
     }
+    // 迁移结果落盘（原只改内存映射，要等下一条 knote 写入才生效；幂等）
+    if (changed) await store.set(K.knote, out).catch(() => {});
     return out;
   } catch {
     return {};

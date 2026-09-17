@@ -52,7 +52,7 @@ export function ensureScores(ctx: Ctx): Promise<boolean> {
     }
     try {
       const text = await fetchPage(ctx.BASE + EP + encodeURIComponent(ctx.SEM) + EP_TAIL);
-      const cache = slimScores(JSON.parse(text), ctx.SEM);
+      const cache = slimScores(JSON.parse(text), ctx.SEM, Date.now());
       hydrate(cache);
       console.log(TAG + '[Score]', '校评全量拉取', ctx.SEM, Object.keys(cache.map).length + ' 门');
       try {

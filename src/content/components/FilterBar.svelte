@@ -1,23 +1,11 @@
 <script lang="ts">
-  import { search, setChip, setServerField, setLocalField } from '../../lib/stores/search.svelte.ts';
-  import { store, K } from '../../lib/storage/store';
+  import { search, setChip, setServerField, setLocalField, loadFiltersOpen, setFiltersOpen } from '../../lib/stores/search.svelte.ts';
 
-  let open = $state(true);
-
-  $effect(() => {
-    if (sessionOpen()) {
-      void store.get<boolean>(K.filtersOpen).then((v) => {
-        open = !!v;
-      });
-    }
-  });
-  function sessionOpen() {
-    return true;
-  }
+  // 展开态由 search store 持有（含持久化）；组件只读状态 + 调动作
+  loadFiltersOpen();
 
   function toggle() {
-    open = !open;
-    void store.set(K.filtersOpen, open);
+    setFiltersOpen(!search.filtersOpen);
   }
 
   const chips = [
@@ -36,9 +24,9 @@
 
 <div style="margin-top:8px;">
   <button class="nx-ghost-btn" style="width:100%;font-size:11px;" onclick={toggle}>
-    {open ? '收起筛选 ▴' : '展开筛选 ▾'}
+    {search.filtersOpen ? '收起筛选 ▴' : '展开筛选 ▾'}
   </button>
-  {#if open}
+  {#if search.filtersOpen}
     <div class="flex flex-wrap gap-1.5" style="margin-top:8px;">
       {#each chips as [f, label] (f)}
         <button class:on={search.chip === f} class="nx-chip" onclick={() => setChip(f)}>{label}</button>

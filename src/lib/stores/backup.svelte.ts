@@ -8,7 +8,7 @@ import type { Draft, ManualEvent, VolDatum } from '../domain/types';
 import { mergeHistSeries, sanitizeHistMap, type VolHistMap } from '../domain/probhist';
 import { showToast } from './toast.svelte.ts';
 import { confirmDialog } from './modal.svelte.ts';
-import { draftStore, loadDrafts, importJson } from './drafts.svelte.ts';
+import { draftStore, loadDrafts, importJson, nextDraftId } from './drafts.svelte.ts';
 import { session } from './session.svelte.ts';
 import { search } from './search.svelte.ts';
 import { probHist } from './probhist.svelte.ts';
@@ -113,7 +113,7 @@ export async function backupImport(jsonStr: string): Promise<void> {
       if (exist) {
         exist.courses = dd.courses;
         exist.createdAt = dd.createdAt || exist.createdAt || Date.now();
-        if (!exist.id) exist.id = Date.now();
+        if (!exist.id) exist.id = nextDraftId();
         dRep++;
         continue;
       }
@@ -122,7 +122,7 @@ export async function backupImport(jsonStr: string): Promise<void> {
         dSkip++;
         continue;
       }
-      draftStore.drafts.push({ id: dd.id || Date.now() + i, name: dd.name, courses: dd.courses, createdAt: dd.createdAt || Date.now() });
+      draftStore.drafts.push({ id: dd.id || nextDraftId(), name: dd.name, courses: dd.courses, createdAt: dd.createdAt || Date.now() });
       dAdd++;
     }
     if (dAdd || dRep) {

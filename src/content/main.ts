@@ -5,8 +5,7 @@ import { mount } from 'svelte';
 import App from './App.svelte';
 import css from './app.css?inline';
 import { TAG, BUILD, curVer } from '../lib/core/constants';
-import { bootSite, session } from '../lib/stores/session.svelte.ts';
-import { loadDrafts, draftStore } from '../lib/stores/drafts.svelte.ts';
+  import { bootSite } from '../lib/stores/session.svelte.ts';
 
 async function main(): Promise<void> {
   if (window.parent !== window) return;
@@ -31,39 +30,20 @@ async function main(): Promise<void> {
 
   mount(App, { target: shadow });
 
-  // popup 转发：启动/展示工作台
+  // popup 转发：翻转工作台（browser/chrome 双形态同一处理器；launch 中弹「正在加载」）
+  const onToggle = (msg: { action?: string }): void => {
+    if (msg && msg.action === 'nextthuxk-toggle') void toggleFromPopup();
+  };
   if (typeof browser !== 'undefined') {
-    browser.runtime.onMessage.addListener((msg: { action?: string }) => {
-      if (msg && msg.action === 'nextthuxk-toggle') {
-        if (!session.open) {
-          void bootAndLaunch();
-        } else {
-          session.open = false;
-        }
-      }
-    });
+    browser.runtime.onMessage.addListener(onToggle);
   } else if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
-    chrome.runtime.onMessage.addListener((msg: { action?: string }) => {
-      if (msg && msg.action === 'nextthuxk-toggle') {
-        if (!session.open) {
-          void bootAndLaunch();
-        } else {
-          session.open = false;
-        }
-      }
-    });
+    chrome.runtime.onMessage.addListener(onToggle);
   }
 }
 
-async function bootAndLaunch(): Promise<void> {
-  if (!session.open) {
-    await loadDrafts().catch(() => {});
-    const { launch } = await import('../lib/stores/session.svelte.ts');
-    await launch();
-  } else {
-    session.open = true;
-  }
-  void draftStore;
+async function toggleFromPopup(): Promise<void> {
+  const { toggleWorkbench } = await import('../lib/stores/launch.svelte.ts');
+  toggleWorkbench();
 }
 
 void main();

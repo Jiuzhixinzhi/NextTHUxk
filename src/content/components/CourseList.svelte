@@ -1,7 +1,7 @@
 ﻿<script lang="ts">
   import { search as st, gotoPage, browseGoto, loadAll, runServerQuery, getDisplayed, getVisibleRows, getPager, isSearchMode, isLocalFiltersActive } from '../../lib/stores/search.svelte.ts';
   import { session, previewConflictSpans } from '../../lib/stores/session.svelte.ts';
-  import { uicards, setCardsExpand } from '../../lib/stores/uicards.svelte.ts';
+  import { setCardsExpand } from '../../lib/stores/uicards.svelte.ts';
   import { keyOf } from '../../lib/core/utils';
   import CourseCard from './CourseCard.svelte';
   import PlanView from './PlanView.svelte';
@@ -26,7 +26,7 @@
     const code = st.lastHit.code;
     const sq = st.lastHit.seq;
     // 跳转定位前强制展开目标卡，避免高亮落在折叠行上
-    uicards.map[keyOf(code, sq)] = true;
+    setCardsExpand([keyOf(code, sq)], true);
     const t = el.querySelector<HTMLElement>(`.nx-card-holder[data-code="${code}"][data-seq="${sq}"]`);
     if (t) {
       t.scrollIntoView({ behavior: 'smooth', block: 'center' });

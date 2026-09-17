@@ -6,23 +6,14 @@
 // ═══════════════════════════════════════════════════════════════
 import { PAGE_SIZE, TAG } from '../core/constants';
 import { keyOf, lc, normSeq } from '../core/utils';
+import { K, store } from '../storage/store';
 import { serverSearch, serverSearchStorm, isCodeLike, type SearchOpts } from '../api/search';
 import type { Course, ServerSearchResult } from '../domain/types';
 import { isSportsCourse } from '../domain/flags';
 import { normTeacher, teacherHit } from '../domain/match';
 import { conflictsWithPreview } from '../domain/conflict';
 import { mergeRows, previewConflictSpans, session } from './session.svelte.ts';
-import { fgEnter, fgExit, onLaunchDone } from './bus.svelte.ts';
-
-/** 前台查询占用包裹：进出计数供后台补拉让路（服务端 kkxxSearch 会话游标敏感） */
-async function withForeground<T>(fn: () => Promise<T>): Promise<T> {
-  fgEnter();
-  try {
-    return await fn();
-  } finally {
-    fgExit();
-  }
-}
+import { onLaunchDone, withForeground } from './bus.svelte.ts';
 
 export const search = $state({
   q: '',
@@ -62,7 +53,24 @@ export const search = $state({
   lastHit: { code: '', seq: '' },
   scrollSeq: 0,
   loadAllNonce: 0,
+  /** 筛选栏展开态（会话级持久；组件不直连 storage） */
+  filtersOpen: true,
 });
+
+/** 筛选栏展开态：启动读取一次（失败保持默认展开） */
+export function loadFiltersOpen(): void {
+  store
+    .get<boolean>(K.filtersOpen)
+    .then(v => {
+      search.filtersOpen = !!v;
+    })
+    .catch(() => {});
+}
+
+export function setFiltersOpen(open: boolean): void {
+  search.filtersOpen = open;
+  void store.set(K.filtersOpen, open).catch(() => {});
+}
 
 export function hasText(): boolean {
   return search.q.trim().length > 0;
