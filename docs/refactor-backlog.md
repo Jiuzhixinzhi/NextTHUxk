@@ -4,6 +4,8 @@
 术语：模块 / 接口 / 实现 / 深度 / 接缝（Seam）/ 局部性；领域词沿用 `CONTEXT.md`，硬性约束见 `AGENTS.md`。
 验证命令固定：`pnpm check`（0 error）→ `pnpm test`（vitest 全绿）→ `pnpm build`。
 
+> 本文档所记批次（B1/B2/B3/B5/B6/B7 部分/B8/B9/B10 部分 + 三轮评审跟进）已随 **v3.5.0** 发版。
+
 ---
 
 ## A. 本批次已完成（勿重复）

@@ -33,19 +33,21 @@ src/
    │                       # · paged（pagedFetch：重试·缺页补抓·EMPTY 吸收·熔断）
    ├─ site/                # webvpn.ts（BASE 编码前缀 + ensureSiteIdentity AES-CBC，key 勿改）
    ├─ storage/             # store.ts（Chrome callback/Firefox Promise 双形态 + 键表 + 遗留键清理）· knote.ts
-   ├─ domain/              # 纯函数：types · flags · time（parseTimeSlots/clockRangesOf/SLOT_RANGE）· conflict ·
+   ├─ domain/              # 纯函数：types · flags · time（parseTimeSlots/weeksOf/clockRangesOf）· conflict（spansIntersect）·
    │                       # preview（join 池行）· timetable-layout（分道几何）· probability（级联/卷积）·
-   │                       # draft（构建/差量 diff）· plancov（培养方案覆盖）
+   │                       # draft（构建/差量 diff）· plancov（培养方案覆盖）· pool（池合并单接缝）·
+   │                       # card-model（courseCardModel 视图模型）· backfill（回填纯核）· zy（志愿号分配）· match
    ├─ api/                 # 服务端 IO：dept（院系码）· search（serverSearch/风暴护栏/tabSearch 兜底）· records
    │                       # （已选/候补/一级课表/分类属性/课余量/详情）· volunteers（BR/Ty 定向拉取）·
    │                       # write（token 链/REJECT_RE/pollUntil/选退课/志愿调整）
    ├─ reviews/             # THU选课社区 SWR 索引 + 三级匹配 + 点评实时拉取（fail-soft，CC BY-NC 署名）
    ├─ update/              # GitHub Releases 检查 + 检查点窗口（volNeedsRefresh/volWindowStart/nextVolCheckpoint）
    └─ stores/              # *.svelte.ts（runes 状态 + 编排）：
-                           # session（池/已选/候补/课余量/培养方案/手动占用/启动编排/行合并/时间回填）
-                           # search（查询/筛选/分页/跳转定位）· drafts（草稿集/活跃草稿/冲突阻断/提交差量）
-                           # volunteer（volMap+检查点窗口缓存+按需补拉自愈）· backup · modal · toast · bus
-└─ tests/                  # vitest：时间/冲突/概率/GBK/差量/方案覆盖
+                           # session（池/已选/候补/课余量/培养方案/手动占用/行合并）
+                           # launch（启动编排根：两阶段抓取/横幅/学期与工作台生命周期）· backfill（回填 IO 接线）
+                           # zy（志愿号解析与缓存水合）· search（查询/筛选/分页/跳转定位）· drafts（草稿集/活跃草稿/冲突阻断/提交差量）
+                           # volunteer（volMap+检查点窗口缓存+按需补拉自愈）· backup · modal · toast · bus · uicards · probhist
+└─ tests/                  # vitest：时间/冲突/概率/GBK/差量/方案覆盖/池/回填/志愿号/解码
 ```
 
 **依赖方向（强约束，评审时检查）**：components → stores → api/domain → net/core；domain/net 禁止 import svelte、禁止 DOM；store 拦截表单 DOM 读完即写 state，**组件不读 DOM 当状态源**。
