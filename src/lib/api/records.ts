@@ -48,8 +48,9 @@ export async function fetchSelectedCourses(ctx: Ctx): Promise<Course[]> {
       // 2026-2027-1 起已选表列序变更：课号独立成列 → 自适应取第一个非纯数字候选格
       const nameCell = [cell(4), cell(3)].find(x => x !== '' && !/^\d+$/.test(x)) || '';
       // 教师列：cell(7) 常空（2026-2027-1 列序变更后），cell(2) 实为学分位——
-      // 纯数字不是教师，宁可留空（上游 26a9340 同款；整体课表/池行随后回填真名）
-      const teacherCell = cell(7) || (/^\d+$/.test(cell(2)) ? '' : cell(2));
+      // 纯数字（含小数）不是教师，宁可留空（上游 26a9340 同款；用户报形策块上「4」）
+      const numeric = (x: string) => /^\d+(\.\d+)?$/.test(x);
+      const teacherCell = cell(7) && !numeric(cell(7)) ? cell(7) : cell(2) && !numeric(cell(2)) ? cell(2) : '';
       selected.push({
         code,
         seq,

@@ -2,7 +2,7 @@
 // NextTHUxk — 课表预览时间轴布局（纯函数：重叠分道 + 轴伸缩）
 // ═══════════════════════════════════════════════════════════════
 import type { Course, ManualEvent } from './types';
-import { DAY_NAMES, PV_AXIS_BEGIN, PV_AXIS_END, PV_PX_PER_MIN, displayTimeText, hm, originOf, pvToMin, spansOf, SLOT_NAMES } from './time';
+import { DAY_NAMES, PV_AXIS_BEGIN, PV_AXIS_END, PV_PX_PER_MIN, displayTimeText, hm, needsWeekLabel, originOf, pvToMin, spansOf, SLOT_NAMES } from './time';
 
 export interface PreviewBlock {
   key: string;
@@ -19,6 +19,10 @@ export interface PreviewBlock {
   bg: string;
   origin: string;
   manual: boolean;
+  /** 学分（块内小字 `4cr · 1(教师)` 用） */
+  credits: number;
+  /** 需标注的周次（全周/1-16周 已归一为空串，不标） */
+  week: string;
   /** 占用块专属：同日与任一课程块时间相交 → 渲染为全宽覆盖层（不拦截课程交互） */
   overlap?: boolean;
   id?: number;
@@ -57,6 +61,8 @@ interface RawBlock {
   probLabel: string;
   bg: string;
   manual: boolean;
+  credits: number;
+  week: string;
   overlap?: boolean;
   id?: number;
   code?: string;
@@ -81,7 +87,7 @@ export function layoutPreview(
     const meta = metaOf(c);
     const teacher = (c as Course).teacher;
     const lbl = teacher ? c.name + '(' + teacher + ')' : c.name;
-    const mk = (day: number, begin: number, end: number, tag: string, when: string): RawBlock => ({
+    const mk = (day: number, begin: number, end: number, tag: string, when: string, week: string): RawBlock => ({
       key: (c.code || 'm') + '_' + (c.seq || '0') + '_' + day + '_' + tag,
       day,
       begin,
@@ -93,6 +99,8 @@ export function layoutPreview(
       probLabel: meta.probLabel,
       bg: meta.bg,
       manual: (c as ManualEvent).manual === true,
+      credits: c.credits || 0,
+      week: needsWeekLabel(week) ? week : '',
       id: (c as ManualEvent).id,
       code: c.code,
       seq: c.seq || '0',
@@ -107,11 +115,13 @@ export function layoutPreview(
       const sc = SLOT_NAMES.indexOf(s.when) + 1;
       // 钟点 span（外校课/无大节）indexOf = -1：用 when 做 tag，保证同日多段互异
       const tag = sc > 0 ? String(sc) : s.when;
-      const b = mk(s.dayN, s.begin, s.end, tag, s.dayN + '-' + s.when + (s.week ? '(' + s.week + ')' : ''));
+      const b = mk(s.dayN, s.begin, s.end, tag, s.dayN + '-' + s.when + (s.week ? '(' + s.week + ')' : ''), s.week);
       const k = b.key + '_' + b.begin + '_' + b.end;
       const ex = merged.get(k);
       if (ex) {
         if (!ex.when.includes(b.when)) ex.when = ex.when + ',' + b.when;
+        if (b.week && !ex.week) ex.week = b.week;
+        else if (b.week && !ex.week.includes(b.week)) ex.week = ex.week + ',' + b.week;
       } else {
         merged.set(k, b);
       }

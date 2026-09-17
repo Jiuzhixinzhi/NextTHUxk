@@ -121,6 +121,15 @@
   function originColorOf(b: PreviewBlock): string {
     return ORIGIN_COLORS[b.origin] || '#666';
   }
+
+  /** 块内小字：`学分cr · 课序(教师)`（缺项省略；如 `4cr · 1(张三)`），manual 不显 */
+  function blockSub(b: PreviewBlock): string {
+    if (b.manual) return '';
+    const cr = b.credits ? b.credits + 'cr' : '';
+    const seq = b.seq && b.seq !== '0' ? String(parseInt(b.seq, 10) || 0) : '';
+    const teacher = b.teacher ? (seq ? '(' + b.teacher + ')' : b.teacher) : '';
+    return [cr, seq + teacher].filter(Boolean).join(' · ');
+  }
 </script>
 
 <div class="nx-sec">
@@ -173,6 +182,7 @@
             {#each layout.blocks.filter((b) => b.day === di + 1) as b (b.key + '_' + b.begin + '_' + b.end)}
               {@const isOverlay = b.manual && b.overlap === true}
               {@const bh = Math.max(isOverlay ? 18 : 14, Math.round((b.end - b.begin) * 0.72) - 2)}
+              {@const sub = blockSub(b)}
               <div
                 class:manual={b.manual}
                 class:overlay={isOverlay}
@@ -203,13 +213,13 @@
                       <span class="nx-tta-origin" style="background:{originColorOf(b)};">{b.origin}</span>
                     {/if}
                     <span class="nx-tta-name">{b.label}</span>
-                    {#if b.teacher || (!b.manual && b.seq && b.seq !== '0')}
-                      <span class="nx-tta-sub">{b.teacher}{b.teacher && b.seq && b.seq !== '0' ? ' · ' : ''}{!b.manual && b.seq && b.seq !== '0' ? '课序' + String(parseInt(b.seq, 10) || 0) : ''}</span>
+                    {#if sub}
+                      <span class="nx-tta-sub">{sub}</span>
                     {/if}
                     {#if b.probLabel}
                       <span class="nx-tt-prob" style="background:{b.bg};color:{b.color};">{b.probLabel}</span>
                     {/if}
-                    <span class="nx-tta-tag">{hm(b.begin)}-{hm(b.end)}</span>
+                    <span class="nx-tta-tag">{hm(b.begin)}-{hm(b.end)}{b.week ? ' · ' + b.week : ''}</span>
                   </div>
                   <span
                     class="nx-tta-x"

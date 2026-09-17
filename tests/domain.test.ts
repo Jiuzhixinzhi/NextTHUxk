@@ -2,7 +2,7 @@
 // NextTHUxk — 域逻辑测试：时间解析 / 冲突 / 概率 / 草稿差量 / GBK
 // ═══════════════════════════════════════════════════════════════
 import { describe, expect, it } from 'vitest';
-import { parseTimeSlots, clockRangesOf, pvToMin, spansOf, weeksOf, weeksOverlap, slotDisplayName, displayTimeText } from '../src/lib/domain/time';
+import { parseTimeSlots, clockRangesOf, pvToMin, spansOf, weeksOf, weeksOverlap, slotDisplayName, displayTimeText, needsWeekLabel } from '../src/lib/domain/time';
 import { detectConflicts, buildPreviewSpans, conflictsWithPreview } from '../src/lib/domain/conflict';
 import { calcProb, capacityStatus, cascadeOf, lockedOf, parseVolArr, probResult, priProb, probGridData, creditDist, creditSimItems, queueCapLevel, queueCapTitle } from '../src/lib/domain/probability';
 import { draftDiff, draftCourseFrom, draftKeyOf, mergeSelectedIntoDraft, repairDraftCourse, sameAsDraft } from '../src/lib/domain/draft';
@@ -60,6 +60,17 @@ describe('parseTimeSlots', () => {
     expect(slotDisplayName('18:30-21:30')).toBe('18:30-21:30');
     expect(displayTimeText('4-11-12节(1-8周)')).toBe('4-6大节(1-8周)');
     expect(displayTimeText('2-18:30-21:30')).toBe('2-18:30-21:30');
+  });
+
+  it('周次标注：全周/1-16周 不标，其余标记', () => {
+    expect(needsWeekLabel('')).toBe(false);
+    expect(needsWeekLabel(undefined)).toBe(false);
+    expect(needsWeekLabel('全周')).toBe(false);
+    expect(needsWeekLabel('1-16周')).toBe(false);
+    expect(needsWeekLabel('1-16')).toBe(false);
+    expect(needsWeekLabel('1-8周')).toBe(true);
+    expect(needsWeekLabel('单周')).toBe(true);
+    expect(needsWeekLabel('2-16周')).toBe(true);
   });
 });
 

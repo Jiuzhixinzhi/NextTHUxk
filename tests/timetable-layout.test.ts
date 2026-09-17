@@ -123,3 +123,20 @@ describe('layoutPreview 块键（day/tag 维度）', () => {
     expect(new Set(blocks.map((b) => b.when)).size).toBe(2);
   });
 });
+
+describe('layoutPreview 块元数据（学分 / 周次标注）', () => {
+  it('学分进块；仅非全周/1-16周标注周次', () => {
+    const rows: Course[] = [
+      { code: 'A', seq: '1', name: '甲', credits: 4, teacher: '张三', time: '1-2(1-8周)' },
+      { code: 'B', seq: '1', name: '乙', credits: 3, time: '1-2(全周)' },
+      { code: 'C', seq: '1', name: '丙', credits: 2, time: '3-2(1-16周)' },
+    ];
+    const layout = layoutPreview(rows, metaOf);
+    const bA = layout.blocks.find((b) => b.code === 'A')!;
+    expect(bA.credits).toBe(4);
+    expect(bA.teacher).toBe('张三');
+    expect(bA.week).toBe('1-8周');
+    expect(layout.blocks.find((b) => b.code === 'B')!.week).toBe('');
+    expect(layout.blocks.find((b) => b.code === 'C')!.week).toBe('');
+  });
+});
