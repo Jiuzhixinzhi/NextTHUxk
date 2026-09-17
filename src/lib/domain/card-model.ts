@@ -19,7 +19,7 @@ import {
   type VolColor,
 } from './probability';
 import { trendDelta, type VolPoint } from './probhist';
-import { originOf, parseTimeSlots } from './time';
+import { originOf, parseTimeSlots, slotDisplayName } from './time';
 import { conflictsWithPreview, type PreviewSpan } from './conflict';
 
 /** 开课线：已选/报名 少于 5 人有停开风险 */
@@ -99,7 +99,7 @@ function subTextOf(course: Course): string {
   if (course.seq) parts.push(course.seq + '课序');
   const timeSlots = parseTimeSlots(course.time);
   if (timeSlots.length) {
-    parts.push(timeSlots.map((s) => s.day + '·' + s.slot + (s.week !== '全周' ? '(' + s.week + ')' : '')).join(' / '));
+    parts.push(timeSlots.map((s) => s.day + '·' + slotDisplayName(s.slot) + (s.week !== '全周' ? '(' + s.week + ')' : '')).join(' / '));
   } else if (course.time) {
     parts.push(course.time);
   }

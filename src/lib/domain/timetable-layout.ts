@@ -2,7 +2,7 @@
 // NextTHUxk — 课表预览时间轴布局（纯函数：重叠分道 + 轴伸缩）
 // ═══════════════════════════════════════════════════════════════
 import type { Course, ManualEvent } from './types';
-import { DAY_NAMES, PV_AXIS_BEGIN, PV_AXIS_END, PV_PX_PER_MIN, hm, originOf, pvToMin, spansOf, SLOT_NAMES } from './time';
+import { DAY_NAMES, PV_AXIS_BEGIN, PV_AXIS_END, PV_PX_PER_MIN, displayTimeText, hm, originOf, pvToMin, spansOf, SLOT_NAMES } from './time';
 
 export interface PreviewBlock {
   key: string;
@@ -179,7 +179,7 @@ export function layoutPreview(
       lane: ln.lane,
       lanes: ln.lanes,
       color: bc,
-      title: [b.label, b.teacher, !b.manual && b.seq && b.seq !== '0' ? '课序' + String(parseInt(b.seq, 10) || 0) : '', b.when || ''].filter(Boolean).join(' · '),
+      title: [b.label, b.teacher, !b.manual && b.seq && b.seq !== '0' ? '课序' + String(parseInt(b.seq, 10) || 0) : '', b.when ? displayTimeText(b.when) : ''].filter(Boolean).join(' · '),
     };
   });
   return { A0, A1, H, blocks, undet, hasClock: raw.length > 0 };
