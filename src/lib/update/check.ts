@@ -23,6 +23,11 @@ export interface UpdateUi {
   onUpdate: (ver: string, url: string) => void;
 }
 
+/** 手动检查更新前重置节流窗口（TopBar「检查更新」按钮；组件不直连 storage） */
+export async function resetUpdateThrottle(): Promise<void> {
+  await store.set(K.lastUpdateCheck, 0);
+}
+
 let timer: ReturnType<typeof setInterval> | null = null;
 
 export async function checkUpdate(ui: UpdateUi, throttle = true): Promise<void> {

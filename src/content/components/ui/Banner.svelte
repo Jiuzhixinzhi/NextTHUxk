@@ -1,6 +1,6 @@
 <script lang="ts">
   import { curVer } from '../../../lib/core/constants';
-  import { banner, clearBanner } from '../../../lib/stores/session.svelte.ts';
+  import { banner, clearBanner } from '../../../lib/stores/launch.svelte.ts';
 </script>
 
 {#if banner.kind !== 'none'}

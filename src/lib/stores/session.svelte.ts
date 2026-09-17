@@ -1,21 +1,19 @@
 // ═══════════════════════════════════════════════════════════════
 // NextTHUxk — 会话状态：池 / 已选 / 候补 / 课余量 / 培养方案 / 手动占用
-// 启动编排、已选刷新、课程行合并、已选时间回填。
+// 纯状态 + 刷新/动作接线；启动编排在 launch.svelte.ts、志愿号解析在
+// zy.svelte.ts、元数据回填在 backfill.svelte.ts（B3 拆解）。
 // ═══════════════════════════════════════════════════════════════
-import type { Course, Ctx, DraftCourse, ManualEvent, PlanCourse, QueueDatum, VolDatum } from '../domain/types';
-import { DATA_VER, TAG } from '../core/constants';
-import { keyOf, sleep } from '../core/utils';
-import { K, cleanupLegacyKeys, store } from '../storage/store';
-import { knoteLoad, makeKnoteRemember, type KnoteMap } from '../storage/knote';
+import type { Course, Ctx, DraftCourse, ManualEvent, PlanCourse, QueueDatum } from '../domain/types';
+import { TAG } from '../core/constants';
+import { keyOf } from '../core/utils';
+import { K, store } from '../storage/store';
+import { makeKnoteRemember, type KnoteMap } from '../storage/knote';
 import { ensureSiteIdentity } from '../site/webvpn';
 import { fetchPageRaw, setWebvpnReenter } from '../net/http';
-import { fetchTrainingPlan } from '../api/plan';
-import { isSsoLoginHtml, isXkDeadHtml, serverSearch } from '../api/search';
+import { isSsoLoginHtml, isXkDeadHtml } from '../api/search';
 import {
   applyLevelMap,
-  backfillCandidateMeta,
   fetchCandidateCourses,
-  fetchCategoryAttrs,
   fetchCourseDetail,
   fetchLevelTable,
   fetchQueueData,
@@ -23,26 +21,20 @@ import {
 } from '../api/records';
 import { applyVolunteer } from '../api/volunteers';
 import { dropCourse, submitCourse, changeVolunteer } from '../api/write';
-import { attachScores, ensureScores } from '../api/scores';
-import { typeCodeToFlag } from '../domain/flags';
+import { attachScores } from '../api/scores';
 import { buildPreviewSpans, type PreviewSpan } from '../domain/conflict';
-import { matchPoolRow } from '../domain/match';
-import { applyQueueToPool, hasParsedTime, markCandidates, mergeCandidateRows, mergePoolRows } from '../domain/pool';
+import { markCandidates, mergePoolRows, applyQueueToPool, mergeCandidateRows } from '../domain/pool';
 import { checkPlanCoverage } from '../domain/plancov';
+import { type LevelInfo } from '../domain/zy';
 import { showToast, showXkResult } from './toast.svelte.ts';
-import { clearCardExpansions } from './uicards.svelte.ts';
-import { confirmDialog, promptDialog, zyConfirm } from './modal.svelte.ts';
-import { vol, volCacheHydrate, volCachePersist, volNewDepts, volNeedsDeptRetry, volSessionReset, scheduleVolFetch, type VolApplyCtx } from './volunteer.svelte.ts';
-import { probHistHydrate } from './probhist.svelte.ts';
-import { emitServerRowsMerged, emitLaunchDone, emitSelectedChanged, fgBusy, launchSettled, markLaunchStart } from './bus.svelte.ts';
-import { checkUpdate } from '../update/check';
-import { ensureIndex, tbAttach, setOnIndexChange } from '../reviews/reviews';
+import { confirmDialog } from './modal.svelte.ts';
+import { vol, volCachePersist, volNewDepts, volNeedsDeptRetry, scheduleVolFetch, fetchVolForPool, type VolApplyCtx } from './volunteer.svelte.ts';
+import { resolveCourseZy } from './zy.svelte.ts';
+import { backfillCandidateMeta } from './backfill.svelte.ts';
+import { emitServerRowsMerged, emitSelectedChanged, fgBusy } from './bus.svelte.ts';
+import { tbAttach } from '../reviews/reviews';
 
-export interface LevelInfo {
-  typeCode: string;
-  typeLabel: string;
-  attr: string;
-}
+export type { LevelInfo };
 
 export const session = $state({
   open: false,
@@ -67,9 +59,6 @@ export const session = $state({
 });
 
 export const knoteRemember = makeKnoteRemember(() => session.knote);
-
-let zyCache: Record<string, { zy: number; typeCode: string; typeLabel: string; confirmed: boolean }> = {};
-let zyCacheDirty = false;
 
 export function ctx(): Ctx {
   return { SEM: session.SEM, BASE: session.BASE, isZhjwxk: session.isZhjwxk, isZhjw: session.isZhjw, isWebvpn: session.isWebvpn };
@@ -130,263 +119,12 @@ async function reenterXkRoot(): Promise<boolean> {
   }
 }
 
-// ─── 启动编排 ─────────────────────────────────────────────────
-
-export async function launch(): Promise<void> {
-  if (session.launching) {
-    showXkResult({ ok: false, msg: '正在加载中，请稍候…' });
-    return;
-  }
-  session.launching = true;
-  markLaunchStart();
-  session.open = true;
-  session.fetchWarn = '';
-  try {
-    if (!session.SEM && /p_xnxq=/.test(location.search)) {
-      session.SEM = (location.search.match(/p_xnxq=([^&]+)/) || ['', ''])[1]!;
-    } else if (!session.SEM) {
-      session.SEM = (await store.get<string>(K.sem)) || '';
-    }
-    if (!session.SEM) {
-      const val = await promptDialog('设置学期', '2026-2027-1', '如 2026-2027-1', '输入当前学期（默认 2026-2027-1）：');
-      session.SEM = (val || '').trim() || '2026-2027-1';
-    }
-    await store.set(K.sem, session.SEM);
-    const SEM0 = session.SEM;
-    await cleanupLegacyKeys();
-    session.manualEvents = await store.getArray<ManualEvent>(K.manualEvents);
-    let sd: { ver: number; plan: PlanCourse[] } | null = (await store.get<{ ver: number; plan: PlanCourse[] }>(K.staticData)) || null;
-    if (sd && sd.ver !== DATA_VER) {
-      console.log(TAG, 'data version mismatch, clearing cache');
-      sd = null;
-      await store.set(K.staticData, null).catch(() => {});
-    }
-    // 坏形态自愈：plan 非数组（storage 损坏/异物写入）时清缓存重拉。
-    // 历史故障：sd.ver 命中但 plan 为真值非数组 → applyLevelMap 的 (plan||[]).forEach 抛
-    // 「(n||[]).forEach is not a function」，launch 整体死掉、工作台打不开。
-    if (sd && !Array.isArray(sd.plan)) {
-      console.warn(TAG, 'staticData.plan 形态非法，清缓存重拉:', typeof sd.plan);
-      sd = null;
-      await store.set(K.staticData, null).catch(() => {});
-    }
-    session.planData = sd?.plan || [];
-    volCacheHydrate(session.SEM);
-    probHistHydrate(session.SEM);
-    console.log(TAG, 'on-demand mode: fetching selected + candidates + plan');
-    // 阶段1：已选先上屏（上游 68485cd 同款：进选课列表先出已选，不等方案/目录/候补/属性）
-    const selectedCourses = await fetchSelectedCourses(ctx()).catch(e => {
-      console.warn(TAG, 'selected:', e);
-      return [];
-    });
-    const pool: Course[] = selectedCourses.map(c => ({ ...c, selected: true }));
-    session.allCourses = pool;
-    applyLevelMap(pool, session.levelMap, session.planData);
-    // 阶段2：候补/方案/等级/属性并行到货后增量并入池（已选首屏不被拖慢）
-    const [candRes, planFresh, level, catAttrs] = await Promise.all([
-      fetchCandidateCourses(ctx()).catch(e => {
-        console.warn(TAG, 'candidates:', e);
-        return { rows: [], ok: false };
-      }),
-      session.planData.length ? Promise.resolve<PlanCourse[]>([]) : fetchTrainingPlan(ctx()).catch(e => {
-        console.warn(TAG, 'plan:', e);
-        return [];
-      }),
-      fetchLevelTable(ctx()).catch(e => {
-        console.warn(TAG, 'level table:', e);
-        return {};
-      }),
-      fetchCategoryAttrs(ctx()).catch(e => {
-        console.warn(TAG, 'category attrs:', e);
-        return {};
-      }),
-    ]);
-    session.levelMap = Object.assign({}, level, catAttrs);
-    if (!session.planData.length) session.planData = planFresh || [];
-    session.candidateCourses = candRes.rows;
-    session.candidateFetchOk = candRes.ok;
-    if (candRes.rows.length) {
-      await backfillCandidateMeta(ctx(), candRes.rows).catch(e => console.warn(TAG, 'cand meta:', e));
-    }
-    mergeCandidateRows(session.allCourses, session.candidateCourses);
-    session.knote = await knoteLoad().catch(e => {
-      console.warn(TAG, 'knote:', e);
-      return {};
-    });
-    applyLevelMap(session.allCourses, session.levelMap, session.planData);
-    // 重开场景：志愿院系均在检查点窗口内 fresh → 后台拉取返回空，池行会一直缺 vol 字段
-    // （概率标签消失）。此处先用内存/缓存 vol.map 同步回放，后台到货后再刷新。
-    if (Object.keys(vol.map).length) applyVolunteer(session.allCourses, vol.map);
-    // 课余量/排队 + 志愿：非阻塞（UI 先上屏，数据后到回填）
-    void (async () => {
-      const qResult = await fetchQueueData(ctx(), session.allCourses).catch(e => {
-        console.warn(TAG, 'queue:', e);
-        return { map: {}, phase: false };
-      });
-      session.queueDataMap = qResult.map;
-      session.isQueuePhase = qResult.phase;
-      if (qResult.phase) {
-        applyQueueToPool(session.allCourses, session.queueDataMap);
-      } else {
-        try {
-          await fetchVolForPoolLaunch(session.allCourses);
-        } catch (e) {
-          console.warn(TAG, 'volunteer:', e);
-        }
-      }
-      if (session.SEM === SEM0) {
-        await store.set(K.staticData, { ver: DATA_VER, plan: session.planData, ts: Date.now() }).catch(() => {});
-      } else {
-        console.warn(TAG, 'cache write skipped: semester switched during load', SEM0, '->', session.SEM);
-      }
-      if (session.fetchWarn) {
-        const w = session.fetchWarn;
-        session.fetchWarn = '';
-        showXkResult({ ok: false, msg: w });
-      }
-    })();
-    session.knote = Object.assign({}, session.knote);
-    void backfillSelTimes();
-    setOnIndexChange(() => {
-      if (session.allCourses.length) {
-        const r = tbAttach(session.allCourses);
-        console.log(TAG, '[TB] 社区评价匹配', r.matched + '/' + r.total);
-      }
-    });
-    ensureIndex()
-      .then(ok => {
-        if (!ok) return;
-        const r = tbAttach(session.allCourses);
-        console.log(TAG, '[TB] 社区评价匹配', r.matched + '/' + r.total, JSON.stringify({}));
-      })
-      .catch(() => {});
-    // 校评（教务评教均分）：学期静止数据，缓存命中不发请求；全量拉取后回填池行
-    ensureScores(ctx())
-      .then(ok => {
-        if (!ok) return;
-        const r = attachScores(session.allCourses);
-        console.log(TAG, '[Score] 校评匹配', r.matched + '/' + r.total);
-      })
-      .catch(() => {});
-    startVolAutoSyncIfNeeded();
-    checkUpdate({ onDanger: () => setBanner('danger'), onUpdate: (v, u) => setBanner('update', v, u) });
-    const warn = session.fetchWarn;
-    if (warn) {
-      session.fetchWarn = '';
-      showXkResult({ ok: false, msg: warn });
-    }
-    console.log(TAG, 'on-demand launch done:', session.allCourses.filter(c => c.selected).length, 'selected,', session.candidateCourses.length, 'candidates,', session.isQueuePhase ? 'queue phase' : 'browse mode');
-  } catch (e) {
-    showXkResult({ ok: false, msg: '启动失败：' + (e instanceof Error ? e.message : String(e)) });
-  } finally {
-    session.launching = false;
-    emitLaunchDone();
-  }
-}
-
-export const banner = $state({ kind: 'none' as 'none' | 'update' | 'danger', ver: '', url: '' });
-export function setBanner(kind: 'update' | 'danger', ver?: string, url?: string): void {
-  banner.kind = kind;
-  if (ver) banner.ver = ver;
-  if (url) banner.url = url;
-}
-export function clearBanner() {
-  banner.kind = 'none';
-}
-
-// 版本号/构建显示：curVer() 由 core/constants 单源导出（Banner 等直接引用）
-
-// ─── 志愿：launch 后台块 ─────────────────────────────────────
-import { fetchVolForPool, startVolAutoSync } from './volunteer.svelte.ts';
-async function fetchVolForPoolLaunch(pool: Course[]) {
-  const vctxAll: VolApplyCtx & Ctx = { allCourses: pool, searchRows: null, sem: session.SEM, ...ctx() };
-  await fetchVolForPool(vctxAll, pool, false);
-  volCachePersist(session.SEM);
-}
-let autoSyncArmed = false;
-function startVolAutoSyncIfNeeded() {
-  if (autoSyncArmed) return;
-  autoSyncArmed = true;
-  startVolAutoSync(session.SEM, async () => {
-    await syncQueueAndVol();
-  });
-}
-
 // ─── 已选 / 候补 / 志愿刷新 ───────────────────────────────────
 
-async function resolveCourseZy(courses: Course[], selMap: Record<string, Course>, withModal: boolean): Promise<boolean> {
-  let cacheUpdated = false;
-  const missingZy: Course[] = [];
-  let levelMap: Record<string, LevelInfo> | null = null;
-  let selectedChanged = false;
-  for (const c of courses) {
-    // keyOf 归一：selMap/zyCache 与 fetchLevelTable 的键拼写必须一致
-    // （历史 Bug：此处用原始课序拼键查归一后的 levelMap，前导零课班取不到 typeCode/typeLabel）
-    const key = keyOf(c.code, c.seq);
-    const s = selMap[key];
-    if (c.selected !== !!s) selectedChanged = true;
-    c.selected = !!s;
-    if (s) {
-      if (s.zy && s.zy > 0) {
-        c.zy = s.zy;
-        c.typeCode = s.typeCode || '';
-        c.typeLabel = s.typeLabel || '';
-        zyCache[key] = { zy: s.zy, typeCode: s.typeCode || '', typeLabel: s.typeLabel || '', confirmed: true };
-        cacheUpdated = true;
-      } else {
-        const cached = zyCache[key];
-        if (cached && cached.zy > 0 && cached.confirmed) {
-          c.zy = cached.zy;
-          c.typeCode = cached.typeCode;
-          c.typeLabel = cached.typeLabel;
-        } else {
-          if (!levelMap) levelMap = await fetchLevelTable(ctx());
-          const lt = levelMap[key];
-          if (lt) {
-            c.typeCode = lt.typeCode;
-            c.typeLabel = lt.typeLabel;
-          } else {
-            c.typeCode = s.typeCode || '';
-            c.typeLabel = s.typeLabel || '';
-          }
-          c.zy = cached && cached.zy > 0 ? cached.zy : 0;
-          missingZy.push(c);
-        }
-      }
-    } else {
-      c.zy = 0;
-      c.typeCode = '';
-      c.typeLabel = '';
-    }
-  }
-  if (missingZy.length) {
-    if (session.isQueuePhase) {
-      missingZy.forEach(c => {
-        c.zy = 3;
-        zyCache[keyOf(c.code, c.seq)] = { zy: 3, typeCode: c.typeCode || '', typeLabel: c.typeLabel || '', confirmed: false };
-      });
-      cacheUpdated = true;
-    } else if (withModal) {
-      const values = await zyConfirm(missingZy);
-      missingZy.forEach((c, i) => {
-        if (values[i] && values[i]! > 0) {
-          c.zy = values[i]!;
-          zyCache[keyOf(c.code, c.seq)] = { zy: c.zy, typeCode: c.typeCode || '', typeLabel: c.typeLabel || '', confirmed: false };
-          cacheUpdated = true;
-        }
-      });
-    }
-  }
-  if (zyCacheDirty || cacheUpdated) {
-    zyCacheDirty = false;
-    try {
-      await store.set(K.zyCache, JSON.parse(JSON.stringify(zyCache)));
-    } catch {
-      /* fail-soft */
-    }
-  }
-  return cacheUpdated;
-}
-
+/** 刷新已选/候补/余量（选退课后的校准正源）。
+ *  withModal 默认 true（v2 语义）——但当前所有调用点都显式传 false：提交动作后的校准时
+ *  不打扰（confirmed 缓存命中本就零弹窗），缺志愿号的补问统一由 launch 后台尾部
+ *  `resolveZyMissing`（zy.svelte.ts，withModal=true）负责，避免动作后多次弹窗。 */
 export async function refreshSelected(withModal = true): Promise<void> {
   const selected = await fetchSelectedCourses(ctx());
   const selMap: Record<string, Course> = {};
@@ -395,7 +133,7 @@ export async function refreshSelected(withModal = true): Promise<void> {
   });
   session.levelMap = await fetchLevelTable(ctx()).catch(() => session.levelMap || {});
   applyLevelMap(session.allCourses, session.levelMap, session.planData);
-  await resolveCourseZy(session.allCourses, selMap, withModal).catch(() => {});
+  await resolveCourseZy(session.allCourses, selMap, ctx(), { withModal, isQueuePhase: session.isQueuePhase }).catch(() => {});
   try {
     const cr = await fetchCandidateCourses(ctx());
     session.candidateCourses = cr.rows;
@@ -577,155 +315,6 @@ export async function removeManualEvent(id: number): Promise<void> {
   showXkResult({ ok: true, msg: '已删除「' + name + '」' });
 }
 
-// ─── 已选元数据回填（外校课时间在说明列；学分列位漂移时按课号补齐）────
-
-const _selTried = new Map<string, number>();
-const _bfStatus: Record<string, string> = {};
-let _bfScanP: Promise<Course[]> | null = null;
-let _bfScanAborted = false;
-let _selBfLogged = false;
-
-/** 后台补拉前等待前台空闲（启动落定 + 无前台查询在途）——上游 PR #46 启动门控。
- *  浏览模式翻页靠服务端会话游标，后台 kkxxSearch 并发会污染（实锤用户报）。 */
-async function waitForegroundIdle(maxMs = 30000): Promise<boolean> {
-  const t0 = Date.now();
-  while (!launchSettled() || fgBusy()) {
-    if (Date.now() - t0 > maxMs) return false;
-    await sleep(150);
-  }
-  return true;
-}
-
-export async function backfillSelTimes(): Promise<void> {
-  if (!session.isZhjwxk && !session.isWebvpn) return;
-  if (!(await waitForegroundIdle())) return;
-  const tried = _selTried;
-  const sel = session.allCourses.filter(c => c.selected && !c.isCandidate);
-  const needsTime = (r: Course): boolean => !hasParsedTime(r);
-  const unparsed = sel.filter(needsTime);
-  // 触发范围：时间解析不出 或 学分缺失（WL 已选表列位漂移致 credits=0，用户报形势与政策）
-  const need = sel.filter(r => needsTime(r) || !r.credits).filter(r => (tried.get(keyOf(r.code, r.seq)) || 0) < 2);
-  if (!need.length) {
-    if (unparsed.length && !_selBfLogged) {
-      _selBfLogged = true;
-      console.log(TAG, '已选元数据回填: 无可查（' + unparsed.length + ' 门时间解析不出已用尽预算）');
-    }
-    return;
-  }
-  console.log(TAG, '已选元数据回填: 查 ' + need.map(r => keyOf(r.code, r.seq)).join(','));
-  const outcome: string[] = [];
-  for (let i = 0; i < need.length; i += 5) {
-    await Promise.all(
-      need.slice(i, i + 5).map(async r => {
-        const k = keyOf(r.code, r.seq);
-        try {
-          // 前台占用则不发起后台请求（服务端会话游标敏感，上游 PR #46）；不消耗 2 次预算
-          if (fgBusy()) {
-            outcome.push(r.code + '⊘前台占用跳过');
-            _bfStatus[r.code] = '⊘前台占用跳过';
-            return;
-          }
-          tried.set(k, (tried.get(k) || 0) + 1);
-          _bfStatus[r.code] = '查询中';
-          let res = await serverSearch(ctx(), { kch: r.code });
-          let rows = res.rows || [];
-          if (!rows.length && r.name && !fgBusy()) {
-            const byName = await serverSearch(ctx(), { kcm: r.name });
-            rows = byName.rows || [];
-          }
-          if (!rows.length && fgBusy()) {
-            // 前台中途接手：停止后续请求，交由下次回填补
-            outcome.push(r.code + '⊘前台占用跳过');
-            _bfStatus[r.code] = '⊘前台占用跳过';
-            return;
-          }
-          if (!rows.length) {
-            if (!_bfScanP) {
-              _bfScanAborted = false;
-              _bfScanP = (async () => {
-                const scanned: Course[] = [];
-                for (let p = 1; p <= 10; p++) {
-                  // 前台接手浏览翻页 → 让路（服务端会话游标敏感）；下次回填再补
-                  if (fgBusy()) {
-                    _bfScanAborted = true;
-                    break;
-                  }
-                  try {
-                    const res3 = await serverSearch(ctx(), { page: p });
-                    const rs = res3.rows || [];
-                    if (!rs.length) break;
-                    scanned.push(...rs);
-                  } catch {
-                    break;
-                  }
-                }
-                console.log(TAG, '回填浏览扫描: ' + scanned.length + ' 行（外校课号排序靠前）');
-                return scanned;
-              })();
-            }
-            const scanned = await _bfScanP;
-            if (_bfScanAborted) {
-              // 中断的半份扫描不缓存，下次回填可重建
-              _bfScanP = null;
-              _bfScanAborted = false;
-            }
-            rows = scanned.filter(c => c.code === r.code);
-          }
-          // 三段匹配挑对班（归一课序 → 同课同师 → 首行）：同课号多班直接取首行会借错时间
-          const hit = matchPoolRow(rows.filter(c => String(c.code) === String(r.code)), r.seq, r.teacher);
-          if (hit) {
-            mergeRows([hit]);
-            outcome.push(r.code + '✓');
-            _bfStatus[r.code] = '✓已上轴';
-          } else {
-            outcome.push(r.code + '×(搜到' + rows.length + '行无匹配)');
-            _bfStatus[r.code] = '×搜到' + rows.length + '行无匹配';
-          }
-        } catch (e) {
-          outcome.push(r.code + '×(' + ((e as Error).message || String(e)) + ')');
-          _bfStatus[r.code] = '×' + (String((e as Error).message || '')).slice(0, 30);
-        }
-      }),
-    );
-    if (i + 5 < need.length) await sleep(60);
-  }
-  console.log(TAG, '已选元数据回填结果:', outcome.join(' , ') || '无');
-  if (session.allCourses.length && _bfStatus && Object.keys(_bfStatus).length) console.log('');
-}
-
-/** 组件用：时间未定课的解析状态 */
-export const bfStatusFor = (code: string): string => _bfStatus[code] || '';
-
-export function resetBfBudget(): void {
-  _selTried.clear();
-  _bfStatus._ = '';
-  _bfScanP = null;
-  _bfScanAborted = false;
-  _selBfLogged = false;
-}
-
 export async function fetchDetail(teacherId: string, code: string): Promise<Record<string, string> | null> {
   return fetchCourseDetail(ctx(), teacherId, code);
-}
-
-export async function changeSemester(newSem: string): Promise<void> {
-  session.SEM = newSem.trim();
-  await store.set(K.sem, session.SEM);
-  await store.set(K.staticData, null).catch(() => {});
-  session.allCourses = [];
-  session.candidateCourses = [];
-  session.candidateFetchOk = false;
-  session.planData = [];
-  session.levelMap = {};
-  session.queueDataMap = {};
-  clearCardExpansions();
-  vol.map = {};
-  volSessionReset();
-  session.fetchWarn = '';
-  await launch();
-}
-
-export function closeWorkbench(): void {
-  session.open = false;
-  clearCardExpansions();
 }

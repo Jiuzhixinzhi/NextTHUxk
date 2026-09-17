@@ -10,8 +10,6 @@ import { pickDecoded, pickDecodedWithSource } from '../net/decode';
 import { gbkPercentEncode } from '../net/gbk';
 import { isSportsCourse } from '../domain/flags';
 import { creditsOf } from '../domain/credits';
-import { matchPoolRow } from '../domain/match';
-import { serverSearch } from './search';
 
 // ─── 已选课程 ─────────────────────────────────────────────────
 
@@ -247,35 +245,6 @@ export async function fetchCandidateCourses(ctx: Ctx): Promise<CandidateFetchRes
     console.warn(TAG, 'candidate fetch:', e);
     return { rows: [], ok: false };
   }
-}
-
-/** 候补课元数据回填（按课号单查一页补齐学分/容量/时间）。
- *  shouldPause 由调用方注入（检查点同步传前台占用判定）——前台查询在途时让路，
- *  避免后台 kkxxSearch 污染服务端会话游标（上游 PR #46 同款；api 层不 import stores）。 */
-export async function backfillCandidateMeta(ctx: Ctx, candidates: Course[], shouldPause?: () => boolean): Promise<void> {
-  const todo = (candidates || []).filter(c => c && c.code && !c.credits);
-  if (!todo.length) return;
-  await runPool(todo, 4, async c => {
-    await sleep(30);
-    if (shouldPause?.()) return;
-    try {
-      const r = await serverSearch(ctx, { kch: c.code });
-      const same = (r.rows || []).filter(x => String(x.code) === String(c.code));
-      const hit = matchPoolRow(same.length ? same : (r.rows || []), c.seq, c.teacher);
-      if (hit) {
-        c.credits = hit.credits || 0;
-        c.capacity = hit.capacity || 0;
-        c.remaining = hit.remaining || 0;
-        c.available = !!hit.available;
-        if (!c.teacher && hit.teacher) c.teacher = hit.teacher;
-        if (!c.time && hit.time) c.time = hit.time;
-        c.xkTextNote = hit.xkTextNote || '';
-      }
-    } catch (e) {
-      console.warn(TAG, 'cand meta', c.code, e);
-    }
-  });
-  console.log(TAG, 'candidate metadata backfilled:', todo.length);
 }
 
 // ─── 一级课表 / 分类属性（课程类型源） ───────────────────────────

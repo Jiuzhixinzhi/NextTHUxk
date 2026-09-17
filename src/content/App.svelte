@@ -1,6 +1,6 @@
 <script lang="ts">
-  import { launch, session } from '../lib/stores/session.svelte.ts';
-  import { loadDrafts } from '../lib/stores/drafts.svelte.ts';
+  import { session } from '../lib/stores/session.svelte.ts';
+  import { openWorkbench } from '../lib/stores/launch.svelte.ts';
   import LaunchButton from './components/LaunchButton.svelte';
   import TopBar from './components/TopBar.svelte';
   import SearchBar from './components/SearchBar.svelte';
@@ -13,12 +13,6 @@
   import Banner from './components/ui/Banner.svelte';
   import Toast from './components/ui/Toast.svelte';
   import ModalHost from './components/modals/ModalHost.svelte';
-
-  async function openWorkbench() {
-    if (session.launching) return;
-    await loadDrafts().catch(() => {});
-    await launch();
-  }
 </script>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true">

@@ -45,8 +45,9 @@ export function scoreOfRow(row: Record<string, unknown> | null | undefined): Sco
   return { avg: Math.round((sum / count) * 100) / 100, count };
 }
 
-/** 全量评教 JSON（{ total, rows: [...] }）→ slim 缓存（纯函数；同键多行按人数加权合并） */
-export function slimScores(raw: unknown, sem: string): SemScoreCache {
+/** 全量评教 JSON（{ total, rows: [...] }）→ slim 缓存（纯函数；同键多行按人数加权合并）。
+ *  ts 由调用方注入——原内嵌 Date.now() 使纯函数不可复现/不可测（B3 顺带加固）。 */
+export function slimScores(raw: unknown, sem: string, ts: number): SemScoreCache {
   const rows = raw && typeof raw === 'object' ? (raw as { rows?: unknown }).rows : null;
   const map: SemScoreCache['map'] = {};
   if (Array.isArray(rows)) {
@@ -68,7 +69,7 @@ export function slimScores(raw: unknown, sem: string): SemScoreCache {
       }
     }
   }
-  return { v: SCORE_VER, sem, ts: Date.now(), map };
+  return { v: SCORE_VER, sem, ts, map };
 }
 
 /** 7 分制档位（与社区 5 分制徽章同色系：绿/蓝/橙/红） */

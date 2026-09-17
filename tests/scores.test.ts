@@ -61,6 +61,7 @@ describe('slimScores', () => {
         ],
       },
       '2026-2027-1',
+      1000,
     );
     expect(Object.keys(cache.map)).toHaveLength(2);
     expect(cache.map[scoreKey('1', '张三')]).toEqual({ a: 7, n: 10 });
@@ -76,6 +77,7 @@ describe('slimScores', () => {
         ],
       },
       's',
+      1000,
     );
     expect(Object.keys(cache.map)).toHaveLength(1);
     expect(cache.map[scoreKey('1', '张三')]).toEqual({ a: 6.5, n: 2 });
@@ -93,6 +95,7 @@ describe('slimScores', () => {
         ],
       },
       '2026-2027-1',
+      1000,
     );
     expect(cache.v).toBe(2);
     expect(cache.sem).toBe('2026-2027-1');
@@ -102,10 +105,10 @@ describe('slimScores', () => {
   });
 
   it('非对象 / 无 rows / 坏行 → 空表', () => {
-    expect(slimScores(null, 'x').map).toEqual({});
-    expect(slimScores('bad', 'x').map).toEqual({});
-    expect(slimScores({}, 'x').map).toEqual({});
-    expect(slimScores({ rows: [null, 'x', 1] }, 'x').map).toEqual({});
+    expect(slimScores(null, 'x', 1000).map).toEqual({});
+    expect(slimScores('bad', 'x', 1000).map).toEqual({});
+    expect(slimScores({}, 'x', 1000).map).toEqual({});
+    expect(slimScores({ rows: [null, 'x', 1] }, 'x', 1000).map).toEqual({});
   });
 });
 

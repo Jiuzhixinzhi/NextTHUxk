@@ -1,7 +1,8 @@
 // ═══════════════════════════════════════════════════════════════
-// NextTHUxk — 轻量总线：跨 store 挂勾（避免循环依赖）
+// NextTHUxk — 轻量总线：跨 store 挂勾（避免循环依赖）+ 前台让路协议
 // ═══════════════════════════════════════════════════════════════
 import type { Course } from '../domain/types';
+import { sleep } from '../core/utils';
 
 type MergedHook = (rows: Course[], filled: number) => void;
 
@@ -66,6 +67,28 @@ export function fgExit(): void {
 
 export function fgBusy(): boolean {
   return _fgBusy > 0;
+}
+
+/** 前台查询包裹：进出计数供后台补拉让路（服务端 kkxxSearch 会话游标敏感）。
+ *  唯一拼写——search 的服务端查询与后台回填共用此前台/后台词汇（B3 收拢）。 */
+export async function withForeground<T>(fn: () => Promise<T>): Promise<T> {
+  fgEnter();
+  try {
+    return await fn();
+  } finally {
+    fgExit();
+  }
+}
+
+/** 后台补拉前等待前台空闲（启动落定 + 无前台查询在途）——上游 PR #46 启动门控。
+ *  浏览模式翻页靠服务端会话游标，后台 kkxxSearch 并发会污染（实锤用户报）。 */
+export async function waitForegroundIdle(maxMs = 30000): Promise<boolean> {
+  const t0 = Date.now();
+  while (!launchSettled() || fgBusy()) {
+    if (Date.now() - t0 > maxMs) return false;
+    await sleep(150);
+  }
+  return true;
 }
 
 // ─── 已选变更钩子（refreshSelected 后 → 培养方案覆盖数重算等） ─────

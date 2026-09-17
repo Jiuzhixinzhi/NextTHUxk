@@ -2,6 +2,7 @@
 // NextTHUxk — 课程类型判定（纯函数）
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Flag } from './types';
+import { keyOf } from '../core/utils';
 
 export const courseFlag = (course: Course): Flag => {
   const a = (course.attr || '').trim();
@@ -61,7 +62,8 @@ export function canAdjustZy(pool: Course[], course: Course | undefined, targetZy
   let count = 0;
   pool.forEach(c => {
     if (!c.selected) return;
-    if (c.code === course.code && String(c.seq || '0') === String(course.seq || '0')) return;
+    // keyOf 归一（B1 尾项）：'01'/'1' 同课班两种拼写不得把自己算进档位上限
+    if (keyOf(c.code, c.seq) === keyOf(course.code, course.seq)) return;
     if (zyTypeOf(c) !== zt) return;
     if (c.zy === targetZy) count++;
   });

@@ -1,13 +1,13 @@
 <script lang="ts">
   import { BUILD, curVer } from '../../lib/core/constants';
-  import { session, changeSemester, closeWorkbench } from '../../lib/stores/session.svelte.ts';
+  import { session } from '../../lib/stores/session.svelte.ts';
+  import { changeSemester, closeWorkbench, setBanner } from '../../lib/stores/launch.svelte.ts';
   import { fmtTime } from '../../lib/core/utils';
   import { vol } from '../../lib/stores/volunteer.svelte.ts';
-  import { checkUpdate } from '../../lib/update/check';
+  import { checkUpdate, resetUpdateThrottle } from '../../lib/update/check';
   import { promptDialog } from '../../lib/stores/modal.svelte.ts';
   import { showToast } from '../../lib/stores/toast.svelte.ts';
   import { draftCounts, backupExport, backupImport } from '../../lib/stores/backup.svelte.ts';
-  import { banner, setBanner } from '../../lib/stores/session.svelte.ts';
 
   let backupOpen = $state(false);
   let counts = $state({ drafts: 0, manual: 0, hist: 0 });
@@ -26,9 +26,7 @@
   }
 
   async function onCheckUpdate() {
-    const { store } = await import('../../lib/storage/store');
-    const K = (await import('../../lib/storage/store')).K;
-    await store.set(K.lastUpdateCheck, 0);
+    await resetUpdateThrottle();
     let found = false;
     await checkUpdate(
       {

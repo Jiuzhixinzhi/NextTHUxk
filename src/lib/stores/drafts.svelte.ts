@@ -37,6 +37,13 @@ export const draftStore = $state({
 
 export const MAX_DRAFTS = 5;
 
+/** 草稿 id 单调生成：以 Date.now() 起、只增——同 ms 连续新建（双击/导入）不撞 id */
+let lastDraftId = 0;
+export function nextDraftId(): number {
+  lastDraftId = Math.max(Date.now(), lastDraftId + 1);
+  return lastDraftId;
+}
+
 /** 活跃草稿（优先 activeId；无 ID 时取第一份）——纯函数，组件以 $derived 包裹 */
 export function activeDraftNow(): Draft | undefined {
   return draftStore.drafts.find(d => d.id === draftStore.activeId) || draftStore.drafts[0];
@@ -137,7 +144,7 @@ onSelectedChanged(() => refreshCoverage());
 export function ensureActiveDraft(): Draft {
   let d = activeDraftNow();
   if (!d) {
-    d = newDraft('草稿' + (draftStore.drafts.length + 1), []);
+    d = newDraft('草稿' + (draftStore.drafts.length + 1), [], nextDraftId());
     draftStore.drafts.push(d);
     draftStore.activeId = d.id;
     persistSoon();
@@ -211,7 +218,7 @@ export async function createDraft(): Promise<void> {
     return;
   }
   const name = await promptDialog('新建草稿', '草稿' + (draftStore.drafts.length + 1));
-  const d = newDraft((name || '').trim() || '草稿' + (draftStore.drafts.length + 1), []);
+  const d = newDraft((name || '').trim() || '草稿' + (draftStore.drafts.length + 1), [], nextDraftId());
   draftStore.drafts.push(d);
   draftStore.activeId = d.id;
   persistSoon();
@@ -310,7 +317,7 @@ export function importJson(jsonStr: string): AddResult {
       note: c.note || '',
       queued: c.queued === true ? true : undefined,
     };
-    const ac = session.allCourses.find(x => x.code === c.code && String(x.seq || '0') === String(c.seq || '0'));
+    const ac = session.allCourses.find(x => keyOf(x.code, x.seq) === keyOf(c.code || '', c.seq));
     if (!push.baseFlag) push.baseFlag = ac ? baseFlag(ac) : fallbackFlag;
     d.courses.push(push);
     knoteRemember(push.code, push.seq, push.note || (ac?.note || ac?.xkTextNote || ''), push.time || (ac?.time || ''));
@@ -446,7 +453,7 @@ export async function promote(draft: Draft): Promise<void> {
     }
     for (let i = 0; i < toDrop.length; i++) {
       showToast(false, '退选差量 ' + (i + 1) + '/' + toDrop.length + ': ' + toDrop[i]!.name);
-      const isQueue = session.candidateCourses.some(c => c.code === toDrop[i]!.code && String(c.seq) === String(toDrop[i]!.seq));
+      const isQueue = session.candidateCourses.some(c => keyOf(c.code, c.seq) === keyOf(toDrop[i]!.code, toDrop[i]!.seq));
       const r = await dropCourse(ctx, toDrop[i]!.code, toDrop[i]!.seq, isQueue);
       if (!r.ok) {
         await refreshSelectedNoModal();

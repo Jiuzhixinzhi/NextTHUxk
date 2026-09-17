@@ -118,8 +118,9 @@ export function mergeSelectedIntoDraft(d: Draft, selected: Course[]): MergeSelec
   return { added, skipped, synced };
 }
 
-export function newDraft(name: string, courses: DraftCourse[]): Draft {
-  return { id: Date.now(), name, courses: [...courses], createdAt: Date.now() };
+/** 新草稿（纯函数：id/createdAt 由调用方注入——原内嵌 Date.now() 同 ms 双击会撞 id） */
+export function newDraft(name: string, courses: DraftCourse[], id: number, createdAt: number = id): Draft {
+  return { id, name, courses: [...courses], createdAt };
 }
 
 export function draftKeyOf(c: { code: string; seq: string | number }) {
