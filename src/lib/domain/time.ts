@@ -18,6 +18,28 @@ export interface ClockRange {
 export const DAY_NAMES = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
 export const SLOT_NAMES = ['1-2节', '3-4节', '5-6节', '7-8节', '9-10节', '11-12节'];
 
+// 大节显示名（用户决策：显示统一用大节序号，比小节号通用）；SLOT_NAMES 仍是内部身份，勿动
+export const BIG_SLOT_NAMES = ['1大节', '2大节', '3大节', '4大节', '5大节', '6大节'];
+
+/** 节次显示名：内部大节名 → 「N大节」；钟点串/外校课等非大节文本原样直通 */
+export function slotDisplayName(slot: string): string {
+  const i = SLOT_NAMES.indexOf(slot);
+  return i >= 0 ? BIG_SLOT_NAMES[i]! : slot;
+}
+
+/** 嵌入节次名的文本替换（课表 tooltip `4-11-12节(1-8周)` → `4-6大节(1-8周)`，钟点串不受影响） */
+export function displayTimeText(s: string): string {
+  let out = s;
+  for (let i = 0; i < SLOT_NAMES.length; i++) out = out.split(SLOT_NAMES[i]!).join(BIG_SLOT_NAMES[i]!);
+  return out;
+}
+
+/** 课表块是否需标注周次：空 / 全周 / 1-16周 为默认，不标；1-8周、单双周等须标 */
+export function needsWeekLabel(week: string | undefined | null): boolean {
+  const w = String(week || '').trim();
+  return !!w && w !== '全周' && w.replace(/周$/, '') !== '1-16';
+}
+
 // 大节→钟点映射（清华 1-14 节标准时段）；预览轴随块伸缩（30 分钟对齐）
 const PV_BEGIN = ['', '08:00', '08:50', '09:50', '10:40', '11:30', '13:30', '14:20', '15:20', '16:10', '17:05', '17:55', '19:20', '20:10', '21:00'];
 const PV_END = ['', '08:45', '09:35', '10:35', '11:25', '12:15', '14:15', '15:05', '16:05', '16:55', '17:50', '18:40', '20:05', '20:55', '21:45'];

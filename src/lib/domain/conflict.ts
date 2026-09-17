@@ -4,7 +4,7 @@
 // 跨边界部分重叠、周次不相交（1-8 周 vs 9-16 周、单周 vs 双周）均能正确判定。
 // ═══════════════════════════════════════════════════════════════
 import type { Course, ManualEvent } from './types';
-import { DAY_NAMES, spansOf, weeksOverlap, type TimeSpan } from './time';
+import { DAY_NAMES, slotDisplayName, spansOf, weeksOverlap, type TimeSpan } from './time';
 import { keyOf } from '../core/utils';
 
 export interface Conflict {
@@ -25,7 +25,7 @@ export function detectConflicts(courses: (Course | ManualEvent)[], manualEvents:
   for (const c of courses.concat(manualEvents)) {
     for (const span of spansOf(c)) {
       for (const s of spans) {
-        if (spansIntersect(s.span, span)) conflicts.push({ day: DAY_NAMES[span.dayN - 1]!, slot: span.when, a: s.name, b: c.name });
+        if (spansIntersect(s.span, span)) conflicts.push({ day: DAY_NAMES[span.dayN - 1]!, slot: slotDisplayName(span.when), a: s.name, b: c.name });
       }
       spans.push({ span, name: c.name });
     }
@@ -64,7 +64,7 @@ export function conflictsWithPreview(course: Course, spans: PreviewSpan[]): { na
       const k = h.name + '|' + h.dayN + '|' + h.when;
       if (seen.has(k)) continue;
       seen.add(k);
-      conflicts.push({ name: h.name, day: DAY_NAMES[h.dayN - 1]!, slot: h.when });
+      conflicts.push({ name: h.name, day: DAY_NAMES[h.dayN - 1]!, slot: slotDisplayName(h.when) });
     }
   }
   return conflicts;

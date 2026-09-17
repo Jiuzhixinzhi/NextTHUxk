@@ -1261,9 +1261,21 @@
   color: var(--nx-ink-soft);
   cursor: pointer;
 }
-.nx-tt-undet i {
-  font-style: normal;
+.nx-tt-undet-x {
+  display: none;
+  border: none;
+  background: transparent;
   color: var(--nx-red);
+  font-size: 9px;
+  cursor: pointer;
+  padding: 0 0 0 4px;
+}
+.nx-tt-undet:hover .nx-tt-undet-x {
+  display: inline;
+}
+.nx-tt-locate {
+  font-style: normal;
+  color: var(--nx-accent);
   font-size: 9px;
 }
 

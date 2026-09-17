@@ -12,8 +12,8 @@ const parses = hasParsedTime;
 
 /** OneTHU buildRows join：已选/候补/草稿行时间解析不出 → 当场按课号借池行的
  *  note/time 合成预览行（池里有目录行立即能用；不再依赖回填时序）。
- *  借源走三段匹配（归一课序 → 同课同师 → 首行兜底）——同课号多班直接借首行会
- *  让不同时间的课在预览课表挤进同一格（上游 d28bdb5 同款）。
+ *  借源走匹配（归一课序 → 同课同师）——同课号多班直接借首行会让不同时间的课
+ *  张冠李戴（用户报形策），故不兜底首行，匹配不到即如实缺省。
  *  输出按 keyOf 去重（防池内 '01'/'1' 双写法重复行）。 */
 export function previewJoinRows(rows: Course[], pool: Course[], knote: Record<string, { note: string; time: string }>): Course[] {
   const parseableByCode = new Map<string, Course[]>();
@@ -38,13 +38,11 @@ export function previewJoinRows(rows: Course[], pool: Course[], knote: Record<st
       out.push(s);
       continue;
     }
-    // 只借同课号行：优先可解析行（能提供时间），走三段匹配挑对班
+    // 只借同课号行：优先可解析行（能提供时间），走三段匹配挑对班；
+    // 池内无同课班时再借 knote，且只认归一课班键（同课号多班不跨课序借错时间）
     const poolRows = parseableByCode.get(s.code) || anyByCode.get(s.code) || [];
     let hit: Course | undefined = matchPoolRow(poolRows, s.seq, s.teacher);
-    if (!hit) {
-      const knoteKey = Object.keys(knote).find(k => k.indexOf(s.code + '_') === 0);
-      hit = (knote[keyOf(s.code, s.seq)] as Course | undefined) || (knoteKey ? (knote[knoteKey] as Course | undefined) : undefined);
-    }
+    if (!hit) hit = knote[keyOf(s.code, s.seq)] as Course | undefined;
     if (!hit) {
       out.push(s);
       continue;

@@ -6,11 +6,23 @@
 // ═══════════════════════════════════════════════════════════════
 import type { Course, Ctx } from '../domain/types';
 import { TAG } from '../core/constants';
-import { keyOf, sleep } from '../core/utils';
-import { serverSearch } from '../api/search';
+import { keyOf, normSeq, sleep } from '../core/utils';
+import { serverSearch, serverSearchStorm } from '../api/search';
 import { hasParsedTime } from '../domain/pool';
 import { backfillBatched, backfillPooled } from '../domain/backfill';
 import { fgBusy, waitForegroundIdle } from './bus.svelte.ts';
+
+/** 行表里是否已有同一课班（同课号 + 归一课序）——判定 kch 单页是否漏本班 */
+const hasSameClass = (rows: Course[], r: Course): boolean =>
+  rows.some(x => String(x.code) === String(r.code) && normSeq(x.seq) === normSeq(r.seq));
+
+/** kch 单页不含本班时的课名风暴兜底：形策一课号 ~40 班、一页装不下（records.ts 注），
+ *  只按课号查会永远漏掉用户的班；改用课名（已在风暴护栏内多页）补齐。 */
+async function nameStormFallback(ctx: Ctx, r: Course, rows: Course[]): Promise<Course[]> {
+  if (hasSameClass(rows, r) || !r.name || fgBusy()) return rows;
+  const byName = (await serverSearchStorm(ctx, { kcm: r.name })).rows || [];
+  return rows.concat(byName);
+}
 
 // ─── 候补课元数据回填（原 api/records.backfillCandidateMeta，B3 上移）────
 
@@ -24,10 +36,7 @@ export async function backfillCandidateMeta(ctx: Ctx, candidates: Course[], shou
     todo,
     {
       pauseGate: () => shouldPause?.() || false,
-      probe: async c => {
-        const r = await serverSearch(ctx, { kch: c.code });
-        return r.rows || [];
-      },
+      probe: async c => nameStormFallback(ctx, c, (await serverSearch(ctx, { kch: c.code })).rows || []),
       applyHit: (c, hit) => {
         c.credits = hit.credits || 0;
         c.capacity = hit.capacity || 0;
@@ -127,12 +136,10 @@ export async function backfillSelTimes(deps: SelBackfillDeps): Promise<void> {
       consume: k => tried.set(k, (tried.get(k) || 0) + 1),
       probe: async r => {
         let rows = (await serverSearch(deps.ctx(), { kch: r.code })).rows || [];
-        if (!rows.length && r.name && !fgBusy()) {
-          const byName = await serverSearch(deps.ctx(), { kcm: r.name });
-          rows = byName.rows || [];
-        }
-        if (!rows.length && !fgBusy()) {
-          rows = (await scanBrowse(deps.ctx())).filter(c => c.code === r.code);
+        // kch 单页漏本班 → 课名风暴 → 浏览扫描（逐级兜底，任一命中即停）
+        rows = await nameStormFallback(deps.ctx(), r, rows);
+        if (!hasSameClass(rows, r) && !fgBusy()) {
+          rows = rows.concat((await scanBrowse(deps.ctx())).filter(c => c.code === r.code));
         }
         return rows;
       },

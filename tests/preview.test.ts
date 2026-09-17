@@ -47,11 +47,19 @@ describe('previewJoinRows（已选/候补/草稿行借时间）', () => {
     expect(out[0]!.xkTextNote).toBe('周二 18:30-21:30');
   });
 
-  it('knote 按课号前缀兜底（课序拼写不同于快照）', () => {
+  it('knote 命中按归一课班键（课序前导零差异仍命中）', () => {
+    const row = c({ code: 'B', seq: '03', time: '' });
+    const knote = { B_3: { note: '周二 18:30-21:30', time: '' } };
+    const out = previewJoinRows([row], [], knote);
+    expect(out[0]!.note).toBe('周二 18:30-21:30');
+    expect(out[0]!.xkTextNote).toBe('周二 18:30-21:30');
+  });
+
+  it('knote 不跨课序借（同课号不同班 → 原样缺省）', () => {
     const row = c({ code: 'B', seq: '3', time: '' });
     const knote = { B_7: { note: '周四 08:00-09:35', time: '' } };
     const out = previewJoinRows([row], [], knote);
-    expect(out[0]!.note).toBe('周四 08:00-09:35');
+    expect(out[0]!.note).toBeUndefined();
   });
 
   it('无池行无 knote → 原样返回（诚实缺省）', () => {

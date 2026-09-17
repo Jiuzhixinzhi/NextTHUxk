@@ -2,7 +2,7 @@
 // NextTHUxk — 域逻辑测试：时间解析 / 冲突 / 概率 / 草稿差量 / GBK
 // ═══════════════════════════════════════════════════════════════
 import { describe, expect, it } from 'vitest';
-import { parseTimeSlots, clockRangesOf, pvToMin, spansOf, weeksOf, weeksOverlap } from '../src/lib/domain/time';
+import { parseTimeSlots, clockRangesOf, pvToMin, spansOf, weeksOf, weeksOverlap, slotDisplayName, displayTimeText, needsWeekLabel } from '../src/lib/domain/time';
 import { detectConflicts, buildPreviewSpans, conflictsWithPreview } from '../src/lib/domain/conflict';
 import { calcProb, capacityStatus, cascadeOf, lockedOf, parseVolArr, probResult, priProb, probGridData, creditDist, creditSimItems, queueCapLevel, queueCapTitle } from '../src/lib/domain/probability';
 import { draftDiff, draftCourseFrom, draftKeyOf, mergeSelectedIntoDraft, repairDraftCourse, sameAsDraft } from '../src/lib/domain/draft';
@@ -53,6 +53,25 @@ describe('parseTimeSlots', () => {
     expect(s).toHaveLength(1);
     expect(s[0]!.week).toBe('单周,双周');
   });
+
+  it('节次显示统一为大节序号（钟点串原样直通）', () => {
+    expect(slotDisplayName('11-12节')).toBe('6大节');
+    expect(slotDisplayName('3-4节')).toBe('2大节');
+    expect(slotDisplayName('18:30-21:30')).toBe('18:30-21:30');
+    expect(displayTimeText('4-11-12节(1-8周)')).toBe('4-6大节(1-8周)');
+    expect(displayTimeText('2-18:30-21:30')).toBe('2-18:30-21:30');
+  });
+
+  it('周次标注：全周/1-16周 不标，其余标记', () => {
+    expect(needsWeekLabel('')).toBe(false);
+    expect(needsWeekLabel(undefined)).toBe(false);
+    expect(needsWeekLabel('全周')).toBe(false);
+    expect(needsWeekLabel('1-16周')).toBe(false);
+    expect(needsWeekLabel('1-16')).toBe(false);
+    expect(needsWeekLabel('1-8周')).toBe(true);
+    expect(needsWeekLabel('单周')).toBe(true);
+    expect(needsWeekLabel('2-16周')).toBe(true);
+  });
 });
 
 describe('clockRangesOf（外校课钟点）', () => {
@@ -86,7 +105,7 @@ describe('冲突检测（区间重叠）', () => {
     const b = { code: '2', seq: '01', name: '乙', time: '1-2(1-16周)' };
     const cs = detectConflicts([a, b] as never, []);
     expect(cs).toHaveLength(1);
-    expect(cs[0]).toMatchObject({ day: '周一', slot: '3-4节' });
+    expect(cs[0]).toMatchObject({ day: '周一', slot: '2大节' });
   });
 
   it('不同大节不冲突', () => {
@@ -101,7 +120,7 @@ describe('冲突检测（区间重叠）', () => {
     const b = { code: '2', seq: '01', name: '乙', time: '2-4(1-16周)' };
     const cs = detectConflicts([a, b] as never, []);
     expect(cs).toHaveLength(1);
-    expect(cs[0]).toMatchObject({ day: '周二', slot: '7-8节' });
+    expect(cs[0]).toMatchObject({ day: '周二', slot: '4大节' });
   });
 
   it('半大节跨界重叠（大节 vs 自由钟点）', () => {
@@ -672,7 +691,9 @@ describe('matchPoolRow 池行三段匹配', () => {
   });
   it('课序无匹配 → 同课同师（多师行含单师）', () => {
     expect(matchPoolRow(rows, '9', '乙')!.seq).toBe('2');
-    expect(matchPoolRow(rows, '9', '丙')).toBe(rows[0]);
+  });
+  it('课序/教师均不命中 → undefined（多班不盲取首行，宁缺勿错）', () => {
+    expect(matchPoolRow(rows, '9', '丙')).toBeUndefined();
   });
   it('teacherHit 只做正向包含', () => {
     expect(teacherHit(rows[2] as never, '乙')).toBe(true);

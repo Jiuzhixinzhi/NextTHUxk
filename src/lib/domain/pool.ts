@@ -6,6 +6,7 @@
 import type { Course, QueueDatum } from './types';
 import { keyOf } from '../core/utils';
 import { clockRangesOf, parseTimeSlots } from './time';
+import { matchPoolRow } from './match';
 
 /** 时间可解析（大节或文字说明钟点任一可用）——池合并与预览 join 共用判定 */
 export const hasParsedTime = (c: Course): boolean =>
@@ -22,8 +23,9 @@ export interface PoolMergeResult {
  * 合并服务端搜索行入池（原地）：
  * - 新课班入池；既有行回填空缺字段（note/time/teacher/credits/department/xkTextNote）
  * - 容量/余量刷新：r.capacity>0 才动（页签 0/0 占位不覆盖）；余量含 0（「余 0=已满」是信息）
- * - 借时间：本批可解析的行把 note/time 借给池内同课号、时间未解析的已选/候补行
- *   （用户实锤「形策跳转左边看得见余量、右边暂存不显示」）
+ * - 借时间：本批可解析的行把 note/time 借给池内同课号、时间未解析的已选/候补行，
+ *   且必须按课序/教师匹配到同一课班（用户实锤「形策跳转左边看得见余量、右边暂存不显示」；
+ *   后又实锤一课号多班盲借首行 → 已选行时间张冠李戴，故借源走 matchPoolRow，宁缺勿错）
  * - onParsedRow：本批每个时间可解析的行回调一次（调用方写 knote 时间记忆）
  */
 export function mergePoolRows(pool: Course[], rows: Course[], onParsedRow?: (row: Course) => void): PoolMergeResult {
@@ -31,13 +33,9 @@ export function mergePoolRows(pool: Course[], rows: Course[], onParsedRow?: (row
   const byKey = new Map(pool.map(c => [keyOf(c.code, c.seq), c]));
   let added = 0;
   let filled = 0;
-  const borrowersByCode = new Map<string, Course[]>();
-  for (const c of pool) {
-    if ((c.selected || c.isCandidate) && !hasParsedTime(c)) {
-      if (!borrowersByCode.has(c.code)) borrowersByCode.set(c.code, []);
-      borrowersByCode.get(c.code)!.push(c);
-    }
-  }
+  // 借入方（已选/候补且时间未解析）先登记；借源（本批可解析行）按课号收集，循环后统一匹配
+  const borrowers = pool.filter(c => (c.selected || c.isCandidate) && !hasParsedTime(c));
+  const donorsByCode = new Map<string, Course[]>();
   for (const r of rows) {
     const k = keyOf(r.code, r.seq);
     const ex = byKey.get(k);
@@ -67,18 +65,27 @@ export function mergePoolRows(pool: Course[], rows: Course[], onParsedRow?: (row
     }
     if (hasParsedTime(r)) {
       onParsedRow?.(r);
-      const borrowers = (borrowersByCode.get(r.code) || []).filter(ex2 => ex2 !== ex && !hasParsedTime(ex2));
-      for (const ex2 of borrowers) {
-        if (!ex2.note && r.note) {
-          ex2.note = r.note;
-          filled++;
-        }
-        if (!hasParsedTime(ex2) && r.time) {
-          ex2.time = r.time;
-          filled++;
-        }
-        if (!ex2.xkTextNote && (r.note || r.xkTextNote)) ex2.xkTextNote = r.note || r.xkTextNote;
-      }
+      const donors = donorsByCode.get(r.code);
+      if (donors) donors.push(r);
+      else donorsByCode.set(r.code, [r]);
+    }
+  }
+  // 借时间（循环后统一）：同课号多班只借同课序/同师的行，杜绝取首行张冠李戴
+  for (const b of borrowers) {
+    if (hasParsedTime(b)) continue;
+    const donor = matchPoolRow(donorsByCode.get(b.code) || [], b.seq, b.teacher);
+    if (!donor) continue;
+    if (!b.note && donor.note) {
+      b.note = donor.note;
+      filled++;
+    }
+    if (!hasParsedTime(b) && donor.time) {
+      b.time = donor.time;
+      filled++;
+    }
+    if (!b.xkTextNote && (donor.note || donor.xkTextNote)) {
+      b.xkTextNote = donor.note || donor.xkTextNote;
+      filled++;
     }
   }
   return { added, filled };

@@ -125,8 +125,8 @@ describe('courseCardModel · 冲突摘要', () => {
 
   it('命中 → 列表 + 折叠行首条明示（+N）', () => {
     const m = courseCardModel(input(course({ time: '1-2(1-8周)' }), { conflictSpans: spans }));
-    expect(m.conflicts).toEqual([{ name: '乙课', day: '周一', slot: '3-4节' }]);
-    expect(m.conflictMini).toEqual({ label: '冲突 周一3-4节 乙课', title: '时间冲突：周一3-4节 与「乙课」' });
+    expect(m.conflicts).toEqual([{ name: '乙课', day: '周一', slot: '2大节' }]);
+    expect(m.conflictMini).toEqual({ label: '冲突 周一2大节 乙课', title: '时间冲突：周一2大节 与「乙课」' });
   });
 
   it('周次不相交 → 不报（1-8 周 vs 9-16 周）', () => {
@@ -156,7 +156,7 @@ describe('courseCardModel · 志愿可调性与小字', () => {
 
   it('小字 = 教师 · 课序 · 时间档；无大节回退原始时间串', () => {
     const m = courseCardModel(input(course({ teacher: '张三', seq: '01', time: '1-2(1-8周)' })));
-    expect(m.subText).toBe('张三 · 01课序 · 周一·3-4节(1-8周)');
+    expect(m.subText).toBe('张三 · 01课序 · 周一·2大节(1-8周)');
     const raw = courseCardModel(input(course({ time: '待定' })));
     expect(raw.subText).toBe('01课序 · 待定');
   });
