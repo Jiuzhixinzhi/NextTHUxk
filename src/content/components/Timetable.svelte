@@ -99,21 +99,23 @@
     retrySelBackfill();
   }
 
+  /** 未定块点击只做「定位」，不移除——移除一律走 hover 出现的 ✕，防误触 */
   function undetClick(u: { manual: boolean; code: string; seq: string; id?: number }) {
+    if (u.manual || draftStore.preview.kind !== 'selected') return;
+    const c =
+      session.allCourses.find((x) => keyOf(x.code, x.seq) === keyOf(u.code, u.seq)) ||
+      session.candidateCourses.find((x) => keyOf(x.code, x.seq) === keyOf(u.code, u.seq));
+    jumpTo(u.code, u.seq, c?.teacher);
+  }
+
+  function removeUndet(u: { manual: boolean; code: string; seq: string; id?: number }) {
     if (u.manual) {
       void removeManualEvent(u.id!);
       return;
     }
-    if (draftStore.preview.kind !== 'selected') {
-      const idx = previewRows.findIndex((x) => keyOf(x.code, x.seq) === keyOf(u.code, u.seq));
-      if (idx >= 0) removeActiveCourse(idx);
-    } else {
-      // 未定时间块无教师字段：从池行回查（候补/已选均可能）
-      const c =
-        session.allCourses.find((x) => keyOf(x.code, x.seq) === keyOf(u.code, u.seq)) ||
-        session.candidateCourses.find((x) => keyOf(x.code, x.seq) === keyOf(u.code, u.seq));
-      jumpTo(u.code, u.seq, c?.teacher);
-    }
+    if (draftStore.preview.kind === 'selected') return;
+    const idx = previewRows.findIndex((x) => keyOf(x.code, x.seq) === keyOf(u.code, u.seq));
+    if (idx >= 0) removeActiveCourse(idx);
   }
 
   function originColorOf(b: PreviewBlock): string {
@@ -240,8 +242,21 @@
       </div>
       <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;">
         {#each layout.undet as u, ui (u.code + '_' + u.seq + (u.manual ? 'm' : '') + '_' + ui)}
-          <span class="nx-tt-undet" onclick={() => undetClick(u)} title="点击：手动占用=移除；草稿=移除；已选=定位搜索">
-            {u.label} · {u.credits}学分 <i>✕</i>
+          <span class="nx-tt-undet" onclick={() => undetClick(u)} title={u.manual || draftStore.preview.kind !== 'selected' ? '悬停 ✕ 移除' : '点击定位到搜索结果'}>
+            {u.label} · {u.credits}学分
+            {#if u.manual || draftStore.preview.kind !== 'selected'}
+              <button
+                type="button"
+                class="nx-tt-undet-x"
+                title={u.manual ? '移除占用' : '从草稿移除'}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  removeUndet(u);
+                }}>✕</button
+              >
+            {:else}
+              <i class="nx-tt-locate">定位</i>
+            {/if}
           </span>
         {/each}
       </div>
